@@ -78,7 +78,7 @@ public static class Skeletons
         return Breathe(panel);
     }
 
-    /// <summary>Shelves of square covers, each with a title line above. Keep the spacing in sync with ShelvesView.xaml.</summary>
+    /// <summary>Shelves of square covers, each with a title line above. Keep the spacing in sync with ShelvesView.xaml; see docs/card-layout.md.</summary>
     public static StackPanel Shelves(int shelves, int cards = 7, double size = 160)
     {
         var panel = new StackPanel { Spacing = 22 };

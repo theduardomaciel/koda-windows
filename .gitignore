@@ -21,14 +21,13 @@ CLAUDE.md
 env.ps1
 scripts/check-c-clean.ps1
 
-# Documentation: only the README, the changelog and the fork's release process
-# are public for now. The engineering journals (docs\), the product and design
-# plans stay local until they are ready.
-docs/*
+# Documentation: the README, changelog and docs/ are tracked in this fork.
+# Other local markdown files stay ignored.
 *.md
 !README.md
 !CHANGELOG.md
-!docs/fork-releases.md
+!docs/
+!docs/**
 
 # WiX Toolset extension folder (build tooling state, not source)
 .wix/
