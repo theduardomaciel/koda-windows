@@ -34,8 +34,8 @@
         <GridView
             x:Name="Cards"
             Grid.Row="1"
-            Margin="-6,0"
-            Padding="0,0,0,28"
+            Margin="-9,0"
+            Padding="0,0,6,28"
             SelectionMode="None"
             IsItemClickEnabled="True"
             ItemClick="OnCardClick"

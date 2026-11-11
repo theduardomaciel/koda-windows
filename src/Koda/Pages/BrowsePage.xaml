@@ -52,7 +52,8 @@
                     <ContentPresenter x:Name="SkeletonHost" />
                     <GridView
                         x:Name="MoodGrid"
-                        Margin="-6,0"
+                        Margin="-9,0"
+                        Padding="0,0,6,0"
                         Visibility="Collapsed"
                         SelectionMode="None"
                         IsItemClickEnabled="True"

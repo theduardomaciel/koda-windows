@@ -43,7 +43,7 @@
                     <ListView
                         Grid.Row="1"
                         Grid.ColumnSpan="2"
-                        Padding="26,0,16,0"
+                        Padding="23,0,19,0"
                         ItemsSource="{Binding Cards}"
                         ItemTemplateSelector="{StaticResource CardSelector}"
                         ItemContainerStyle="{StaticResource CardItemStyle}"
