@@ -3,15 +3,44 @@
     x:Class="Koda.Controls.ShelvesView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Card layout formulas. The styles live in App.xaml (CardItemStyle and
+        CardGridItemStyle).
+
+        T = target cover inset (32, the title inset)
+        P = CardItemStyle.Padding (12)
+        M = CardItemStyle.Margin on that side (left 0, right -3)
+        H = native ListViewItem hover inset (4 horizontal, 2 vertical)
+
+        Outer ListView padding per side = T - P - M
+            left  = 32 - 12 - 0 = 20
+            right = 32 - 12 + 3 = 23
+
+        Cover inset         = outer + P + M
+        Visible hover inset = outer + H + M
+        Cover gap           = 2P + M   (21)
+        Visible hover gap   = M + 2H   (5)
+
+        When changing P or M, recompute the list padding, keep the scroll
+        buttons' right margin at T, and update Skeletons.Shelves:
+            shelf spacing = StackPanel.Spacing
+            card spacing  = 2P + M
+
+        Vertical:
+            title to cover     = RowSpacing + P
+            text to next title = StackPanel.Spacing + P
+
+        GridViewItem has no native hover inset, so its visible hover gap is M.
+    -->
     <ItemsControl x:Name="ShelfList">
         <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
-                <StackPanel Spacing="28" />
+                <StackPanel Spacing="22" />
             </ItemsPanelTemplate>
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
             <DataTemplate>
-                <Grid RowSpacing="8">
+                <Grid RowSpacing="2">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -31,7 +60,7 @@
                     </StackPanel>
 
                     <!-- Wheel scrolls the page; these step the shelf a screen at a time. -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Bottom" Margin="0,0,26,0">
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Bottom" Margin="0,0,32,0">
                         <Button x:Name="StepLeftButton" Width="32" Height="32" Padding="0" IsEnabled="False" Click="OnStepLeft" ToolTipService.ToolTip="Scroll left" AutomationProperties.Name="Scroll shelf left">
                             <FontIcon Glyph="&#xE76B;" FontSize="12" />
                         </Button>
@@ -43,7 +72,7 @@
                     <ListView
                         Grid.Row="1"
                         Grid.ColumnSpan="2"
-                        Padding="20,0,12,0"
+                        Padding="20,0,23,0"
                         ItemsSource="{Binding Cards}"
                         ItemTemplateSelector="{StaticResource CardSelector}"
                         ItemContainerStyle="{StaticResource CardItemStyle}"

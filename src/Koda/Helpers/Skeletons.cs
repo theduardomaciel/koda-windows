@@ -78,15 +78,15 @@ public static class Skeletons
         return Breathe(panel);
     }
 
-    /// <summary>Shelves of square covers, each with a title line above.</summary>
+    /// <summary>Shelves of square covers, each with a title line above. Keep the spacing in sync with ShelvesView.xaml.</summary>
     public static StackPanel Shelves(int shelves, int cards = 7, double size = 160)
     {
-        var panel = new StackPanel { Spacing = 28 };
+        var panel = new StackPanel { Spacing = 22 };
         for (var s = 0; s < shelves; s++)
         {
             var shelf = new StackPanel { Spacing = 12 };
             shelf.Children.Add(Block(180 + s * 40 % 120, 18));
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16 };
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 21 };
             for (var c = 0; c < cards; c++)
             {
                 var card = new StackPanel { Spacing = 8, Width = size };
