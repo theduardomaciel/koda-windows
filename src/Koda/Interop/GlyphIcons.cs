@@ -6,8 +6,9 @@ namespace Koda.Interop;
 /// <summary>
 /// Small HICONs drawn from Segoe Fluent Icons for the taskbar's thumbnail toolbar.
 /// The shell wants icons, not XAML, so the glyphs are rendered into a colour bitmap
-/// and a matching mask: white glyph on the colour bitmap, black glyph on the mask,
-/// which is the shape Windows reads as "this pixel is the icon".
+/// and a matching mask: a glyph on the colour bitmap, a black glyph on the mask,
+/// which is the shape Windows reads as "this pixel is the icon". The glyph itself is
+/// white on the dark flyout and black on the light one.
 /// </summary>
 internal static class GlyphIcons
 {
@@ -94,8 +95,9 @@ internal static class GlyphIcons
     [DllImport("user32.dll")]
     private static extern nint CreateIconIndirect(ref ICONINFO info);
 
-    /// <summary>Draw <paramref name="glyph"/> into a 32px icon; the caller owns the HICON.</summary>
-    public static nint Create(string glyph, int size = 32)
+    /// <summary>Draw <paramref name="glyph"/> into a 32px icon; the caller owns the HICON.
+    /// <paramref name="light"/> selects a black glyph for the light taskbar flyout.</summary>
+    public static nint Create(string glyph, int size = 32, bool light = false)
     {
         var screen = GetDC(0);
         if (screen == 0)
@@ -132,7 +134,7 @@ internal static class GlyphIcons
         PatBlt(maskDc, 0, 0, size, size, WHITENESS);
 
         var rect = new RECT { Left = 0, Top = 0, Right = size, Bottom = size };
-        SetTextColor(colorDc, 0x00FFFFFF);
+        SetTextColor(colorDc, light ? 0x00000000u : 0x00FFFFFFu);
         DrawTextW(colorDc, glyph, -1, ref rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
         SetTextColor(maskDc, 0x00000000);
         DrawTextW(maskDc, glyph, -1, ref rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);

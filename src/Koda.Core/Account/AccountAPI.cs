@@ -22,6 +22,16 @@ public sealed partial class YouTubeMusic
         return AccountPages.AccountInfo(root) ?? throw MusicException.BadResponse(200);
     }
 
+    /// <summary>The channels under the signed-in Google account, with the server-issued
+    /// switch URL for each. Requires the active session.</summary>
+    public async Task<AccountsList> AccountsListAsync(CancellationToken cancellation = default)
+    {
+        // WEB_REMIX returns the channel switcher menu for an empty body; the
+        // channel-switcher request type belongs to the www.youtube.com WEB client.
+        var root = await _api.MusicAsync("account/accounts_list", new JsonObject(), cancellation, Signing.Required);
+        return AccountPages.AccountsList(root);
+    }
+
     // MARK: Library
 
     /// <summary>Liked songs, newest first, every page up to <paramref name="limit"/>. All or
@@ -110,13 +120,13 @@ public sealed partial class YouTubeMusic
         var cpn = HistoryPing.Cpn();
         var sent = await _signatures.CurrentAsync(cancellation: cancellation);
         var root = await _api.MusicAsync("player", HistoryPing.PlayerPayload(videoId, cpn, sent),
-            cancellation, Signing.Required);
+            cancellation, Signing.Required, brand: false);
         if (!root["playbackTracking"].Exists
             && await _signatures.RefreshAfterRejectionAsync(sent, cancellation: cancellation) is { } retry)
         {
             // A signatureTimestamp YouTube no longer takes looks exactly like an unavailable video.
             root = await _api.MusicAsync("player", HistoryPing.PlayerPayload(videoId, cpn, retry),
-                cancellation, Signing.Required);
+                cancellation, Signing.Required, brand: false);
         }
         if (root["playbackTracking"]["videostatsPlaybackUrl"]["baseUrl"].NonEmpty is not { } baseUrl
             || HistoryPing.TrackingUrl(baseUrl, cpn) is not { } url)

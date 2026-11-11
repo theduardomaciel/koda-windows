@@ -102,6 +102,24 @@ public class LyricsTests
         Assert.All(lines, l => Assert.False(l.IsWordTimed));
     }
 
+    [Fact]
+    public void ReadsQrc()
+    {
+        const string qrc = "[1000,2000]Hello (1000,400)world (1400,600)\n[3000,1000]Next (3000,1000)";
+
+        var lyrics = LyricsFormats.ParseAny(qrc);
+
+        Assert.NotNull(lyrics);
+        var lines = lyrics!.Lines;
+        Assert.Equal(2, lines.Count);
+        Assert.Equal("Hello world", lines[0].Text);
+        Assert.Equal(2, lines[0].Words.Count);
+        Assert.Equal(1.0, lines[0].Words[0].Start, 3);
+        Assert.Equal(1.4, lines[0].Words[0].End, 3);
+        Assert.True(lines[0].Words[0].SpaceAfter);
+        Assert.Equal(3.0, lines[1].Time, 3);
+    }
+
     /// <summary>Both services return the same Apple-timed lyrics for one song, in different shapes.</summary>
     private static void CheckWordTimed(IReadOnlyList<LyricLine> lines)
     {

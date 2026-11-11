@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Text;
 
@@ -11,14 +12,22 @@ public enum LyricsSource
     YouLyPlus,
     /// <summary>Word-by-word, from several catalogues.</summary>
     BetterLyrics,
+    /// <summary>Word-by-word from NetEase's catalogue.</summary>
+    NetEase,
+    /// <summary>Word-by-word, timed by SimpMusic.</summary>
+    SimpMusic,
     /// <summary>Line-by-line and plain lyrics, community-made.</summary>
     Lrclib,
+    /// <summary>Line-timed lyrics from KuGou.</summary>
+    KuGou,
+    /// <summary>Apple Music's word timing, through Unison.</summary>
+    Unison,
 }
 
 /// <summary>
 /// Lyrics from several services at once, keeping the best: word-timed from
-/// YouLyPlus or BetterLyrics (Apple Music's timings), else line-timed or plain
-/// from LRCLIB.
+/// YouLyPlus, BetterLyrics, NetEase or SimpMusic, else line-timed or plain
+/// from LRCLIB, KuGou or Unison.
 ///
 /// The services answer at different speeds and come and go. All of them are
 /// asked together; a word-timed answer is taken as soon as every service ranked
@@ -68,7 +77,9 @@ public sealed class LyricsClient : IDisposable
         IReadOnlyList<LyricsSource>? sources = null,
         CancellationToken cancellation = default)
     {
-        var wanted = sources ?? [LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.Lrclib];
+        var wanted = sources ?? [
+            LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.NetEase,
+            LyricsSource.SimpMusic, LyricsSource.Lrclib, LyricsSource.KuGou, LyricsSource.Unison];
         if (wanted.Count == 0)
         {
             return null;
@@ -163,7 +174,11 @@ public sealed class LyricsClient : IDisposable
         {
             LyricsSource.YouLyPlus => await YouLyPlus(song, cancellation).ConfigureAwait(false),
             LyricsSource.BetterLyrics => await BetterLyrics(song, cancellation).ConfigureAwait(false),
+            LyricsSource.NetEase => await NetEase(song, cancellation).ConfigureAwait(false),
+            LyricsSource.SimpMusic => await SimpMusic(song, cancellation).ConfigureAwait(false),
             LyricsSource.Lrclib => await Lrclib(song, cancellation).ConfigureAwait(false),
+            LyricsSource.KuGou => await KuGou(song, cancellation).ConfigureAwait(false),
+            LyricsSource.Unison => await Unison(song, cancellation).ConfigureAwait(false),
             _ => null,
         };
 
@@ -401,6 +416,327 @@ public sealed class LyricsClient : IDisposable
         }
 
         return null;
+    }
+
+    // MARK: NetEase
+
+    private async Task<Lyrics?> NetEase(Song song, CancellationToken cancellation)
+    {
+        if (song.ArtistLine.Length == 0)
+        {
+            return null;
+        }
+
+        var search = new Dictionary<string, string> { ["q"] = $"{song.Title} {song.ArtistLine}" };
+        if (await Fetch("https://lyrics.paxsenix.org/netease/search", search, cancellation).ConfigureAwait(false) is not { } searchData)
+        {
+            return null;
+        }
+
+        Json root;
+        try
+        {
+            root = Json.Parse(Encoding.UTF8.GetString(searchData));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        Json? best = null;
+        var bestDelta = double.MaxValue;
+        foreach (var item in root["result"]["songs"].Array)
+        {
+            var milliseconds = item["duration"].Double ?? 0;
+            var delta = song.Duration is { } wanted && milliseconds > 0
+                ? Math.Abs(milliseconds / 1000 - wanted)
+                : 0;
+            if (delta > 10 || delta >= bestDelta)
+            {
+                continue;
+            }
+
+            best = item;
+            bestDelta = delta;
+        }
+
+        if (best is not { } chosen || IdOf(chosen) is not { } id)
+        {
+            return null;
+        }
+
+        var parameters = new Dictionary<string, string> { ["id"] = id, ["word"] = "true" };
+        if (await Fetch("https://lyrics.paxsenix.org/netease/lyrics", parameters, cancellation).ConfigureAwait(false) is not { } lyricsData)
+        {
+            return null;
+        }
+
+        try
+        {
+            var lyrics = Json.Parse(Encoding.UTF8.GetString(lyricsData));
+            var text = lyrics["klyric"]["lyric"].NonEmpty ?? lyrics["lrc"]["lyric"].NonEmpty;
+            return text is null ? null : LyricsFormats.ParseAny(text);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // MARK: SimpMusic
+
+    private async Task<Lyrics?> SimpMusic(Song song, CancellationToken cancellation)
+    {
+        if (song.Id.Length == 0)
+        {
+            return null;
+        }
+
+        var url = "https://api-lyrics.simpmusic.org/v1/" + Uri.EscapeDataString(song.Id);
+        if (await Fetch(url, new Dictionary<string, string>(), cancellation).ConfigureAwait(false) is not { } data)
+        {
+            return null;
+        }
+
+        Json root;
+        try
+        {
+            root = Json.Parse(Encoding.UTF8.GetString(data));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        if (!string.Equals(root["type"].String, "success", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var items = root["data"].Array;
+        if (items.Length == 0)
+        {
+            return null;
+        }
+
+        Json? best = null;
+        var bestDelta = double.MaxValue;
+        foreach (var item in items)
+        {
+            var seconds = item["durationSeconds"].Double ?? 0;
+            var delta = song.Duration is { } wanted && seconds > 0 ? Math.Abs(seconds - wanted) : 0;
+            if (delta > 12 || delta >= bestDelta)
+            {
+                continue;
+            }
+
+            best = item;
+            bestDelta = delta;
+        }
+
+        best ??= items[0];
+        foreach (var key in new[] { "richSyncLyrics", "syncedLyrics", "plainLyric" })
+        {
+            if (best.Value[key].NonEmpty is { } text && LyricsFormats.ParseAny(text) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    // MARK: KuGou
+
+    private async Task<Lyrics?> KuGou(Song song, CancellationToken cancellation)
+    {
+        var keyword = $"{CleanTitle(song.Title)} - {CleanArtist(song.ArtistLine)}";
+
+        // The song catalogue knows the exact hash, which is a better match than a text search.
+        var search = new Dictionary<string, string>
+        {
+            ["version"] = "9108",
+            ["plat"] = "0",
+            ["pagesize"] = "8",
+            ["showtype"] = "0",
+            ["keyword"] = keyword,
+        };
+        if (await Fetch("https://mobileservice.kugou.com/api/v3/search/song", search, cancellation).ConfigureAwait(false) is { } data)
+        {
+            Json root;
+            try
+            {
+                root = Json.Parse(Encoding.UTF8.GetString(data));
+            }
+            catch (Exception)
+            {
+                root = Json.Null;
+            }
+
+            foreach (var item in root["data"]["info"].Array)
+            {
+                var seconds = item["duration"].Double ?? 0;
+                if (song.Duration is { } wanted && seconds > 0 && Math.Abs(seconds - wanted) > 8)
+                {
+                    continue;
+                }
+
+                if (item["hash"].NonEmpty is { } hash &&
+                    await KuGouLyrics(new Dictionary<string, string> { ["hash"] = hash }, cancellation).ConfigureAwait(false) is { } found)
+                {
+                    return found;
+                }
+            }
+        }
+
+        var fallback = new Dictionary<string, string> { ["keyword"] = keyword };
+        if (song.Duration is { } duration && duration > 0)
+        {
+            fallback["duration"] = ((int)Math.Round(duration * 1000)).ToString(CultureInfo.InvariantCulture);
+        }
+
+        return await KuGouLyrics(fallback, cancellation).ConfigureAwait(false);
+    }
+
+    /// <summary>The KuGou lyrics service: search for a candidate, then download its base64 LRC.</summary>
+    private async Task<Lyrics?> KuGouLyrics(Dictionary<string, string> search, CancellationToken cancellation)
+    {
+        var parameters = new Dictionary<string, string>(search)
+        {
+            ["ver"] = "1",
+            ["man"] = "yes",
+            ["client"] = "pc",
+        };
+        if (await Fetch("https://lyrics.kugou.com/search", parameters, cancellation).ConfigureAwait(false) is not { } searchData)
+        {
+            return null;
+        }
+
+        Json candidate;
+        try
+        {
+            candidate = Json.Parse(Encoding.UTF8.GetString(searchData))["candidates"].Array.FirstOrDefault();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        if (candidate.Raw.ValueKind != System.Text.Json.JsonValueKind.Object ||
+            IdOf(candidate) is not { } id || candidate["accesskey"].NonEmpty is not { } accessKey)
+        {
+            return null;
+        }
+
+        var download = new Dictionary<string, string>
+        {
+            ["fmt"] = "lrc",
+            ["charset"] = "utf8",
+            ["client"] = "pc",
+            ["ver"] = "1",
+            ["id"] = id,
+            ["accesskey"] = accessKey,
+        };
+        if (await Fetch("https://lyrics.kugou.com/download", download, cancellation).ConfigureAwait(false) is not { } lyricsData)
+        {
+            return null;
+        }
+
+        try
+        {
+            var content = Json.Parse(Encoding.UTF8.GetString(lyricsData))["content"].NonEmpty;
+            if (content is null)
+            {
+                return null;
+            }
+
+            return LyricsFormats.ParseAny(Encoding.UTF8.GetString(Convert.FromBase64String(content)));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static string CleanTitle(string title) =>
+        System.Text.RegularExpressions.Regex
+            .Replace(title, "[（(「『<《〈＜].*?[）)」』>》〉＞]", "")
+            .Trim();
+
+    private static string CleanArtist(string artist) =>
+        artist.Replace(", ", "、").Replace(" & ", "、").Replace(".", "").Trim();
+
+    // MARK: Unison
+
+    private async Task<Lyrics?> Unison(Song song, CancellationToken cancellation)
+    {
+        if (song.ArtistLine.Length == 0)
+        {
+            return null;
+        }
+
+        var search = new Dictionary<string, string>
+        {
+            ["song"] = song.Title,
+            ["artist"] = song.ArtistLine,
+            ["limit"] = "5",
+        };
+        if (song.Album is { } album && album.Title.Length > 0)
+        {
+            search["album"] = album.Title;
+        }
+
+        if (song.Duration is { } duration && duration > 0)
+        {
+            search["duration"] = ((int)Math.Round(duration)).ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (await Fetch("https://unison.boidu.dev/lyrics/search", search, cancellation).ConfigureAwait(false) is not { } data)
+        {
+            return null;
+        }
+
+        Json root;
+        try
+        {
+            root = Json.Parse(Encoding.UTF8.GetString(data));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        foreach (var item in root["data"].Array)
+        {
+            if (item["lyrics"].NonEmpty is { } text && LyricsFormats.ParseAny(text) is { } found)
+            {
+                return found;
+            }
+
+            if (IdOf(item) is not { } id)
+            {
+                continue;
+            }
+
+            var byId = await Fetch($"https://unison.boidu.dev/lyrics/{Uri.EscapeDataString(id)}", new Dictionary<string, string>(), cancellation).ConfigureAwait(false);
+            if (byId is not null && DecodeWrapped(byId) is { } again)
+            {
+                return again;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Provider ids arrive as numbers or strings.</summary>
+    private static string? IdOf(Json item)
+    {
+        if (item["id"].String is { Length: > 0 } text)
+        {
+            return text;
+        }
+
+        return item["id"].Double is { } number ? ((long)number).ToString(CultureInfo.InvariantCulture) : null;
     }
 
     // MARK: Network

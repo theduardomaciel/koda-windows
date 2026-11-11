@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 
 namespace Koda.Interop;
 
@@ -34,6 +35,7 @@ internal sealed class Taskbar : IDisposable
     private nint _pauseIcon;
     private nint _nextIcon;
     private bool _added;
+    private bool _lightIcons;
     private bool? _lastPlaying;
     private bool? _lastHasSong;
     private TaskbarProgress? _lastState;
@@ -44,6 +46,7 @@ internal sealed class Taskbar : IDisposable
         _previous = previous;
         _toggle = toggle;
         _next = next;
+        _lightIcons = SystemUsesLightTheme();
 
         try
         {
@@ -56,10 +59,7 @@ internal sealed class Taskbar : IDisposable
             return;
         }
 
-        _previousIcon = GlyphIcons.Create("\uE892");
-        _playIcon = GlyphIcons.Create("\uE768");
-        _pauseIcon = GlyphIcons.Create("\uE769");
-        _nextIcon = GlyphIcons.Create("\uE893");
+        CreateIcons();
 
         try
         {
@@ -167,6 +167,69 @@ internal sealed class Taskbar : IDisposable
         ];
     }
 
+    /// <summary>Rebuild the icons when Windows flips between light and dark. The
+    /// flyout follows the system theme, not the app's own.</summary>
+    public void RefreshTheme()
+    {
+        var light = SystemUsesLightTheme();
+        if (light == _lightIcons)
+        {
+            return;
+        }
+
+        _lightIcons = light;
+        DestroyIcons();
+        CreateIcons();
+
+        if (!_added || _list is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _list.ThumbBarUpdateButtons(_hwnd, 3, BuildButtons(_lastPlaying ?? false, _lastHasSong ?? false));
+        }
+        catch (Exception)
+        {
+            // The flyout may have gone with an Explorer restart; the next Update brings it back.
+        }
+    }
+
+    private void CreateIcons()
+    {
+        _previousIcon = GlyphIcons.Create("\uE892", light: _lightIcons);
+        _playIcon = GlyphIcons.Create("\uE768", light: _lightIcons);
+        _pauseIcon = GlyphIcons.Create("\uE769", light: _lightIcons);
+        _nextIcon = GlyphIcons.Create("\uE893", light: _lightIcons);
+    }
+
+    private void DestroyIcons()
+    {
+        if (_previousIcon != 0) NativeMethods.DestroyIcon(_previousIcon);
+        if (_playIcon != 0) NativeMethods.DestroyIcon(_playIcon);
+        if (_pauseIcon != 0) NativeMethods.DestroyIcon(_pauseIcon);
+        if (_nextIcon != 0) NativeMethods.DestroyIcon(_nextIcon);
+        _previousIcon = _playIcon = _pauseIcon = _nextIcon = 0;
+    }
+
+    /// <summary>Whether the taskbar itself is light: the thumbnail flyout follows
+    /// <c>SystemUsesLightTheme</c>, while the app may be forced to either theme.</summary>
+    private static bool SystemUsesLightTheme()
+    {
+        try
+        {
+            return Registry.GetValue(
+                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                "SystemUsesLightTheme",
+                1) is int value && value != 0;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
     public void Dispose()
     {
         try
@@ -179,11 +242,7 @@ internal sealed class Taskbar : IDisposable
         }
 
         _list = null;
-        if (_previousIcon != 0) NativeMethods.DestroyIcon(_previousIcon);
-        if (_playIcon != 0) NativeMethods.DestroyIcon(_playIcon);
-        if (_pauseIcon != 0) NativeMethods.DestroyIcon(_pauseIcon);
-        if (_nextIcon != 0) NativeMethods.DestroyIcon(_nextIcon);
-        _previousIcon = _playIcon = _pauseIcon = _nextIcon = 0;
+        DestroyIcons();
     }
 
     private enum TaskbarProgress

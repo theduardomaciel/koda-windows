@@ -106,6 +106,10 @@ public sealed class Library
         LoadHistory();
     }
 
+    /// <summary>The folder the library and its history are open on, for the channel folder
+    /// reconciliation.</summary>
+    public string OpenFolder => _file is null ? "" : Path.GetDirectoryName(_file) ?? "";
+
     /// <summary>The library of another profile takes over: this one is written out, the other
     /// read in, and everything drawn from it redraws.</summary>
     public void Open(string directory)

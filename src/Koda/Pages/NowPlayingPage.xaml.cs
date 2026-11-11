@@ -177,12 +177,36 @@ public sealed partial class NowPlayingPage : Page
         SkipBackButton.IsEnabled = SkipForwardButton.IsEnabled = true;
         Art.SetSource(Cover, song.Artwork);
         Art.SetSource(CompactCoverImage, song.Artwork);
-        Art.SetSource(BackdropArt, song.Artwork);
+        _ = SetBackdropAsync(song);
         FailureBanner.Visibility = Visibility.Collapsed;
         UpdateLike();
         OnPositionTick();
         _ = PaintAsync(song);
         _ = LoadLyricsAsync(song);
+    }
+
+    /// <summary>The blurred cover behind the page, refreshed per song. The previous one
+    /// stays until the new one is ready, and a late result for a song already gone is dropped.</summary>
+    private async System.Threading.Tasks.Task SetBackdropAsync(Song song)
+    {
+        var source = await ArtBlur.FromAsync(song.Artwork);
+        if (source is null || Playback.CurrentSong?.Id != song.Id)
+        {
+            return;
+        }
+
+        BackdropArt.Source = source;
+        BackdropArt.Opacity = 0;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (Playback.CurrentSong?.Id != song.Id)
+            {
+                return;
+            }
+
+            BackdropArt.OpacityTransition ??= new ScalarTransition { Duration = TimeSpan.FromMilliseconds(450) };
+            BackdropArt.Opacity = 1;
+        });
     }
 
     // MARK: lyrics

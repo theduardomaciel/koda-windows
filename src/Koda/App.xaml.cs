@@ -137,6 +137,7 @@ public partial class App : Application
         playback.ItemHeard += (item, seconds) =>
             account.ItemHeard(item.Id, item.Song.Id, item.Song.Duration, seconds);
         account.Changed += () => Shell?.DispatcherQueue.TryEnqueue(Koda.Services.Profiles.FollowAccount);
+        Koda.Services.Profiles.ApplyChannelContext();
         account.Start();
         Koda.Services.Profiles.FollowAccount();
 

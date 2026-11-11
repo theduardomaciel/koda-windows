@@ -37,8 +37,43 @@ public static class Pages
         return new ShelfPage([.. shelves], [.. moods]);
     }
 
-    // MARK: Artist
+    /// <summary>The token for the next block of Home shelves. Home's section list pages:
+    /// the first answer carries it on <c>sectionListRenderer</c>, each continuation on
+    /// <c>sectionListContinuation</c>. Ported from the Android parser.</summary>
+    public static string? HomeContinuation(Json root)
+    {
+        var sectionList = root["contents"]["singleColumnBrowseResultsRenderer"]["tabs"].Array
+            .Select(tab => tab["tabRenderer"]["content"]["sectionListRenderer"])
+            .FirstOrDefault(candidate => candidate.Exists);
+        if (!sectionList.Exists)
+        {
+            sectionList = root["continuationContents"]["sectionListContinuation"];
+        }
 
+        if (!sectionList.Exists)
+        {
+            sectionList = root.First("sectionListRenderer");
+        }
+
+        if (!sectionList.Exists)
+        {
+            return null;
+        }
+
+        var legacy = sectionList["continuations"].Array
+            .Select(item => item["nextContinuationData"]["continuation"].NonEmpty)
+            .FirstOrDefault(token => token is not null);
+        if (legacy is not null)
+        {
+            return legacy;
+        }
+
+        return sectionList["contents"].Array
+            .Select(item => item["continuationItemRenderer"]["continuationEndpoint"]["continuationCommand"]["token"].NonEmpty)
+            .FirstOrDefault(token => token is not null);
+    }
+
+    // MARK: Artist
     public static ArtistPage? Artist(Json root, string id)
     {
         var header = root.First("musicImmersiveHeaderRenderer").Exists

@@ -57,6 +57,22 @@ public sealed partial class YouTubeSignInDialog : ContentDialog
     private bool _initialized;
     private bool _finishing;
     private bool _closed;
+    private bool _switchMode;
+    private string? _switchUrl;
+    private string? _switchPageId;
+    private YouTubeCookies? _switchCookies;
+    private int _switchIdentityReads;
+
+    /// <summary>The cookies a successful channel switch produced, when this dialog was opened
+    /// in switch mode. Null after a cancel.</summary>
+    public YouTubeCookies? Result { get; private set; }
+
+    /// <summary>A switch that produced working cookies but whose playback identity YouTube did
+    /// not confirm. The channel's library still moves; history may lag one channel.</summary>
+    public string? Warning { get; private set; }
+
+    /// <summary>The outcome of the channel-switch dialog.</summary>
+    public sealed record ChannelSwitchResult(YouTubeCookies? Cookies, string? Warning);
 
     public YouTubeSignInDialog()
     {
@@ -87,6 +103,43 @@ public sealed partial class YouTubeSignInDialog : ContentDialog
             // Another dialog is up: the sign-in steps aside rather than crashing the app.
             dialog.Cleanup();
         }
+    }
+
+    /// <summary>
+    /// Selects another channel of the signed-in account. YouTube's own switch URL is loaded in
+    /// a fresh WebView with this account's cookies injected; the updated cookies come back if
+    /// the page settles on YouTube.
+    /// </summary>
+    public static async Task<ChannelSwitchResult> SwitchChannelAsync(string signinUrl, YouTubeCookies cookies, string? expectedPageId)
+    {
+        if (App.Shell?.Content?.XamlRoot is not { } root)
+        {
+            return new ChannelSwitchResult(null, null);
+        }
+
+        var dialog = new YouTubeSignInDialog
+        {
+            XamlRoot = root,
+            Title = "Switch channel",
+        };
+        dialog._switchMode = true;
+        dialog._switchUrl = signinUrl;
+        dialog._switchPageId = expectedPageId;
+        dialog._switchCookies = cookies;
+        dialog.IntroText.Text = "Switching this account to another channel. Koda keeps the same sign-in.";
+        dialog.HostLine.Visibility = Visibility.Collapsed;
+        dialog.Fit(root.Size);
+        try
+        {
+            await dialog.ShowAsync();
+        }
+        catch (Exception)
+        {
+            dialog.Cleanup();
+            return new ChannelSwitchResult(null, null);
+        }
+
+        return new ChannelSwitchResult(dialog.Result, dialog.Warning);
     }
 
     private void Fit(Windows.Foundation.Size size)
@@ -156,6 +209,36 @@ public sealed partial class YouTubeSignInDialog : ContentDialog
             };
             await Browser.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(HidePasskeys);
             if (_closed) return;
+
+            if (_switchMode)
+            {
+                if (_switchCookies is not null)
+                {
+                    foreach (var cookie in _switchCookies.Cookies)
+                    {
+                        try
+                        {
+                            var injected = Browser.CoreWebView2.CookieManager.CreateCookie(
+                                cookie.Name, cookie.Value, ".youtube.com", "/");
+                            injected.IsSecure = true;
+                            injected.IsHttpOnly = true;
+                            Browser.CoreWebView2.CookieManager.AddOrUpdateCookie(injected);
+                        }
+                        catch (Exception)
+                        {
+                            // A cookie the engine won't take is not worth failing the switch over.
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(_switchUrl))
+                {
+                    Browser.CoreWebView2.Navigate(_switchUrl);
+                }
+
+                return;
+            }
+
             Browser.CoreWebView2.Navigate(StartUrl);
         }
         catch (Exception)
@@ -173,6 +256,16 @@ public sealed partial class YouTubeSignInDialog : ContentDialog
         if (_closed || _finishing || !args.IsSuccess || Browser.CoreWebView2 is null) return;
         if (!Uri.TryCreate(Browser.CoreWebView2.Source, UriKind.Absolute, out var uri)) return;
         if (!IsYouTubeHost(uri.Host)) return;
+
+        // The switch URL's own page is not the answer; its redirect (or the delegation it set)
+        // is. Give that one navigation a moment before reading the jar.
+        if (_switchMode && uri.AbsolutePath.Equals("/signin", StringComparison.OrdinalIgnoreCase))
+        {
+            await Task.Delay(600);
+            if (!_closed) await ReadSessionAsync();
+            return;
+        }
+
         await ReadSessionAsync();
     }
 
@@ -201,6 +294,31 @@ public sealed partial class YouTubeSignInDialog : ContentDialog
         // The five cookies Google sets on a real sign-in, not just a jar with look-alikes.
         if (_closed || _finishing || !cookies.HasSignInCookies) return;
 
+        if (_switchMode)
+        {
+            // The switch is committed by the page's own JavaScript; DATASYNC_ID is the
+            // identity the next page will use. Wait for it to name the requested channel.
+            if (!await MatchesIdentityAsync())
+            {
+                if (_switchIdentityReads++ < 40)
+                {
+                    await Task.Delay(500);
+                    if (!_closed) await ReadSessionAsync();
+                    return;
+                }
+
+                // The cookies still work and onBehalfOfUser carries the library; only the
+                // cookie-bound playback history may lag. Say so rather than block the switch.
+                Warning = "YouTube didn't confirm the playback identity. The channel's library "
+                    + "will switch, but history may still go to the previous channel.";
+            }
+
+            Result = cookies;
+            _finishing = true;
+            if (!_closed) Hide();
+            return;
+        }
+
         _finishing = true;
         ShowBusy();
         try
@@ -225,8 +343,50 @@ public sealed partial class YouTubeSignInDialog : ContentDialog
         }
     }
 
-    private static string SignInProblem(MusicException error) => error.Kind switch
+    /// <summary>Whether the page's <c>ytcfg.DATASYNC_ID</c> names the requested channel. The
+    /// delegated half is the brand page id, or empty for the primary channel.</summary>
+    private async Task<bool> MatchesIdentityAsync()
     {
+        if (Browser.CoreWebView2 is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var raw = await Browser.CoreWebView2.ExecuteScriptAsync(
+                "(function(){try{var c=window.ytcfg;if(!c)return null;"
+                + "if(c.get){var v=c.get('DATASYNC_ID');if(v)return v;}"
+                + "return c.DATASYNC_ID||null}catch(e){return null}})()");
+            if (string.IsNullOrEmpty(raw) || raw == "null")
+            {
+                return false;
+            }
+
+            var id = System.Text.Json.JsonSerializer.Deserialize<string>(raw);
+            if (string.IsNullOrEmpty(id))
+            {
+                return false;
+            }
+
+            var parts = id.Split("||");
+            if (string.IsNullOrEmpty(_switchPageId))
+            {
+                // Primary is "<userSessionId>||": the delegated half is the user, and the
+                // second half is empty. A single id is an older primary shape.
+                return parts.Length < 2 || string.IsNullOrEmpty(parts[1]);
+            }
+
+            return parts.Length >= 2 &&
+                string.Equals(parts[0], _switchPageId, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static string SignInProblem(MusicException error) => error.Kind switch    {
         MusicException.Reason.SignedOut => "YouTube didn't accept the sign-in. Try again in a moment.",
         MusicException.Reason.Network => "Koda couldn't reach YouTube. Check the connection and try again.",
         MusicException.Reason.RateLimited => "YouTube asked Koda to wait a moment. Try again shortly.",

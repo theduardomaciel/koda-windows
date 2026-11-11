@@ -1,9 +1,20 @@
 <Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/Koda.Core/Koda.Core.csproj" />
-    <Project Path="src/Koda/Koda.csproj" />
+    <Project Path="src/Koda.Core/Koda.Core.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
+    <Project Path="src/Koda/Koda.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="Debug|Any CPU" Project="x64" />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Koda.Core.Tests/Koda.Core.Tests.csproj" />
+    <Project Path="tests/Koda.Core.Tests/Koda.Core.Tests.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+    </Project>
   </Folder>
 </Solution>

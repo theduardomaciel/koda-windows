@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ivorisnoob/koda-windows/releases/latest"><img src="https://img.shields.io/github/v/release/Ivorisnoob/koda-windows?style=for-the-badge&label=download&color=0078D4" alt="Latest release"/></a>
+  <a href="https://github.com/theduardomaciel/koda-windows/releases/latest"><img src="https://img.shields.io/github/v/release/theduardomaciel/koda-windows?style=for-the-badge&label=download&color=0078D4" alt="Latest release"/></a>
   <img src="https://img.shields.io/badge/Windows-11-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows 11"/>
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt=".NET 10"/>
   <img src="https://img.shields.io/badge/WinUI%203-6750A4?style=for-the-badge&logo=windows&logoColor=white" alt="WinUI 3"/>
@@ -29,7 +29,7 @@ shared with Koda for Android and the rest of the family.
 
 ## Download
 
-Get the latest release from the [releases page](https://github.com/Ivorisnoob/koda-windows/releases/latest).
+Get the latest release from the [releases page](https://github.com/theduardomaciel/koda-windows/releases/latest).
 Both downloads are for Windows 11 on x64 and carry everything they need.
 
 | File | What it is |
@@ -45,15 +45,17 @@ Windows already trusts.
 
 **Listening**
 
-- **Home**: Your Mix, Quick picks, recently played, your top artists, charts and YouTube Music's
-  own shelves.
+- **Home**: Your Mix, Quick picks, recently played, your top artists, charts, YouTube Music's
+  own shelves and its generated mixes.
 - **Search** for songs, albums, artists and playlists, with recent searches, or paste a YouTube or
   YouTube Music link to open it.
 - **Album, artist, playlist and mood pages**, each with its own hero and track list.
 - **Now Playing** in the cover's own colours, with the queue beside it.
-- **Lyrics, word by word**, from YouLyPlus, BetterLyrics and LRCLIB at once: the line being sung
+- **Lyrics, word by word**, from YouLyPlus, BetterLyrics, NetEase, SimpMusic, LRCLIB, KuGou and
+  Unison at once: the line being sung
   fills as it is sung, backing vocals sit under their line, a duet's second voice takes the right.
-  Right-click a line to share it as an image.
+  Presets, fonts, spacing, glow and highlight softness shape the panel. Right-click a line to
+  share it as an image.
 - **Crossfade** of 1 to 12 seconds (repeat one included), gapless changes with it off, and
   **volume normalization** to YouTube's loudness target.
 - **The queue**: shuffle, repeat, Play next, drag to reorder, and Autoplay that carries on with the
@@ -73,7 +75,8 @@ Windows already trusts.
 
 - **YouTube Music**: sign in with Google to bring your liked songs, saved albums, playlists and
   artists to this PC, and keep them in step both ways. Plays heard for 15 seconds can go to the
-  account's YouTube history. Signing out keeps the library here.
+  account's YouTube history. Switch between the channels of a signed-in account from the title
+  bar; each channel keeps its own likes, history and library. Signing out keeps the library here.
 - **Last.fm** scrobbling, with your own API account and Last.fm's own approval page. Koda never sees
   your password, and plays made offline are sent later.
 - **Discord**: show what you're playing on your profile, with the cover and a link to the song.
@@ -144,7 +147,7 @@ and the parsers are written against those, so the test suite runs offline and ne
 
 Join the [Koda Telegram community](https://t.me/ivorisnoob_chat) for releases, help and feedback
 on every Koda, Windows and Android alike. Bugs can also go to the
-[issue tracker](https://github.com/Ivorisnoob/koda-windows/issues).
+[issue tracker](https://github.com/theduardomaciel/koda-windows/issues).
 
 ## License
 

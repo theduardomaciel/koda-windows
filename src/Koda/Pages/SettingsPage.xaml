@@ -544,6 +544,211 @@
                 </StackPanel>
             </Border>
 
+            <!-- Lyrics look -->
+            <TextBlock Text="Lyrics look" Style="{ThemeResource BodyStrongTextBlockStyle}" Margin="0,20,0,8" Tag="section" />
+            <Border Style="{StaticResource SettingsCard}">
+                <StackPanel>
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Preset" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="A named look. Moving a control below makes it Custom."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ComboBox
+                            x:Name="LyricsPresetBox"
+                            Grid.Column="1"
+                            MinWidth="160"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="Lyrics preset"
+                            SelectionChanged="OnLyricsPresetChanged" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Style" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="The sweep, a heavier expressive line, or plain classic lines."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ComboBox
+                            x:Name="LyricsStyleBox"
+                            Grid.Column="1"
+                            MinWidth="160"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="Lyrics style"
+                            SelectionChanged="OnLyricsStyleChanged" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Typeface" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="The family the sung lines are set in."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ComboBox
+                            x:Name="LyricsFontBox"
+                            Grid.Column="1"
+                            MinWidth="220"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="Lyrics typeface"
+                            SelectionChanged="OnLyricsFontChanged" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Line spacing" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="How airy the lines sit."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <Slider
+                                x:Name="LyricsSpacingSlider"
+                                Width="190"
+                                Minimum="0.85"
+                                Maximum="1.5"
+                                StepFrequency="0.05"
+                                AutomationProperties.Name="Lyrics line spacing"
+                                ValueChanged="OnLyricsSpacingChanged" />
+                            <TextBlock
+                                x:Name="LyricsSpacingValue"
+                                Width="44"
+                                TextAlignment="Right"
+                                VerticalAlignment="Center"
+                                Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                        </StackPanel>
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Idle lines" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="How far the lines around the sung one step back."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Slider
+                            x:Name="LyricsIdleSlider"
+                            Grid.Column="1"
+                            Width="190"
+                            Minimum="0.15"
+                            Maximum="0.8"
+                            StepFrequency="0.01"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="Idle lyric lines"
+                            ValueChanged="OnLyricsIdleChanged" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Highlight softness" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="The soft front of the sung highlight; zero is a hard edge."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Slider
+                            x:Name="LyricsSoftnessSlider"
+                            Grid.Column="1"
+                            Width="190"
+                            Minimum="0"
+                            Maximum="1"
+                            StepFrequency="0.05"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="Lyric highlight softness"
+                            ValueChanged="OnLyricsSoftnessChanged" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Held-note glow" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="A long note swells as it is held."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="LyricsGlowSwitch"
+                            Grid.Column="1"
+                            Style="{StaticResource SettingsToggle}"
+                            AutomationProperties.Name="Held-note glow"
+                            Toggled="OnLyricsGlowToggled" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Glow strength" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="How far a held note swells."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <Slider
+                                x:Name="LyricsGlowSlider"
+                                Width="190"
+                                Minimum="0"
+                                Maximum="2"
+                                StepFrequency="0.1"
+                                AutomationProperties.Name="Lyric glow strength"
+                                ValueChanged="OnLyricsGlowChanged" />
+                            <TextBlock
+                                x:Name="LyricsGlowValue"
+                                Width="44"
+                                TextAlignment="Right"
+                                VerticalAlignment="Center"
+                                Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
             <!-- Lyrics sources -->
             <TextBlock Text="Lyrics sources" Style="{ThemeResource BodyStrongTextBlockStyle}" Margin="0,20,0,8" Tag="section" />
             <Border Style="{StaticResource SettingsCard}">
@@ -554,68 +759,7 @@
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap"
                         Margin="16,14,16,2" />
-                    <Grid Style="{StaticResource SettingsRow}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="YouLyPlus" Style="{ThemeResource BodyStrongTextBlockStyle}" />
-                            <TextBlock
-                                Text="Word-by-word, with duets and backing vocals."
-                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ToggleSwitch
-                            x:Name="YouLyPlusSwitch"
-                            Grid.Column="1"
-                            Style="{StaticResource SettingsToggle}"
-                            AutomationProperties.Name="YouLyPlus"
-                            Toggled="OnSourceToggled" />
-                    </Grid>
-                    <Border Style="{StaticResource SettingsDivider}" />
-                    <Grid Style="{StaticResource SettingsRow}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="BetterLyrics" Style="{ThemeResource BodyStrongTextBlockStyle}" />
-                            <TextBlock
-                                Text="Word-by-word, from several catalogues."
-                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ToggleSwitch
-                            x:Name="BetterLyricsSwitch"
-                            Grid.Column="1"
-                            Style="{StaticResource SettingsToggle}"
-                            AutomationProperties.Name="BetterLyrics"
-                            Toggled="OnSourceToggled" />
-                    </Grid>
-                    <Border Style="{StaticResource SettingsDivider}" />
-                    <Grid Style="{StaticResource SettingsRow}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="LRCLIB" Style="{ThemeResource BodyStrongTextBlockStyle}" />
-                            <TextBlock
-                                Text="Line-by-line and plain lyrics, community-made."
-                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                        <ToggleSwitch
-                            x:Name="LrclibSwitch"
-                            Grid.Column="1"
-                            Style="{StaticResource SettingsToggle}"
-                            AutomationProperties.Name="LRCLIB"
-                            Toggled="OnSourceToggled" />
-                    </Grid>
+                    <StackPanel x:Name="LyricsSourcesPanel" />
                     <Border Style="{StaticResource SettingsDivider}" />
                     <Grid Style="{StaticResource SettingsRow}">
                         <Grid.ColumnDefinitions>
@@ -659,6 +803,27 @@
                             VerticalAlignment="Center"
                             AutomationProperties.Name="Theme"
                             SelectionChanged="OnThemeChanged" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Sidebar toggle in the title bar" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="Show the hide/show sidebar button next to Back. The sidebar's own toggle and Ctrl+B always work."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="SidebarToggleSwitch"
+                            Grid.Column="1"
+                            Style="{StaticResource SettingsToggle}"
+                            AutomationProperties.Name="Sidebar toggle in the title bar"
+                            Toggled="OnSidebarToggleToggled" />
                     </Grid>
                     <Border Style="{StaticResource SettingsDivider}" />
                     <Grid Style="{StaticResource SettingsRow}">
@@ -1122,7 +1287,7 @@
                         <StackPanel VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="Source code" Style="{ThemeResource BodyStrongTextBlockStyle}" />
                             <TextBlock
-                                Text="github.com/Ivorisnoob/Koda-Windows"
+                                x:Name="RepositoryText"
                                 Style="{ThemeResource CaptionTextBlockStyle}"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 TextWrapping="Wrap" />

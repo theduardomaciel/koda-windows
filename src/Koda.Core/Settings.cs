@@ -48,6 +48,23 @@ public enum SongSort
 /// The settings belong to the engine, not to the shell: the engine reads them - the
 /// lyrics services, the cache limit, the history - and the shell writes them.
 /// </summary>
+/// <summary>The named looks the lyrics panel offers; Custom means a knob was moved by hand.</summary>
+public enum LyricsPreset
+{
+    Koda,
+    Expressive,
+    Minimal,
+    Custom,
+}
+
+/// <summary>How the sung words light: the sweep, a heavier Expressive line, or plain classic lines.</summary>
+public enum LyricsRenderer
+{
+    Sweep,
+    Expressive,
+    Classic,
+}
+
 public sealed class Settings
 {
     private static readonly JsonSerializerOptions Options = new()
@@ -61,6 +78,8 @@ public sealed class Settings
             new JsonStringEnumConverter<Theme>(),
             new JsonStringEnumConverter<CacheLimit>(),
             new JsonStringEnumConverter<LyricsSource>(),
+            new JsonStringEnumConverter<LyricsPreset>(),
+            new JsonStringEnumConverter<LyricsRenderer>(),
             new JsonStringEnumConverter<LibrarySort>(),
             new JsonStringEnumConverter<SongSort>(),
         },
@@ -82,13 +101,109 @@ public sealed class Settings
 
     /// <summary>Every lyrics service, best first; the order decides which answer wins.</summary>
     public List<LyricsSource> LyricsSourceOrder { get; set; } =
-        [LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.Lrclib];
+    [
+        LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.NetEase,
+        LyricsSource.SimpMusic, LyricsSource.Lrclib, LyricsSource.KuGou, LyricsSource.Unison,
+    ];
 
     /// <summary>The services the listener turned off.</summary>
     public List<LyricsSource> DisabledLyricsSources { get; set; } = [];
 
     /// <summary>Words rise as they start and held notes swell.</summary>
     public bool LyricsMotion { get; set; } = true;
+
+    /// <summary>The named look the lyrics panel asks for; moving a knob makes it Custom.</summary>
+    public LyricsPreset LyricsPreset { get; set; } = LyricsPreset.Koda;
+
+    /// <summary>How the words light: the sweep, the heavier Expressive look, or classic lines.</summary>
+    public LyricsRenderer LyricsRenderer { get; set; } = LyricsRenderer.Sweep;
+
+    /// <summary>The space between lines, as a multiplier on the theme's 1.35.</summary>
+    public double LyricsLineSpacing
+    {
+        get => _lyricsLineSpacing;
+        set => _lyricsLineSpacing = Math.Clamp(value, 0.85, 1.5);
+    }
+
+    private double _lyricsLineSpacing = 1.0;
+
+    /// <summary>How strongly the lines other than the one being sung step back.</summary>
+    public double LyricsIdleOpacity
+    {
+        get => _lyricsIdleOpacity;
+        set => _lyricsIdleOpacity = Math.Clamp(value, 0.15, 0.8);
+    }
+
+    private double _lyricsIdleOpacity = 0.36;
+
+    /// <summary>How soft the front of the sung highlight is, 0 (a hard edge) to 1.</summary>
+    public double LyricsSoftness
+    {
+        get => _lyricsSoftness;
+        set => _lyricsSoftness = Math.Clamp(value, 0, 1);
+    }
+
+    private double _lyricsSoftness = 0.35;
+
+    /// <summary>Whether a held note swells.</summary>
+    public bool LyricsGlow { get; set; } = true;
+
+    /// <summary>Show the sidebar hide/show button in the title bar. The pane's own toggle
+    /// and Ctrl+B work without it; upstream shipped the button, so it stays optional.</summary>
+    public bool ShowsTitleBarSidebarToggle { get; set; }
+
+    /// <summary>How far a held note swells and glows, 0 to 2.</summary>
+    public double LyricsGlowIntensity
+    {
+        get => _lyricsGlowIntensity;
+        set => _lyricsGlowIntensity = Math.Clamp(value, 0, 2);
+    }
+
+    private double _lyricsGlowIntensity = 1.0;
+
+    /// <summary>The lyric typeface; the panel falls back to its own if the family is absent.</summary>
+    public string LyricsFont { get; set; } = "Segoe UI Variable Text";
+
+    /// <summary>Applies a named look. Call inside <see cref="Update"/> so it is saved once.</summary>
+    public void ApplyLyricsPreset(LyricsPreset preset)
+    {
+        LyricsPreset = preset;
+        switch (preset)
+        {
+            case LyricsPreset.Koda:
+                LyricsRenderer = LyricsRenderer.Sweep;
+                LyricsLineSpacing = 1.0;
+                LyricsIdleOpacity = 0.36;
+                LyricsSoftness = 0.35;
+                LyricsGlow = true;
+                LyricsGlowIntensity = 1.0;
+                LyricsFont = "Segoe UI Variable Text";
+                LyricsMotion = true;
+                break;
+            case LyricsPreset.Expressive:
+                LyricsRenderer = LyricsRenderer.Expressive;
+                LyricsLineSpacing = 1.12;
+                LyricsIdleOpacity = 0.30;
+                LyricsSoftness = 0.60;
+                LyricsGlow = true;
+                LyricsGlowIntensity = 1.5;
+                LyricsFont = "Segoe UI Variable Display";
+                LyricsMotion = true;
+                break;
+            case LyricsPreset.Minimal:
+                LyricsRenderer = LyricsRenderer.Classic;
+                LyricsLineSpacing = 0.95;
+                LyricsIdleOpacity = 0.18;
+                LyricsSoftness = 0.0;
+                LyricsGlow = false;
+                LyricsGlowIntensity = 0.0;
+                LyricsFont = "Segoe UI";
+                LyricsMotion = false;
+                break;
+            case LyricsPreset.Custom:
+                break;
+        }
+    }
 
     /// <summary>The size of a sung line, in effective pixels; backing vocals follow at 70%.
     /// Kept between 14 and 32, the slider's ends.</summary>
@@ -339,7 +454,9 @@ public sealed class Settings
 
             // Services added in a later version join at the end of a saved order.
             var known = settings.LyricsSourceOrder
-                .Concat([LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.Lrclib])
+                .Concat([
+                    LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.NetEase,
+                    LyricsSource.SimpMusic, LyricsSource.Lrclib, LyricsSource.KuGou, LyricsSource.Unison])
                 .Distinct()
                 .ToList();
             settings.LyricsSourceOrder = known;

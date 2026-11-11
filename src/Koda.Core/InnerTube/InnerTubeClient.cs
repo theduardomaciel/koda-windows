@@ -33,6 +33,13 @@ public sealed class InnerTubeClient : IDisposable
     private readonly AccountSessions? _accounts;
     private bool _disposed;
 
+    /// <summary>
+    /// The brand channel music requests are made for; null is the account's primary channel.
+    /// The value rides <c>context.user.onBehalfOfUser</c>. Playback reports must not carry it:
+    /// a brand onBehalfOfUser on music <c>/player</c> is answered 401.
+    /// </summary>
+    public string? OnBehalfOfUser { get; set; }
+
     /// <param name="http">The session shared with the identity and the resolver, as the Swift
     /// port shares one URLSession; a private one when null.</param>
     public InnerTubeClient(ClientProfiles clients, VisitorIdentity identity, RateGate? gate = null,
@@ -57,7 +64,7 @@ public sealed class InnerTubeClient : IDisposable
     /// the cached one first, exactly as the Swift port does.
     /// </summary>
     public async Task<Json> MusicAsync(string endpoint, JsonObject payload, CancellationToken cancellation = default,
-        Signing signing = Signing.IfSignedIn)
+        Signing signing = Signing.IfSignedIn, bool brand = true)
     {
         var ticket = _accounts?.Ticket();
         if (signing == Signing.Required && ticket?.Cookies.Sapisid is null) throw MusicException.SignedOut();
@@ -73,7 +80,18 @@ public sealed class InnerTubeClient : IDisposable
             ["gl"] = "US",
         };
         if (visitor is not null) client["visitorData"] = visitor;
-        payload["context"] = new JsonObject { ["client"] = client };
+        var user = new JsonObject { ["lockedSafetyMode"] = false };
+        if (brand && OnBehalfOfUser is { Length: > 0 } channel)
+        {
+            user["onBehalfOfUser"] = channel;
+        }
+
+        payload["context"] = new JsonObject
+        {
+            ["client"] = client,
+            // The web client's user block, and the brand channel this request reads for.
+            ["user"] = user,
+        };
 
         using var request = new HttpRequestMessage(HttpMethod.Post,
             $"https://music.youtube.com/youtubei/v1/{endpoint}?prettyPrint=false");
@@ -172,7 +190,13 @@ public sealed class InnerTubeClient : IDisposable
             ["gl"] = "US",
         };
         if (visitor is not null) client["visitorData"] = visitor;
-        payload["context"] = new JsonObject { ["client"] = client };
+        payload["context"] = new JsonObject
+        {
+            ["client"] = client,
+            // The account endpoints expect the web client's user block; locked safety mode
+            // off is the same value the web sends for an ordinary account.
+            ["user"] = new JsonObject { ["lockedSafetyMode"] = false },
+        };
 
         using var request = new HttpRequestMessage(HttpMethod.Post,
             $"https://www.youtube.com/youtubei/v1/{endpoint}?prettyPrint=false");

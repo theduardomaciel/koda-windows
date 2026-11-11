@@ -91,10 +91,39 @@ public sealed class YouTubeAccount : IDisposable
         RestoreSession();
         if (IsSignedIn)
         {
-            _ = SyncAsync(force: true);
+            _ = InitializeAndSyncAsync();
             _ = _music.RenewVisitorIdentityAsync();
         }
         _ = SyncLoopAsync();
+    }
+
+    /// <summary>The first sync after a launch or account switch: if the roster has no channel
+    /// context yet, ask which channel the session is on before pulling a library into the
+    /// folder. Primary is the safe default when the list cannot be read.</summary>
+    private async Task InitializeAndSyncAsync()
+    {
+        if (!IsSignedIn)
+        {
+            return;
+        }
+
+        if (_music.OnBehalfOfUser is null)
+        {
+            try
+            {
+                var channels = await _music.AccountsListAsync();
+                if (channels.Channels.FirstOrDefault(channel => channel.IsSelected) is { } selected)
+                {
+                    _music.OnBehalfOfUser = selected.PageId;
+                }
+            }
+            catch (Exception)
+            {
+                // Primary remains; the channel list retries from the shell.
+            }
+        }
+
+        await SyncAsync(force: true);
     }
 
     // MARK: Signing in and out
@@ -151,6 +180,24 @@ public sealed class YouTubeAccount : IDisposable
         }
 
         _ = _music.RenewVisitorIdentityAsync();
+
+        // A fresh session can already be a brand channel. Read the selected channel and keep
+        // the API context on it before the first sync, or the primary's library lands in the
+        // brand's folder.
+        _music.OnBehalfOfUser = null;
+        try
+        {
+            var channels = await _music.AccountsListAsync(cancellation);
+            if (channels.Channels.FirstOrDefault(channel => channel.IsSelected) is { } selected)
+            {
+                _music.OnBehalfOfUser = selected.PageId;
+            }
+        }
+        catch (Exception)
+        {
+            // The channel list is a best effort; primary is the safe default.
+        }
+
         await SyncAsync(force: true, cancellation);
     }
 
@@ -221,7 +268,91 @@ public sealed class YouTubeAccount : IDisposable
 
         Notify();
         _ = _music.RenewVisitorIdentityAsync();
-        if (IsSignedIn) _ = SyncAsync(force: true);
+        if (IsSignedIn) _ = InitializeAndSyncAsync();
+    }
+
+    /// <summary>
+    /// Another channel of the same account takes over. The switch URL has already produced the
+    /// cookies; this proves them, swaps the library to the channel's folder, and syncs it.
+    /// </summary>
+    public async Task SwitchChannelAsync(
+        string directory,
+        ISecretStore secrets,
+        YouTubeCookies cookies,
+        Action openLibrary)
+    {
+        if (!cookies.LooksSignedIn)
+        {
+            throw new YouTubeSignInException("YouTube didn't come back signed in to the channel. Try again.");
+        }
+
+        await _work.WaitAsync();
+        try
+        {
+            // File the leaving channel's unsent changes in its own mirror before the swap.
+            lock (_mirrorLock)
+            {
+                if (_music.Accounts.Active is not null)
+                {
+                    var changes = Differences(_lastSeen, Snapshot());
+                    foreach (var change in changes) _mirror.Queue(change);
+                    if (changes.Count > 0) SaveMirror();
+                }
+            }
+
+            var previous = _music.Accounts.Active?.Cookies;
+            _secrets = secrets;
+            _music.Accounts.SignIn(new AccountSession(AccountId, cookies));
+            AccountInfo info;
+            try
+            {
+                info = await _music.AccountInfoAsync();
+            }
+            catch
+            {
+                RestoreChannel(previous);
+                throw;
+            }
+
+            _info = info;
+            _isExpired = false;
+            _directory = directory;
+            _infoFile = Path.Combine(directory, "account.json");
+            _mirrorFile = Path.Combine(directory, "account-mirror.json");
+            lock (_syncGate) _lastSync = null;
+            openLibrary();
+            lock (_mirrorLock)
+            {
+                _mirror = LoadMirror();
+                _lastSeen = Snapshot();
+            }
+            SaveInfo();
+            _music.ClearPageCache();
+        }
+        finally
+        {
+            _work.Release();
+        }
+
+        Notify();
+        _ = _music.RenewVisitorIdentityAsync();
+        _ = SyncAsync(force: true);
+    }
+
+    private void RestoreChannel(YouTubeCookies? previous)
+    {
+        if (previous is not null)
+        {
+            _music.Accounts.SignIn(new AccountSession(AccountId, previous));
+            PersistCookies(previous);
+        }
+        else
+        {
+            _music.Accounts.Forget(AccountId);
+            TryWriteSecret(null);
+        }
+
+        _music.ClearPageCache();
     }
 
     // MARK: Library sync

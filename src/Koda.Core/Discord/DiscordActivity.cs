@@ -44,7 +44,7 @@ public sealed record DiscordActivity
     public const int MaxImage = 300;
     /// <summary>Discord recommends artwork of at least this many pixels a side.</summary>
     public const int ArtworkPixels = 1024;
-    public const string ReleasesUrl = "https://github.com/Ivorisnoob/Koda-Windows/releases";
+    public const string ReleasesUrl = ForkConfig.ReleasesUrl;
     /// <summary>Not whitespace, so Discord does not trim it away again.</summary>
     private const char Pad = '⠀';
 

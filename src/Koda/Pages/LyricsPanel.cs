@@ -69,6 +69,18 @@ internal sealed class LyricsPanel : IDisposable
     /// than the Display cut, which is what made the lyrics look thin.</summary>
     private static readonly FontFamily LyricFont = new("Segoe UI Variable Text");
 
+    // The look, read from the settings when a song's lyrics load. A change in
+    // Settings applies the next time the panel fills, not mid-song.
+    private FontFamily _font = LyricFont;
+    private double _lineHeightFactor = LineHeightFactor;
+    private double _feather = Feather;
+    private double _idleNear = 0.5;
+    private double _idleFar = 0.36;
+    private bool _glow = true;
+    private double _glowIntensity = 1;
+    private bool _motion = true;
+    private LyricsRenderer _renderer = LyricsRenderer.Sweep;
+
     private readonly ScrollViewer _scroll;
     private readonly StackPanel _lines;
     private readonly Border _spacer = new();
@@ -199,9 +211,26 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>The song's place in time, with the listener's correction and the lead.</summary>
     public void SetPosition(double positionSeconds) => _position = positionSeconds + Lead - _offset;
 
+    /// <summary>The appearance settings, read once per fill so a song never changes look
+    /// halfway through.</summary>
+    private void ReadLook()
+    {
+        var settings = Koda.Core.Settings.Current;
+        _font = string.IsNullOrWhiteSpace(settings.LyricsFont) ? LyricFont : new FontFamily(settings.LyricsFont);
+        _lineHeightFactor = LineHeightFactor * settings.LyricsLineSpacing;
+        _feather = 0.08 + 0.55 * settings.LyricsSoftness;
+        _idleFar = settings.LyricsIdleOpacity;
+        _idleNear = Math.Min(1, _idleFar + 0.16);
+        _glow = settings.LyricsGlow;
+        _glowIntensity = settings.LyricsGlowIntensity;
+        _motion = settings.LyricsMotion;
+        _renderer = settings.LyricsRenderer;
+    }
+
     /// <summary>Fills the panel with the lyrics of a song.</summary>
     public void Load(Lyrics? lyrics)
     {
+        ReadLook();
         _tween.Stop();
         _lines.Children.Clear();
         _rows.Clear();
@@ -522,7 +551,7 @@ internal sealed class LyricsPanel : IDisposable
             foreach (var other in _rows)
             {
                 var distance = Math.Abs(_rows.IndexOf(other) - index);
-                other.Opacity = other == row ? 1 : distance <= 1 ? 0.5 : 0.36;
+                other.Opacity = other == row ? 1 : distance <= 1 ? _idleNear : _idleFar;
                 other.Scale = other == row ? 1 : 0.99;
             }
 
@@ -574,7 +603,7 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
-        var motion = Koda.Core.Settings.Current.LyricsMotion;
+        var motion = _motion;
         foreach (var word in current.WordItems)
         {
             Paint(word, time, motion);
@@ -617,7 +646,7 @@ internal sealed class LyricsPanel : IDisposable
                 active = _rows[index];
                 progress = Math.Clamp((time - end) / (_lyricLines[index + 1].Time - end), 0, 1);
                 // The line just sung rests while the gap plays, as it does on the Mac.
-                active.Opacity = 0.5;
+                active.Opacity = _idleNear;
                 active.Scale = 0.99;
             }
         }
@@ -668,17 +697,21 @@ internal sealed class LyricsPanel : IDisposable
     private void Paint(Word word, double time, bool motion)
     {
         var data = word.Data;
-        var fill = Math.Clamp((time - data.Start) / Math.Max(0.001, data.End - data.Start), 0, 1);
-        var rise = motion ? Math.Clamp((time - data.Start) / RiseSeconds, 0, 1) : 0;
+        var classic = _renderer == LyricsRenderer.Classic;
+        var expressive = _renderer == LyricsRenderer.Expressive;
+        // Classic lights the whole line; the other looks fill each word as it is sung.
+        var fill = classic ? 1 : Math.Clamp((time - data.Start) / Math.Max(0.001, data.End - data.Start), 0, 1);
+        var rise = motion && _renderer == LyricsRenderer.Sweep ? Math.Clamp((time - data.Start) / RiseSeconds, 0, 1) : 0;
         var eased = 1 - Math.Pow(1 - rise, 3); // quick at first, settling gently
-        var sustainStrength = motion ? Math.Clamp((data.End - data.Start - SustainStart) / SustainStart, 0, 1) : 0;
+        var sustainStrength = motion && !classic ? Math.Clamp((data.End - data.Start - SustainStart) / SustainStart, 0, 1) : 0;
         var sustain = sustainStrength * Math.Sin(Math.PI * fill);
 
         // The mask runs from -feather to 1, so the word is clear at the start and full at the end.
-        var front = fill * (1 + Feather);
+        var feather = classic ? 0.0 : expressive ? Math.Min(1, _feather * 1.25) : _feather;
+        var front = fill * (1 + feather);
         var stops = word.Fill.GradientStops;
         stops[0].Offset = 0;
-        stops[1].Offset = Math.Max(0, front - Feather);
+        stops[1].Offset = Math.Max(0, front - feather);
         stops[1].Color = Brush(0xFF).Color;
         stops[2].Offset = Math.Min(1, Math.Max(front, 0.0001));
         stops[2].Color = Brush(0x61).Color;
@@ -686,8 +719,9 @@ internal sealed class LyricsPanel : IDisposable
         // The word rises as it is sung: a ripple through the line.
         word.Transform.TranslateY = -RisePixels * eased;
 
-        // A note held long swells.
-        var swell = 1 + SwellScale * sustain;
+        // A note held long swells, by as much as the look asks for.
+        var glow = _glow ? Math.Clamp(_glowIntensity, 0, 2) : 0;
+        var swell = 1 + SwellScale * sustain * glow * (classic ? 0 : 1);
         word.Transform.ScaleX = swell;
         word.Transform.ScaleY = swell;
     }
@@ -766,17 +800,22 @@ internal sealed class LyricsPanel : IDisposable
     private static SolidColorBrush Brush(byte alpha) =>
         new(Windows.UI.Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF));
 
-    /// <summary>The lyric type: the Text optical size, semibold, a little tracked out and airy.
+    /// <summary>The lyric type: the chosen family, the look's weight, a little tracked out and airy.
     /// The backing vocals are the same shape in a lighter weight.</summary>
-    private static void Shape(TextBlock block, double fontSize, bool soft = false)
+    private void Shape(TextBlock block, double fontSize, bool soft = false)
     {
-        block.FontFamily = LyricFont;
+        block.FontFamily = _font;
         block.FontWeight = soft
             ? Microsoft.UI.Text.FontWeights.Medium
-            : Microsoft.UI.Text.FontWeights.SemiBold;
+            : _renderer switch
+            {
+                LyricsRenderer.Expressive => Microsoft.UI.Text.FontWeights.Bold,
+                LyricsRenderer.Classic => Microsoft.UI.Text.FontWeights.Normal,
+                _ => Microsoft.UI.Text.FontWeights.SemiBold,
+            };
         block.FontSize = fontSize;
         block.CharacterSpacing = Tracking;
-        block.LineHeight = Math.Round(fontSize * LineHeightFactor);
+        block.LineHeight = Math.Round(fontSize * _lineHeightFactor);
         block.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
     }
 

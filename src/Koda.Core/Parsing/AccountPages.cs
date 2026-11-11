@@ -55,6 +55,111 @@ public static class AccountPages
             root["responseContext"]["mainAppWebResponseContext"]["datasyncId"].NonEmpty);
     }
 
+    // MARK: Accounts list (account/accounts_list)
+
+    /// <summary>
+    /// The signed-in Google account and its channels. Two response shapes exist: the multi-page
+    /// menu (<c>getMultiPageMenuAction</c>) and the channel-switcher page
+    /// (<c>updateChannelSwitcherPageAction</c>); both are read.
+    /// </summary>
+    public static AccountsList AccountsList(Json root)
+    {
+        string? email = null;
+        string? name = null;
+        var channels = new List<AccountChannel>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        void Add(Json item)
+        {
+            var channelName = item["accountName"].Text().Trim();
+            if (channelName.Length == 0)
+            {
+                return;
+            }
+
+            var handle = item["channelHandle"].Text().TrimmedOrNull();
+            string? pageId = null;
+            string? signinUrl = null;
+            string? datasync = null;
+            foreach (var token in item["serviceEndpoint"]["selectActiveIdentityEndpoint"]["supportedTokens"].Array)
+            {
+                pageId ??= token["pageIdToken"]["pageId"].NonEmpty;
+                signinUrl ??= NormalizeSigninUrl(token["accountSigninToken"]["signinUrl"].NonEmpty);
+                datasync ??= token["datasyncIdToken"]["datasyncIdToken"].NonEmpty;
+            }
+
+            var key = $"{pageId ?? "primary"}|{channelName}|{handle}";
+            if (!seen.Add(key))
+            {
+                return;
+            }
+
+            channels.Add(new AccountChannel(
+                pageId,
+                null,
+                channelName,
+                handle,
+                item["accountPhoto"].BestThumbnail(),
+                item["isSelected"].Bool == true,
+                signinUrl,
+                datasync));
+        }
+
+        foreach (var action in root["actions"].Array)
+        {
+            var menu = action["getMultiPageMenuAction"]["menu"]["multiPageMenuRenderer"];
+            foreach (var section in menu["sections"].Array)
+            {
+                var list = section["accountSectionListRenderer"];
+                if (!list.Exists)
+                {
+                    continue;
+                }
+
+                var header = list["header"]["googleAccountHeaderRenderer"];
+                email ??= header["email"].Text().TrimmedOrNull();
+                name ??= header["name"].Text().TrimmedOrNull();
+                foreach (var itemSection in list["contents"].Array)
+                {
+                    foreach (var content in itemSection["accountItemSectionRenderer"]["contents"].Array)
+                    {
+                        Add(content["accountItem"]);
+                    }
+                }
+            }
+
+            foreach (var content in action["updateChannelSwitcherPageAction"]["page"]["channelSwitcherPageRenderer"]["contents"].Array)
+            {
+                Add(content["accountItemRenderer"]);
+            }
+        }
+
+        return new AccountsList(email, name, [.. channels]);
+    }
+
+    /// <summary>Keeps only YouTube's own <c>/signin</c> URL; the channel switch must never be
+    /// pointed at another host.</summary>
+    private static string? NormalizeSigninUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        var text = url.Trim();
+        if (text.StartsWith('/'))
+        {
+            text = "https://www.youtube.com" + text;
+        }
+
+        return Uri.TryCreate(text, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttps
+            && uri.Host is "www.youtube.com" or "music.youtube.com"
+            && uri.AbsolutePath.Equals("/signin", StringComparison.OrdinalIgnoreCase)
+            ? uri.ToString()
+            : null;
+    }
+
     // MARK: Library pages (FEmusic_liked_videos, _liked_playlists, _liked_albums, _library_corpus_artists)
 
     /// <summary>Where a library page and its continuations keep their items: a list shelf of rows

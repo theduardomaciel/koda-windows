@@ -10,7 +10,7 @@
 
     <Grid x:Name="Root">
         <Grid.RowDefinitions>
-            <RowDefinition Height="32" />
+            <RowDefinition Height="48" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -32,24 +32,42 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
                     <ColumnDefinition x:Name="RightInset" Width="0" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4" Margin="4,0,0,0">
-                    <Button
-                        x:Name="BackButton"
-                        Width="32"
-                        Height="32"
-                        Padding="0"
-                        Background="Transparent"
-                        BorderThickness="0"
-                        IsEnabled="False"
-                        Click="OnBackClick"
-                        ToolTipService.ToolTip="Back"
-                        AutomationProperties.Name="Back">
-                        <FontIcon Glyph="&#xE72B;" FontSize="14" />
-                    </Button>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="2" Margin="4,0,0,0">
+                    <Grid
+                        x:Name="BackSlot"
+                        Width="0"
+                        Height="28"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        SizeChanged="OnBackSlotSizeChanged">
+                        <Grid.Clip>
+                            <RectangleGeometry x:Name="BackClip" Rect="0,0,0,28" />
+                        </Grid.Clip>
+                        <Button
+                            x:Name="BackButton"
+                            Width="28"
+                            Height="28"
+                            HorizontalAlignment="Left"
+                            Padding="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Visibility="Collapsed"
+                            Opacity="0"
+                            IsHitTestVisible="False"
+                            IsTabStop="False"
+                            RenderTransformOrigin="0.5,0.5"
+                            Click="OnBackClick"
+                            ToolTipService.ToolTip="Back"
+                            AutomationProperties.Name="Back">
+                            <Button.RenderTransform>
+                                <ScaleTransform x:Name="BackScale" ScaleX="0.82" ScaleY="0.82" />
+                            </Button.RenderTransform>
+                            <FontIcon Glyph="&#xE72B;" FontSize="12" />
+                        </Button>
+                    </Grid>
                     <Button
                         x:Name="SidebarButton"
                         Width="32"
@@ -57,6 +75,7 @@
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="0"
+                        Visibility="Collapsed"
                         Click="OnSidebarClick"
                         ToolTipService.ToolTip="Hide sidebar (Ctrl+B)"
                         AutomationProperties.Name="Hide sidebar">
@@ -73,8 +92,10 @@
 
                 <AutoSuggestBox
                     x:Name="TitleSearch"
-                    Grid.Column="3"
+                    Grid.ColumnSpan="5"
                     Width="420"
+                    Height="34"
+                    HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     PlaceholderText="Songs, albums, artists or a link"
                     QueryIcon="Find"
@@ -82,6 +103,35 @@
                     QuerySubmitted="OnSearchSubmitted"
                     SizeChanged="OnTitleBarPartsChanged"
                     AutomationProperties.Name="Search YouTube Music" />
+
+                <Button
+                    x:Name="TitleProfileButton"
+                    Grid.Column="3"
+                    Height="36"
+                    Margin="4,0,10,0"
+                    Padding="8,0,6,0"
+                    VerticalAlignment="Center"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    CornerRadius="8"
+                    Click="OnProfileButtonClick"
+                    ToolTipService.ToolTip="Switch profile"
+                    AutomationProperties.Name="Switch profile">
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <PersonPicture x:Name="TitleProfilePicture" Width="26" Height="26" />
+                        <TextBlock
+                            x:Name="TitleProfileName"
+                            MaxWidth="140"
+                            VerticalAlignment="Center"
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="NoWrap" />
+                        <FontIcon
+                            Glyph="&#xE70D;"
+                            FontSize="10"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Button>
             </Grid>
         </Grid>
 
@@ -231,26 +281,6 @@
                         <!-- What plays next and today's listening, as ordinary two-line rows: they line up
                              with the rest of the pane, keep its hover and focus, and shrink to their icon
                              when the pane is compact. -->
-                        <!-- Who's listening. Here only once there are two profiles to choose between. -->
-                        <muxc:NavigationViewItem
-                            x:Name="ProfileItem"
-                            Tag="profile"
-                            SelectsOnInvoked="False"
-                            Visibility="Collapsed">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE77B;" />
-                            </muxc:NavigationViewItem.Icon>
-                            <StackPanel VerticalAlignment="Center" Margin="0,5">
-                                <TextBlock x:Name="ProfileName" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                <TextBlock
-                                    x:Name="ProfileDetail"
-                                    Style="{ThemeResource CaptionTextBlockStyle}"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    TextTrimming="CharacterEllipsis"
-                                    TextWrapping="NoWrap" />
-                            </StackPanel>
-                        </muxc:NavigationViewItem>
-
                         <muxc:NavigationViewItem
                             x:Name="UpNextItem"
                             Tag="up-next"
@@ -298,6 +328,11 @@
                             HorizontalAlignment="Center"
                             VerticalAlignment="Bottom"
                             Margin="0,0,0,12"
+                            Padding="12,8"
+                            CornerRadius="8"
+                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                            BorderThickness="1"
                             IsOpen="False"
                             IsClosable="True"
                             CloseButtonClick="OnStatusClosed" />

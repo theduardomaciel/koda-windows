@@ -29,7 +29,8 @@ public sealed partial class HomePage : Page
 
     private sealed record Saved(
         Mix? Mix, Song[] Picks, bool PicksPersonal, PlaylistSummary[] Charts, Song[] Trending,
-        Shelf[] YouTube, Dictionary<string, Artwork> ArtistPhotos, DateTimeOffset LoadedAt);
+        Shelf[] YouTube, [property: System.Text.Json.Serialization.JsonIgnore] PlaylistSummary[]? Mixes,
+        Dictionary<string, Artwork> ArtistPhotos, DateTimeOffset LoadedAt);
 
     private static string SnapshotPath => Path.Combine(Koda.Services.Profiles.ActiveFolder, "home-snapshot.json");
     private static readonly JsonSerializerOptions SnapshotJson = new() { PropertyNameCaseInsensitive = true };
@@ -39,6 +40,7 @@ public sealed partial class HomePage : Page
     private Mix? _mix;
     private int _pickCount = 12;
     private double _topWidth;
+    private int _mixesGeneration;
 
     public HomePage()
     {
@@ -115,7 +117,7 @@ public sealed partial class HomePage : Page
                 (explore.Result?.Shelves ?? []).Where(s => s.Title != "Trending")).ToArray();
             var personal = picks.Result.Length > 0;
             var state = new Saved(_state?.Mix, personal ? picks.Result : trending, personal, charts.Result ?? [],
-                trending, DedupeShelves(youtube), _state?.ArtistPhotos ?? [], DateTimeOffset.Now);
+                trending, DedupeShelves(youtube), _state?.Mixes, _state?.ArtistPhotos ?? [], DateTimeOffset.Now);
             if (state.Mix is null && taste.IsEmpty && trending.Length > 0)
             {
                 state = state with { Mix = StartHere(trending) };
@@ -124,6 +126,7 @@ public sealed partial class HomePage : Page
             _state = state;
             Show(state);
             ClearSkeletons();
+            _ = LoadMixesAsync(++_mixesGeneration);
 
             // The mix and the artist photos come after the page is up.
             var mix = await BuildMixAsync(taste, recent);
@@ -193,6 +196,37 @@ public sealed partial class HomePage : Page
         catch (MusicException)
         {
             return [];
+        }
+    }
+
+    /// <summary>YouTube Music's generated mixes come from Home's later pages, so they are
+    /// read after the page is drawn: the walk never delays Home itself.</summary>
+    private async System.Threading.Tasks.Task LoadMixesAsync(int generation)
+    {
+        if (!App.Account.IsSignedIn)
+        {
+            return;
+        }
+
+        var profile = Koda.Services.Profiles.Roster.ActiveId;
+        try
+        {
+            var feed = await EngineHost.Music.HomeWithMixesAsync();
+            if (generation != _mixesGeneration ||
+                profile != Koda.Services.Profiles.Roster.ActiveId ||
+                !App.Account.IsSignedIn ||
+                _state is null ||
+                feed.Mixes.Length == 0)
+            {
+                return;
+            }
+
+            _state = _state with { Mixes = feed.Mixes };
+            Show(_state);
+        }
+        catch (Exception)
+        {
+            // Home already has its shelves; the mixes rail simply stays absent.
         }
     }
 
@@ -301,7 +335,16 @@ public sealed partial class HomePage : Page
             shelves.Add(new ShelfView("Charts", "Global and near you", [.. state.Charts.Select(p => CardItem.From(new MusicItem.PlaylistRecord(p)))]));
         }
 
-        var ytShelves = state.YouTube;
+        var mixes = state.Mixes ?? [];
+        if (mixes.Length > 0)
+        {
+            shelves.Add(new ShelfView("Mixes for you", "YouTube Music's own mixes",
+                [.. mixes.Select(playlist => CardItem.From(new MusicItem.PlaylistRecord(playlist)))]));
+        }
+
+        var ytShelves = state.YouTube
+            .Where(shelf => !shelf.Title.Contains("mixed for you", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
         if (!App.Settings.ShowsGlobalContent)
         {
             ytShelves = ytShelves.Where(s => !s.Title.Contains("trend", StringComparison.OrdinalIgnoreCase)

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml;
 
 namespace Koda.Core;
@@ -146,6 +147,11 @@ public static class LyricsFormats
             return lines is null ? null : Lyrics.Synced(lines);
         }
 
+        if (IsQrc(cleaned) && ParseQrc(cleaned) is { Count: > 0 } qrc)
+        {
+            return Lyrics.Synced(qrc);
+        }
+
         if (cleaned.StartsWith('<') || cleaned.StartsWith('{'))
         {
             return null;
@@ -153,6 +159,102 @@ public static class LyricsFormats
 
         var synced = Lyrics.ParseLrc(cleaned);
         return synced.Count > 0 ? Lyrics.Synced(synced) : Lyrics.Unsynced(cleaned);
+    }
+
+    /// <summary>QQ Music's QRC, and the word-timed body NetEase returns as <c>klyric</c>:
+    /// <c>[lineStart,lineDuration]word(start,duration)…</c>, times in milliseconds.</summary>
+    internal static IReadOnlyList<LyricLine>? ParseQrc(string text)
+    {
+        var body = ExtractQrc(text);
+        var lines = new List<LyricLine>();
+        foreach (var raw in body.Split(['\r', '\n']))
+        {
+            var line = raw.Trim();
+            var header = QrcLine.Match(line);
+            if (!header.Success || !long.TryParse(header.Groups[1].Value, out var startMilliseconds))
+            {
+                continue;
+            }
+
+            long.TryParse(header.Groups[2].Value, out var lineDuration);
+            var content = header.Groups[3].Value;
+            var words = new List<LyricWord>();
+            foreach (Match match in QrcWord.Matches(content))
+            {
+                if (!long.TryParse(match.Groups[2].Value, out var wordStart))
+                {
+                    continue;
+                }
+
+                long.TryParse(match.Groups[3].Value, out var wordDuration);
+                var rawWord = match.Groups[1].Value;
+                var word = rawWord.Trim();
+                if (word.Length == 0)
+                {
+                    continue;
+                }
+
+                words.Add(new LyricWord(word, wordStart / 1000.0,
+                    (wordStart + wordDuration) / 1000.0, rawWord.EndsWith(' ')));
+            }
+
+            var textLine = QrcWord.Replace(content, "").Trim();
+            if (textLine.Length == 0)
+            {
+                textLine = Joined(words);
+            }
+
+            if (textLine.Length == 0)
+            {
+                continue;
+            }
+
+            var end = lineDuration > 0 ? (startMilliseconds + lineDuration) / 1000.0 : (double?)null;
+            lines.Add(new LyricLine(lines.Count, startMilliseconds / 1000.0, textLine, words, [], end, LyricVoice.Lead));
+        }
+
+        return lines.Count == 0 ? null : lines;
+    }
+
+    private static readonly Regex QrcLine = new(@"^\[(\d{1,9}),(\d{1,9})\](.*)$", RegexOptions.Compiled);
+    private static readonly Regex QrcWord = new(@"(.*?)\((\d{1,9}),(\d{1,9})(?:,\d{1,9})?\)", RegexOptions.Compiled);
+
+    private static bool IsQrc(string text) =>
+        text.Contains("<QrcInfos", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("LyricContent=", StringComparison.OrdinalIgnoreCase) ||
+        text.Split('\n').Any(line =>
+        {
+            var header = QrcLine.Match(line.Trim());
+            return header.Success && QrcWord.IsMatch(header.Groups[3].Value);
+        });
+
+    private static string ExtractQrc(string text)
+    {
+        const string marker = "LyricContent=";
+        var index = text.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (index < 0)
+        {
+            return text;
+        }
+
+        var start = index + marker.Length;
+        while (start < text.Length && (text[start] == '"' || text[start] == '\''))
+        {
+            start++;
+        }
+
+        var end = text.IndexOf('"', start);
+        if (end < 0)
+        {
+            return text;
+        }
+
+        return text[start..end]
+            .Replace("&quot;", "\"")
+            .Replace("&apos;", "'")
+            .Replace("&lt;", "<")
+            .Replace("&gt;", ">")
+            .Replace("&amp;", "&");
     }
 
     public static string Joined(IReadOnlyList<LyricWord> words)

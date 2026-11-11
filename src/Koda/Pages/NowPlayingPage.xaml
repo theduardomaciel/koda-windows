@@ -52,8 +52,19 @@
         <Grid x:Name="Mesh" Background="#FF141416">
             <!-- Oversized by margins (set with the page size), never a RenderTransform: an
                  element with one may not have the fade-in Art gives every image. -->
-            <Image x:Name="BackdropArt" helpers:Art.Soft="True" Stretch="UniformToFill" />
-            <Rectangle Fill="#8C000000" />
+            <Image x:Name="BackdropArt" Stretch="UniformToFill" />
+            <!-- A scrim that keeps the cover readable behind the controls while the art
+                 stays a picture rather than a flat wash: lighter at the top, deeper at the
+                 bottom where the words and the transport sit. -->
+            <Rectangle>
+                <Rectangle.Fill>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#59000000" Offset="0" />
+                        <GradientStop Color="#8C000000" Offset="0.45" />
+                        <GradientStop Color="#D9000000" Offset="1" />
+                    </LinearGradientBrush>
+                </Rectangle.Fill>
+            </Rectangle>
             <Rectangle x:Name="BlobA" RenderTransformOrigin="0.5,0.5" Opacity="0">
                 <Rectangle.RenderTransform><CompositeTransform /></Rectangle.RenderTransform>
                 <Rectangle.Fill>

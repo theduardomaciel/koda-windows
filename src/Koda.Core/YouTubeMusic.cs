@@ -44,6 +44,14 @@ public sealed partial class YouTubeMusic : IDisposable
     /// <summary>The session requests are signed with; the app signs in and out here.</summary>
     public AccountSessions Accounts => _accounts;
 
+    /// <summary>The brand channel reads are made for; null is the primary channel. Set when
+    /// the active channel changes, before the account sync runs.</summary>
+    public string? OnBehalfOfUser
+    {
+        get => _api.OnBehalfOfUser;
+        set => _api.OnBehalfOfUser = value;
+    }
+
     /// <summary>What history <c>/player</c> calls carry; see PlaybackHistory.cs.</summary>
     internal PlayerSignatureTimestamp Signatures => _signatures;
 
@@ -69,7 +77,7 @@ public sealed partial class YouTubeMusic : IDisposable
     /// <summary>A cached page, kept per session: signed in, pages carry the account's state
     /// (saved, subscribed), so one session's are never shown to another.</summary>
     private Task<T> Page<T>(string key, Func<Task<T>> load) =>
-        _pages.Value(_accounts.CacheScope + "|" + key, load);
+        _pages.Value(_accounts.CacheScope + "|" + (_api.OnBehalfOfUser ?? "primary") + "|" + key, load);
 
     // MARK: Browse
 
@@ -78,6 +86,80 @@ public sealed partial class YouTubeMusic : IDisposable
         var payload = new JsonObject { ["browseId"] = "FEmusic_home" };
         if (@params is not null) payload["params"] = @params;
         return Pages.Shelves(await _api.MusicAsync("browse", payload, cancellation));
+    }
+
+    /// <summary>Where Home's generated mixes live: YouTube Music puts most of them past the
+    /// first page, under "Fresh finds, old favorites" and "Mixed for you". The account's
+    /// library lists only Discover Mix, so the walk is what completes the rail.</summary>
+    public sealed record HomeFeed(ShelfPage Page, PlaylistSummary[] Mixes);
+
+    private static readonly System.Text.RegularExpressions.Regex HomeMixName =
+        new(@"(^|\s)mix(\s+\d+)?$|supermix$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>The first Home page, plus the generated mixes read across its continuations.</summary>
+    public async Task<HomeFeed> HomeWithMixesAsync(bool includeMixes = true, CancellationToken cancellation = default)
+    {
+        var root = await _api.MusicAsync("browse", new JsonObject { ["browseId"] = "FEmusic_home" }, cancellation);
+        var first = Pages.Shelves(root);
+        if (!includeMixes)
+        {
+            return new HomeFeed(first, []);
+        }
+
+        var mixes = new List<PlaylistSummary>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var feed = first;
+        for (var page = 0; page < 4; page++)
+        {
+            if (CollectHomeMixes(feed.Shelves, mixes, seen))
+            {
+                break;
+            }
+
+            var continuation = Pages.HomeContinuation(root);
+            if (continuation is null)
+            {
+                break;
+            }
+
+            root = await _api.MusicAsync("browse", new JsonObject { ["continuation"] = continuation }, cancellation);
+            feed = Pages.Shelves(root);
+        }
+
+        return new HomeFeed(first, [.. mixes]);
+    }
+
+    /// <summary>Appends the generated mixes a page carries; true once "Mixed for you" is read.</summary>
+    private static bool CollectHomeMixes(Shelf[] shelves, List<PlaylistSummary> mixes, HashSet<string> seen)
+    {
+        var mixedForYou = false;
+        foreach (var shelf in shelves)
+        {
+            var shelfIsMixedForYou = shelf.Title.Contains("mixed for you", StringComparison.OrdinalIgnoreCase);
+            mixedForYou |= shelfIsMixedForYou;
+            foreach (var playlist in shelf.Items.OfType<MusicItem.PlaylistRecord>().Select(record => record.Value))
+            {
+                // A generated mix is a radio playlist; the id is the machine-made signal.
+                if (!playlist.Id.StartsWith("RD", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!shelfIsMixedForYou && !HomeMixName.IsMatch(playlist.Title.Trim()))
+                {
+                    continue;
+                }
+
+                if (seen.Add(playlist.Id))
+                {
+                    mixes.Add(playlist);
+                }
+            }
+        }
+
+        return mixedForYou;
     }
 
     public Task<ShelfPage> ExploreAsync(CancellationToken cancellation = default) =>

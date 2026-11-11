@@ -68,6 +68,6 @@
 
     <Icon Id="AppIcon.ico" SourceFile="$(var.PublishDir)\Assets\icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/Ivorisnoob/Koda-Windows" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/theduardomaciel/koda-windows" />
   </Package>
 </Wix>

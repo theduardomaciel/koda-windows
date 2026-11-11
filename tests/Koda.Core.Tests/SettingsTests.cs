@@ -19,7 +19,7 @@ public class SettingsTests
         Assert.True(settings.CloseToTray);
         Assert.True(settings.Autoplay);
         Assert.Equal(100, settings.Volume);
-        Assert.Equal(3, settings.LyricsSources.Count);
+        Assert.Equal(7, settings.LyricsSources.Count);
     }
 
     [Fact]
@@ -110,12 +110,13 @@ public class SettingsTests
         var settings = new Settings();
 
         // The lyrics need somewhere to come from.
-        settings.SetEnabled(LyricsSource.YouLyPlus, false);
-        settings.SetEnabled(LyricsSource.BetterLyrics, false);
-        settings.SetEnabled(LyricsSource.Lrclib, false);
+        foreach (var source in settings.LyricsSources.SkipLast(1).ToList())
+        {
+            settings.SetEnabled(source, false);
+        }
 
         Assert.Single(settings.LyricsSources);
-        Assert.True(settings.IsEnabled(LyricsSource.Lrclib));
+        Assert.True(settings.IsEnabled(LyricsSource.Unison));
     }
 
     [Fact]
@@ -139,8 +140,38 @@ public class SettingsTests
 
         var settings = Settings.Load(file);
 
-        Assert.Equal(3, settings.LyricsSourceOrder.Count);
+        Assert.Equal(7, settings.LyricsSourceOrder.Count);
         Assert.Equal(LyricsSource.Lrclib, settings.LyricsSourceOrder[0]);
+    }
+
+    [Fact]
+    public void TheTitleBarSidebarToggleDefaultsOffAndIsRemembered()
+    {
+        Assert.False(new Settings().ShowsTitleBarSidebarToggle);
+
+        var file = Path.Combine(Fixtures.Scratch, $"settings-sidebar-{Guid.NewGuid():N}.json");
+        File.WriteAllText(file, """{ "showsTitleBarSidebarToggle": true }""");
+
+        Assert.True(Settings.Load(file).ShowsTitleBarSidebarToggle);
+    }
+
+    [Fact]
+    public void ALyricsPresetMovesEveryLook()
+    {
+        var settings = new Settings();
+        settings.ApplyLyricsPreset(LyricsPreset.Expressive);
+
+        Assert.Equal(LyricsRenderer.Expressive, settings.LyricsRenderer);
+        Assert.Equal(1.12, settings.LyricsLineSpacing, 2);
+        Assert.Equal(0.60, settings.LyricsSoftness, 2);
+        Assert.True(settings.LyricsGlow);
+        Assert.Equal("Segoe UI Variable Display", settings.LyricsFont);
+
+        settings.ApplyLyricsPreset(LyricsPreset.Minimal);
+
+        Assert.Equal(LyricsRenderer.Classic, settings.LyricsRenderer);
+        Assert.False(settings.LyricsGlow);
+        Assert.False(settings.LyricsMotion);
     }
 
     [Fact]

@@ -18,6 +18,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
 using Windows.Media;
 using CoreVirtualKeyStates = Windows.UI.Core.CoreVirtualKeyStates;
@@ -38,9 +39,9 @@ public sealed partial class MainWindow : Window
     /// range is for very large displays, where the window has room for a lot more.</summary>
     private static readonly double[] ZoomSteps = [0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5];
 
-    /// <summary>The title bar is the standard Windows height. Its caption buttons are
-    /// drawn by Windows and cannot be made smaller, so this is the floor.</summary>
-    private const double TitleBarHeight = 32;
+    /// <summary>The title bar is the tall Windows height (48): it holds the search field and
+    /// the account chip with room above and below, while the caption buttons stay native.</summary>
+    private const double TitleBarHeight = 48;
 
     /// <summary>The title bar's own content follows the UI zoom, but not below 75%:
     /// a back button and a search field still have to be usable.</summary>
@@ -50,6 +51,7 @@ public sealed partial class MainWindow : Window
     private Taskbar? _taskbar;
     private MiniPlayerWindow? _mini;
     private readonly SmtcController _smtc = new();
+    private readonly Windows.UI.ViewManagement.UISettings _systemColors = new();
     private nint _previousWndProc;
     private bool _placementApplied;
     private bool _scrubbing;
@@ -67,6 +69,8 @@ public sealed partial class MainWindow : Window
     private DispatcherQueueTimer? _zoomTimer;
     private double _zoom = 1;
     private double _titleScale = 1;
+    private bool _backShown;
+    private Microsoft.UI.Xaml.Media.Animation.Storyboard? _backStoryboard;
     private bool _shutdown;
 
     private delegate nint WndProc(nint hwnd, uint msg, nint wParam, nint lParam);
@@ -98,15 +102,17 @@ public sealed partial class MainWindow : Window
         appWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "icon.ico"));
 
         // The title bar is ours: Mica runs to the top edge, caption buttons float on it.
-        // Windows' standard height is the thin one; the bar's content shrinks with the UI zoom.
+        // Windows' tall height leaves room for the search field and the account chip;
+        // the bar's content shrinks with the UI zoom.
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        appWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Standard;
+        appWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         Root.RowDefinitions[0].Height = new GridLength(TitleBarHeight);
         Root.ActualThemeChanged += (_, _) => PaintCaptionButtons();
         PaintCaptionButtons();
         AppTitleBar.SizeChanged += OnTitleBarPartsChanged;
         TitleBarContent.SizeChanged += OnTitleBarPartsChanged;
+        ApplyTitleBarChrome();
         Activated += OnActivated;
 
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -133,11 +139,11 @@ public sealed partial class MainWindow : Window
         // Energy Saver quietly stills the decorative motion; the pages that move follow it.
         EnergySaver.Watch(dispatch);
         Playback.Connect(dispatch, _smtc);
-        Playback.TrackChanged += OnTrackChanged;
-        Playback.QueueChanged += OnQueueModesChanged;
-        Playback.PlayStateChanged += OnPlayStateChanged;
-        Playback.PositionTick += OnPositionTick;
-        Playback.StatusRaised += OnStatusRaised;
+        Playback.TrackChanged += () => dispatch.TryEnqueue(OnTrackChanged);
+        Playback.QueueChanged += () => dispatch.TryEnqueue(OnQueueModesChanged);
+        Playback.PlayStateChanged += () => dispatch.TryEnqueue(OnPlayStateChanged);
+        Playback.PositionTick += () => dispatch.TryEnqueue(OnPositionTick);
+        Playback.StatusRaised += (tone, message) => dispatch.TryEnqueue(() => OnStatusRaised(tone, message));
         Video.Connect(dispatch);
         Video.StartTimers();
         Video.Changed += () => dispatch.TryEnqueue(UpdateVideoBar);
@@ -146,8 +152,14 @@ public sealed partial class MainWindow : Window
         App.Account.Changed += () => dispatch.TryEnqueue(UpdateVideoSidebar);
         App.Settings.Changed += _ => dispatch.TryEnqueue(UpdateVideoSidebar);
         UpdateVideoSidebar();
-        Koda.Services.Profiles.Roster.Changed += () => dispatch.TryEnqueue(UpdateProfileItem);
-        UpdateProfileItem();
+        Koda.Services.Profiles.Roster.Changed += () => dispatch.TryEnqueue(UpdateProfileChip);
+        UpdateProfileChip();
+        App.Settings.Changed += _ => dispatch.TryEnqueue(UpdateSidebarButton);
+        UpdateSidebarButton();
+
+        // The taskbar's flyout follows Windows, not the app theme; rebuild its
+        // icons when the system light/dark switch moves.
+        _systemColors.ColorValuesChanged += (_, _) => dispatch.TryEnqueue(() => _taskbar?.RefreshTheme());
         App.Library.Changed += () => dispatch.TryEnqueue(RefreshSidebar);
         App.AudioStore.Changed += () => dispatch.TryEnqueue(RefreshSidebar);
         App.Library.Changed += () => dispatch.TryEnqueue(UpdateLike);
@@ -262,8 +274,30 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>The caption buttons' space is kept clear, and the back button and search field stay clickable.</summary>
-    private void OnTitleBarPartsChanged(object sender, SizeChangedEventArgs args) => ApplyTitleBarScale();
+    /// <summary>The caption buttons' space is kept clear, and the back button, search field and
+    /// account chip stay clickable.</summary>
+    private void OnTitleBarPartsChanged(object sender, SizeChangedEventArgs args)
+    {
+        ApplyTitleBarChrome();
+        ApplyTitleBarScale();
+    }
+
+    /// <summary>The bar's own responsive step: the account name and the search field give way
+    /// as the window narrows, before anything overlaps.</summary>
+    private void ApplyTitleBarChrome()
+    {
+        var width = AppTitleBar.ActualWidth;
+        if (width <= 0)
+        {
+            return;
+        }
+
+        AppTitle.Visibility = width < 820 ? Visibility.Collapsed : Visibility.Visible;
+        TitleProfileName.Visibility = width < 980 ? Visibility.Collapsed : Visibility.Visible;
+        TitleSearch.Width = width >= 1040 ? 420 : width >= 860 ? 340 : 240;
+        UpdateTitleBarRegions();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+    }
 
     private void UpdateTitleBarRegions()
     {
@@ -279,8 +313,13 @@ public sealed partial class MainWindow : Window
         RightInset.Width = new GridLength(AppWindow.TitleBar.RightInset / scale / _titleScale);
 
         var rects = new List<RectInt32>();
-        foreach (var element in new FrameworkElement[] { BackButton, SidebarButton, TitleSearch })
+        foreach (var element in new FrameworkElement[] { SidebarButton, TitleSearch, TitleProfileButton, BackButton })
         {
+            if (element.Visibility != Visibility.Visible || element.ActualWidth <= 0)
+            {
+                continue;
+            }
+
             var bounds = element.TransformToVisual(null).TransformBounds(new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
             rects.Add(new RectInt32(
                 (int)Math.Round(bounds.X * scale), (int)Math.Round(bounds.Y * scale),
@@ -390,9 +429,6 @@ public sealed partial class MainWindow : Window
             case "up-next":
                 ShowQueue();
                 break;
-            case "profile":
-                ShowProfileMenu();
-                break;
             case "video-home":
                 NavigateRoot(typeof(VideoListPage), new VideoListRequest(VideoListKind.Home), tag);
                 break;
@@ -471,7 +507,140 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void UpdateBackButton() => BackButton.IsEnabled = ContentFrame.CanGoBack;
+    /// <summary>The back button exists only while there is somewhere to go. It slides in
+    /// inside a clipped slot, so the icon and name move with it instead of snapping.</summary>
+    private void UpdateBackButton()
+    {
+        var canGoBack = ContentFrame.CanGoBack;
+        if (canGoBack == _backShown)
+        {
+            return;
+        }
+
+        _backShown = canGoBack;
+        if (canGoBack)
+        {
+            BackButton.Visibility = Visibility.Visible;
+            BackButton.IsHitTestVisible = true;
+            BackButton.IsTabStop = true;
+            AnimateBack(1, 1, 28, () => { });
+        }
+        else
+        {
+            BackButton.IsHitTestVisible = false;
+            BackButton.IsTabStop = false;
+            AnimateBack(0, 0.82, 0, () =>
+            {
+                if (!_backShown)
+                {
+                    BackButton.Visibility = Visibility.Collapsed;
+                    BackSlot.Width = 0;
+                    UpdateTitleBarRegions();
+                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+                }
+            });
+        }
+
+        UpdateTitleBarRegions();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+    }
+
+    /// <summary>The arrow's own fade and scale, and the slot width that carries the icon and name.</summary>
+    private void AnimateBack(double opacity, double scale, double slotWidth, Action completed)
+    {
+        var duration = TimeSpan.FromMilliseconds(170);
+        var fadeEasing = new Microsoft.UI.Xaml.Media.Animation.CubicEase
+        {
+            EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut,
+        };
+        Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase spring = slotWidth > 0
+            ? new Microsoft.UI.Xaml.Media.Animation.ElasticEase
+            {
+                Oscillations = 1,
+                Springiness = 4,
+                EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut,
+            }
+            : new Microsoft.UI.Xaml.Media.Animation.CubicEase
+            {
+                EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseIn,
+            };
+
+        var width = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+        {
+            To = slotWidth,
+            Duration = duration,
+            EasingFunction = spring,
+            EnableDependentAnimation = true,
+        };
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(width, BackSlot);
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(width, "Width");
+
+        var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+        {
+            To = opacity,
+            Duration = duration,
+            EasingFunction = fadeEasing,
+            EnableDependentAnimation = true,
+        };
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(fade, BackButton);
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var grow = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+        {
+            To = scale,
+            Duration = duration,
+            EasingFunction = spring,
+            EnableDependentAnimation = true,
+        };
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(grow, BackScale);
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(grow, "ScaleX");
+
+        var growY = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
+        {
+            To = scale,
+            Duration = duration,
+            EasingFunction = spring,
+            EnableDependentAnimation = true,
+        };
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(growY, BackScale);
+        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(growY, "ScaleY");
+
+        var storyboard = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
+        storyboard.Children.Add(width);
+        storyboard.Children.Add(fade);
+        storyboard.Children.Add(grow);
+        storyboard.Children.Add(growY);
+        storyboard.Completed += (_, _) => completed();
+
+        _backStoryboard?.Stop();
+        _backStoryboard = storyboard;
+        storyboard.Begin();
+    }
+
+    /// <summary>The slot clips the arrow while its width animates, so the arrow appears to
+    /// slide in from the left rather than being squeezed.</summary>
+    private void OnBackSlotSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        BackClip.Rect = new Windows.Foundation.Rect(0, 0, args.NewSize.Width, args.NewSize.Height);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+    }
+
+    /// <summary>The upstream sidebar button is optional; the pane's own toggle and Ctrl+B
+    /// are always there.</summary>
+    private void UpdateSidebarButton()
+    {
+        var wanted = App.Settings.ShowsTitleBarSidebarToggle
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (SidebarButton.Visibility == wanted)
+        {
+            return;
+        }
+
+        SidebarButton.Visibility = wanted;
+        UpdateTitleBarRegions();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+    }
 
     private void OnContentNavigated(object sender, Microsoft.UI.Xaml.Navigation.NavigationEventArgs args)
     {
@@ -1262,38 +1431,318 @@ public sealed partial class MainWindow : Window
 
     // MARK: profiles
 
-    /// <summary>Only with a choice to make: one profile, and nothing about profiles shows here.</summary>
-    private void UpdateProfileItem()
+    /// <summary>The title bar's account chip: the active channel, and the way to switch
+    /// account or channel.</summary>
+    private void UpdateProfileChip()
     {
         var roster = Koda.Services.Profiles.Roster;
         var active = roster.Active;
-        ProfileItem.Visibility = roster.HasSeveral ? Visibility.Visible : Visibility.Collapsed;
-        ProfileName.Text = active.DisplayName;
-        ProfileDetail.Text = active.Subtitle;
-        var label = $"{active.DisplayName}, {active.Subtitle}. Switch profile";
-        ToolTipService.SetToolTip(ProfileItem, label);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ProfileItem, label);
+        TitleProfilePicture.DisplayName = active.ListeningName;
+        TitleProfilePicture.ProfilePicture = active.ListeningPhoto is { } photo && Uri.TryCreate(photo, UriKind.Absolute, out var url)
+            ? new BitmapImage(url) { DecodePixelWidth = 52 }
+            : null;
+        TitleProfileName.Text = active.ListeningName;
+
+        var label = $"{active.ListeningName}, {active.ListeningSubtitle}. Switch account or channel";
+        ToolTipService.SetToolTip(TitleProfileButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(TitleProfileButton, label);
+        UpdateTitleBarRegions();
     }
 
-    private void ShowProfileMenu()
+    private async void OnProfileButtonClick(object sender, RoutedEventArgs e)
     {
-        var roster = Koda.Services.Profiles.Roster;
-        var menu = new MenuFlyout();
-        foreach (var profile in roster.Profiles)
+        var active = Koda.Services.Profiles.Roster.Active;
+        if (active.IsSignedIn)
         {
-            var item = new RadioMenuFlyoutItem
+            var refresh = Koda.Services.Profiles.RefreshChannelsAsync();
+            if (active.Channels.Count == 0)
             {
-                Text = profile.DisplayName,
-                GroupName = "Profile",
-                IsChecked = profile.Id == roster.ActiveId,
-            };
-            item.Click += (_, _) => _ = Koda.Services.Profiles.SwitchAsync(profile.Id);
-            menu.Items.Add(item);
+                // The first open can wait a moment for the channel list; later opens use the cache.
+                await System.Threading.Tasks.Task.WhenAny(
+                    refresh, System.Threading.Tasks.Task.Delay(1500));
+            }
+            else
+            {
+                _ = refresh;
+            }
         }
 
-        menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(SongMenu.Item("Manage profiles…", "\uE713", () => _ = ProfilesDialog.ShowAsync()));
-        menu.ShowAt(ProfileItem);
+        ShowProfileMenu(TitleProfileButton);
+    }
+
+    private void ShowProfileMenu(FrameworkElement anchor)
+    {
+        var roster = Koda.Services.Profiles.Roster;
+        var active = roster.Active;
+        var flyout = new Flyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };
+        var content = new StackPanel();
+
+        // Who is signed in, in the Store's account-panel shape: photo, name, email, sign out.
+        var header = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 0, 0, 8) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.Children.Add(ProfilesDialog.Picture(active, 44));
+
+        var identity = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        identity.Children.Add(new TextBlock
+        {
+            Text = active.IsSignedIn ? active.AccountName ?? active.DisplayName : active.DisplayName,
+            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
+        });
+
+        if (active.IsSignedIn)
+        {
+            var signOut = new Button
+            {
+                Content = "Sign out",
+                Background = new SolidColorBrush(Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Margin = new Thickness(0, 6, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                MinHeight = 0,
+                Height = 24,
+                FontSize = 13,
+                Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"],
+            };
+            signOut.Click += (_, _) =>
+            {
+                flyout.Hide();
+                SignOutActive();
+            };
+            identity.Children.Add(signOut);
+        }
+
+        Grid.SetColumn(identity, 1);
+        header.Children.Add(identity);
+        content.Children.Add(header);
+        content.Children.Add(Divider());
+
+        if (active.IsSignedIn)
+        {
+            content.Children.Add(SectionHeader("Channels"));
+            if (active.Channels.Count > 0)
+            {
+                foreach (var channel in active.Channels)
+                {
+                    var target = channel;
+                    var selected = string.Equals(channel.PageId, active.ActiveChannelPageId, StringComparison.Ordinal);
+                    content.Children.Add(FlyoutRow(channel.DisplayName, selected, flyout, () => _ = SwitchChannelAsync(target)));
+                }
+            }
+            else
+            {
+                var reason = Koda.Services.Profiles.LastChannelsError;
+                content.Children.Add(FlyoutNote(reason is null
+                    ? "Channels unavailable"
+                    : $"Channels unavailable: {reason}"));
+                content.Children.Add(FlyoutRow("Try again", false, flyout, async () =>
+                {
+                    await Koda.Services.Profiles.RefreshChannelsAsync();
+                    await System.Threading.Tasks.Task.Delay(150);
+                    ShowProfileMenu(anchor);
+                }, "\uE72C"));
+            }
+        }
+
+        var accounts = roster.Profiles
+            .Where(profile => profile.Id != active.Id && profile.IsSignedIn)
+            .ToList();
+        if (accounts.Count > 0)
+        {
+            content.Children.Add(SectionHeader("Other accounts"));
+            foreach (var profile in accounts)
+            {
+                var target = profile;
+                content.Children.Add(FlyoutRow(profile.DisplayName, false, flyout, () => _ = Koda.Services.Profiles.SwitchAsync(target.Id)));
+            }
+        }
+
+        var offline = roster.Profiles
+            .Where(profile => profile.Id != active.Id && !profile.IsSignedIn)
+            .ToList();
+        if (offline.Count > 0)
+        {
+            content.Children.Add(SectionHeader("Offline"));
+            foreach (var profile in offline)
+            {
+                var target = profile;
+                content.Children.Add(FlyoutRow(profile.DisplayName, false, flyout, () => _ = Koda.Services.Profiles.SwitchAsync(target.Id)));
+            }
+        }
+
+        if (content.Children.Count > 0 && content.Children[^1] is not Border)
+        {
+            content.Children.Add(Divider());
+        }
+
+        content.Children.Add(FlyoutRow("Add account…", false, flyout, () => _ = Koda.Services.Profiles.AddSignedInAsync(), "\uE710"));
+        content.Children.Add(FlyoutRow("Manage profiles…", false, flyout, () => _ = ProfilesDialog.ShowAsync(), "\uE713"));
+
+        flyout.Content = new ScrollViewer
+        {
+            Content = content,
+            MaxHeight = 520,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollMode = ScrollMode.Auto,
+            MinWidth = 320,
+            MaxWidth = 380,
+        };
+        flyout.ShowAt(anchor);
+    }
+
+    private static Border Divider() => new()
+    {
+        Height = 1,
+        Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
+    };
+
+    private static TextBlock SectionHeader(string text) => new()
+    {
+        Text = text,
+        Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+        Margin = new Thickness(14, 10, 14, 4),    };
+
+    private static TextBlock FlyoutNote(string text) => new()
+    {
+        Text = text,
+        Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+        TextWrapping = TextWrapping.Wrap,
+        Margin = new Thickness(14, 6, 14, 6),
+    };
+
+    /// <summary>One Store-style row: an optional leading glyph, the label, and the action.</summary>
+    private static Button FlyoutRow(string text, bool selected, Flyout flyout, Action action, string? glyph = null)
+    {
+        var content = new Grid { ColumnSpacing = 10 };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.Children.Add(new FontIcon
+        {
+            Glyph = glyph ?? (selected ? "\uE73E" : ""),
+            FontSize = 14,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = selected
+                ? (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"]
+                : (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+        });
+        var label = new TextBlock
+        {
+            Text = text,
+            FontSize = 14,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextWrapping = TextWrapping.NoWrap,
+        };
+        Grid.SetColumn(label, 1);
+        content.Children.Add(label);
+
+        var button = new Button
+        {
+            Content = content,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Background = new SolidColorBrush(Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(4),
+            MinHeight = 0,
+            Height = 36,
+            Padding = new Thickness(12, 0, 12, 0),
+        };
+        button.Click += (_, _) =>
+        {
+            flyout.Hide();
+            action();
+        };
+        return button;
+    }
+
+    /// <summary>Signing out keeps the library and downloads on this PC; the profile becomes
+    /// an offline one, exactly as the account section has always done.</summary>
+    private void SignOutActive()
+    {
+        if (!Koda.Services.Profiles.Roster.Active.IsSignedIn)
+        {
+            return;
+        }
+
+        try
+        {
+            App.Account.SignOut();
+        }
+        catch (Exception error)
+        {
+            App.WriteError("signing out", error);
+        }
+
+        Koda.Services.Profiles.FollowAccount();
+        NavigateRoot(typeof(HomePage), null, "home", fresh: true);
+        Note("Signed out. The library and downloads stay on this PC.");
+    }
+
+    /// <summary>Uses YouTube's server-issued switch URL, then swaps the library to the channel's
+    /// folder. A cancel leaves the current channel as it was.</summary>
+    private async System.Threading.Tasks.Task SwitchChannelAsync(Koda.Core.Profiles.KodaChannel channel)
+    {
+        if (Koda.Services.EngineHost.Music.Accounts.Active?.Cookies is not { } cookies)
+        {
+            Note("Sign in again to switch channels.");
+            return;
+        }
+
+        string? warning = null;
+        var updated = cookies;
+        if (channel.SigninUrl is { } signinUrl)
+        {
+            YouTubeSignInDialog.ChannelSwitchResult switched;
+            try
+            {
+                switched = await YouTubeSignInDialog.SwitchChannelAsync(signinUrl, cookies, channel.PageId);
+            }
+            catch (Koda.Core.YouTubeSignInException error)
+            {
+                Note(error.Message);
+                return;
+            }
+
+            if (switched.Cookies is null)
+            {
+                return;
+            }
+
+            warning = switched.Warning;
+            updated = switched.Cookies;
+        }
+        else
+        {
+            // Without a server-issued identity link the library can still move; only the
+            // cookie-bound playback history may stay where it was.
+            warning = "Switching the channel's library. YouTube didn't provide an identity "
+                + "link, so history may stay on the previous channel.";
+        }
+
+        try
+        {
+            await Koda.Services.Profiles.SwitchChannelAsync(channel, updated);
+            if (warning is { } message) Warn(message);
+        }
+        catch (Koda.Core.YouTubeSignInException error)
+        {
+            Note(error.Message);
+        }
+        catch (Koda.Core.MusicException)
+        {
+            Note("Couldn't switch channels. Try again in a moment.");
+        }
+        catch (Exception error)
+        {
+            App.WriteError("switching channel", error);
+            Note("Couldn't switch channels. The reason was written to crash.txt.");
+        }
     }
 
     // MARK: video
@@ -1497,6 +1946,17 @@ public sealed partial class MainWindow : Window
 
     /// <summary>A short note in the ribbon, for pages (import done, saved, and the like).</summary>
     public void Note(string message) => OnStatusRaised(PlaybackService.StatusTone.Pacing, message);
+
+    /// <summary>A note that needs attention: same ribbon, warning colour.</summary>
+    public void Warn(string message)
+    {
+        StatusRibbon.Message = message;
+        StatusRibbon.Title = string.Empty;
+        StatusRibbon.Severity = InfoBarSeverity.Warning;
+        StatusRibbon.IsOpen = true;
+        _statusTimer?.Stop();
+        _statusTimer?.Start();
+    }
 
     // MARK: SMTC + tray
 

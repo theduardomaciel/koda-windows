@@ -35,6 +35,10 @@ public sealed partial class SettingsPage : Page
     private bool _loaded;
     private Brush? _highlightBrush;
 
+    /// <summary>The typefaces the lyrics look offers; the panel falls back if one is absent.</summary>
+    private static readonly string[] LyricsFonts =
+        ["Segoe UI Variable Text", "Segoe UI Variable Display", "Segoe UI", "Georgia"];
+
     public SettingsPage()
     {
         InitializeComponent();
@@ -110,9 +114,42 @@ public sealed partial class SettingsPage : Page
         NotificationsSwitch.IsOn = settings.ShowsSongNotifications;
         RefreshEnergySaver();
 
-        YouLyPlusSwitch.IsOn = settings.IsEnabled(LyricsSource.YouLyPlus);
-        BetterLyricsSwitch.IsOn = settings.IsEnabled(LyricsSource.BetterLyrics);
-        LrclibSwitch.IsOn = settings.IsEnabled(LyricsSource.Lrclib);
+        BuildLyricsSources();
+
+        LyricsPresetBox.Items.Clear();
+        foreach (var preset in Enum.GetValues<LyricsPreset>())
+        {
+            LyricsPresetBox.Items.Add(PresetLabel(preset));
+        }
+
+        LyricsPresetBox.SelectedIndex = (int)settings.LyricsPreset;
+
+        LyricsStyleBox.Items.Clear();
+        LyricsStyleBox.Items.Add("Sweep");
+        LyricsStyleBox.Items.Add("Expressive");
+        LyricsStyleBox.Items.Add("Classic");
+        LyricsStyleBox.SelectedIndex = (int)settings.LyricsRenderer;
+
+        LyricsFontBox.Items.Clear();
+        foreach (var font in LyricsFonts)
+        {
+            LyricsFontBox.Items.Add(font);
+        }
+
+        if (!LyricsFonts.Contains(settings.LyricsFont))
+        {
+            LyricsFontBox.Items.Add(settings.LyricsFont);
+        }
+
+        LyricsFontBox.SelectedItem = settings.LyricsFont;
+        LyricsSpacingSlider.Value = settings.LyricsLineSpacing;
+        LyricsSpacingValue.Text = $"{settings.LyricsLineSpacing:F2}×";
+        LyricsIdleSlider.Value = settings.LyricsIdleOpacity;
+        LyricsSoftnessSlider.Value = settings.LyricsSoftness;
+        LyricsGlowSwitch.IsOn = settings.LyricsGlow;
+        LyricsGlowSlider.Value = settings.LyricsGlowIntensity;
+        LyricsGlowSlider.IsEnabled = settings.LyricsGlow;
+        LyricsGlowValue.Text = $"{settings.LyricsGlowIntensity:F1}×";
 
         WordMotionSwitch.IsOn = settings.LyricsMotion;
         BackingVocalsSwitch.IsOn = settings.ShowsBackingVocals;
@@ -133,6 +170,7 @@ public sealed partial class SettingsPage : Page
         }
 
         ThemeBox.SelectedIndex = Array.IndexOf(Enum.GetValues<Theme>(), settings.Theme);
+        SidebarToggleSwitch.IsOn = settings.ShowsTitleBarSidebarToggle;
 
         CacheLimitBox.Items.Clear();
         foreach (var limit in Enum.GetValues<CacheLimit>())
@@ -145,7 +183,12 @@ public sealed partial class SettingsPage : Page
         CacheLimitBox.SelectedIndex = Array.IndexOf(Enum.GetValues<CacheLimit>(), settings.CacheLimit);
 
         var version = Assembly.GetExecutingAssembly().GetName().Version;
-        VersionText.Text = $"Koda {version?.ToString(3) ?? "0.1.0"}";
+        var versionText = version?.ToString(4) ?? "0.1.0";
+        // Upstream's builds have a zero fourth part; a fork build's is the reason
+        // it exists. Hide only the trailing zero, never a real build number.
+        if (versionText.EndsWith(".0", StringComparison.Ordinal)) versionText = versionText[..^2];
+        VersionText.Text = $"Koda {versionText}";
+        RepositoryText.Text = $"github.com/{ForkConfig.Repo}";
 
         AndroidImportText.Text = AndroidImport.Explanation;
 
@@ -737,23 +780,97 @@ public sealed partial class SettingsPage : Page
 
     private void OnSourceToggled(object sender, RoutedEventArgs e)
     {
-        if (!_loaded) return;
-        App.Settings.Update(s =>
+        if (!_loaded || sender is not ToggleSwitch toggle || toggle.Tag is not LyricsSource source)
         {
-            s.SetEnabled(LyricsSource.YouLyPlus, YouLyPlusSwitch.IsOn);
-            s.SetEnabled(LyricsSource.BetterLyrics, BetterLyricsSwitch.IsOn);
-            s.SetEnabled(LyricsSource.Lrclib, LrclibSwitch.IsOn);
-        });
+            return;
+        }
 
-        // The last service cannot be turned off, so the switch goes back where it was.
+        App.Settings.Update(s => s.SetEnabled(source, toggle.IsOn));
+
+        // The last service cannot be turned off, so the switches are rebuilt in their real state.
         LyricsService.Forget();
         Load();
     }
 
+    /// <summary>The services, in the order the settings keep, each with its switch. Generated
+    /// from the order so a new provider is a Core change, not another XAML row.</summary>
+    private void BuildLyricsSources()
+    {
+        LyricsSourcesPanel.Children.Clear();
+        var sources = App.Settings.LyricsSourceOrder;
+        for (var index = 0; index < sources.Count; index++)
+        {
+            if (index > 0)
+            {
+                LyricsSourcesPanel.Children.Add(new Border { Style = _dividerStyle });
+            }
+
+            var source = sources[index];
+            var row = new Grid { Style = _rowStyle };
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
+            text.Children.Add(new TextBlock
+            {
+                Text = SourceName(source),
+                Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
+            });
+            text.Children.Add(new TextBlock
+            {
+                Text = SourceDescription(source),
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                TextWrapping = TextWrapping.Wrap,
+            });
+            row.Children.Add(text);
+
+            var toggle = new ToggleSwitch
+            {
+                Style = (Style)Resources["SettingsToggle"],
+                IsOn = App.Settings.IsEnabled(source),
+                Tag = source,
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, SourceName(source));
+            toggle.Toggled += OnSourceToggled;
+            Grid.SetColumn(toggle, 1);
+            row.Children.Add(toggle);
+            LyricsSourcesPanel.Children.Add(row);
+        }
+    }
+
+    private static string SourceName(LyricsSource source) => source switch
+    {
+        LyricsSource.YouLyPlus => "YouLyPlus",
+        LyricsSource.BetterLyrics => "BetterLyrics",
+        LyricsSource.NetEase => "NetEase",
+        LyricsSource.SimpMusic => "SimpMusic",
+        LyricsSource.Lrclib => "LRCLIB",
+        LyricsSource.KuGou => "KuGou",
+        LyricsSource.Unison => "Unison",
+        _ => source.ToString(),
+    };
+
+    private static string SourceDescription(LyricsSource source) => source switch
+    {
+        LyricsSource.YouLyPlus => "Word-by-word, with duets and backing vocals.",
+        LyricsSource.BetterLyrics => "Word-by-word, from several catalogues.",
+        LyricsSource.NetEase => "Word-by-word from NetEase's catalogue.",
+        LyricsSource.SimpMusic => "Word-by-word, timed by SimpMusic.",
+        LyricsSource.Lrclib => "Line-by-line and plain lyrics, community-made.",
+        LyricsSource.KuGou => "Line-timed lyrics from KuGou.",
+        LyricsSource.Unison => "Apple Music's word timing, through Unison.",
+        _ => "",
+    };
+
     private void OnWordMotionToggled(object sender, RoutedEventArgs e)
     {
         if (!_loaded) return;
-        App.Settings.Update(s => s.LyricsMotion = WordMotionSwitch.IsOn);
+        App.Settings.Update(s =>
+        {
+            s.LyricsMotion = WordMotionSwitch.IsOn;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        ShowCustomPreset();
     }
 
     private void OnBackingVocalsToggled(object sender, RoutedEventArgs e)
@@ -766,6 +883,149 @@ public sealed partial class SettingsPage : Page
     {
         if (!_loaded) return;
         App.Settings.Update(s => s.DuetSides = DuetSidesSwitch.IsOn);
+    }
+
+    private static string PresetLabel(LyricsPreset preset) => preset switch
+    {
+        LyricsPreset.Koda => "Koda",
+        LyricsPreset.Expressive => "Expressive",
+        LyricsPreset.Minimal => "Minimal",
+        _ => "Custom",
+    };
+
+    private void OnLyricsPresetChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_loaded || LyricsPresetBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var preset = (LyricsPreset)LyricsPresetBox.SelectedIndex;
+        App.Settings.Update(s => s.ApplyLyricsPreset(preset));
+        Load();
+    }
+
+    private void OnLyricsStyleChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_loaded || LyricsStyleBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var style = (LyricsRenderer)LyricsStyleBox.SelectedIndex;
+        App.Settings.Update(s =>
+        {
+            s.LyricsRenderer = style;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        Load();
+    }
+
+    private void OnLyricsFontChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_loaded || LyricsFontBox.SelectedItem is not string font)
+        {
+            return;
+        }
+
+        App.Settings.Update(s =>
+        {
+            s.LyricsFont = font;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        Load();
+    }
+
+    private void OnLyricsSpacingChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        App.Settings.Update(s =>
+        {
+            s.LyricsLineSpacing = e.NewValue;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        LyricsSpacingValue.Text = $"{e.NewValue:F2}×";
+        ShowCustomPreset();
+    }
+
+    private void OnLyricsIdleChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        App.Settings.Update(s =>
+        {
+            s.LyricsIdleOpacity = e.NewValue;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        ShowCustomPreset();
+    }
+
+    private void OnLyricsSoftnessChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        App.Settings.Update(s =>
+        {
+            s.LyricsSoftness = e.NewValue;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        ShowCustomPreset();
+    }
+
+    private void OnLyricsGlowToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        App.Settings.Update(s =>
+        {
+            s.LyricsGlow = LyricsGlowSwitch.IsOn;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        LyricsGlowSlider.IsEnabled = LyricsGlowSwitch.IsOn;
+        ShowCustomPreset();
+    }
+
+    private void OnLyricsGlowChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        App.Settings.Update(s =>
+        {
+            s.LyricsGlowIntensity = e.NewValue;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        LyricsGlowValue.Text = $"{e.NewValue:F1}×";
+        ShowCustomPreset();
+    }
+
+    /// <summary>Points the preset box at Custom without re-entering the preset handler.</summary>
+    private void ShowCustomPreset()
+    {
+        if (LyricsPresetBox.SelectedIndex == (int)LyricsPreset.Custom)
+        {
+            return;
+        }
+
+        var loaded = _loaded;
+        _loaded = false;
+        LyricsPresetBox.SelectedIndex = (int)LyricsPreset.Custom;
+        _loaded = loaded;
     }
 
     private void OnLyricsSizeChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -790,6 +1050,12 @@ public sealed partial class SettingsPage : Page
         var theme = Enum.GetValues<Theme>()[ThemeBox.SelectedIndex];
         App.Settings.Update(s => s.Theme = theme);
         ShellChrome.ApplyTheme();
+    }
+
+    private void OnSidebarToggleToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded) return;
+        App.Settings.Update(s => s.ShowsTitleBarSidebarToggle = SidebarToggleSwitch.IsOn);
     }
 
     private void OnAnimatedBackgroundToggled(object sender, RoutedEventArgs e)
@@ -1157,7 +1423,7 @@ public sealed partial class SettingsPage : Page
     {
         try
         {
-            Process.Start(new ProcessStartInfo("https://github.com/Ivorisnoob/Koda-Windows") { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(ForkConfig.RepoUrl) { UseShellExecute = true });
         }
         catch (Exception)
         {

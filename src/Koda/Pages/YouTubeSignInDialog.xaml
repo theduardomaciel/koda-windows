@@ -14,11 +14,12 @@
 
         <StackPanel Spacing="2">
             <TextBlock
+                x:Name="IntroText"
                 Text="Sign in with your Google account. Koda never sees your password."
                 Style="{ThemeResource CaptionTextBlockStyle}"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 TextWrapping="Wrap" />
-            <StackPanel Orientation="Horizontal" Spacing="4">
+            <StackPanel x:Name="HostLine" Orientation="Horizontal" Spacing="4">
                 <FontIcon
                     Glyph="&#xE72E;"
                     FontSize="12"

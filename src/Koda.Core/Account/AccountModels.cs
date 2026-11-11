@@ -16,6 +16,22 @@ public sealed record AccountInfo(
     Artwork? Photo = null,
     string? DatasyncId = null);
 
+/// <summary>One channel under the signed-in Google account, from <c>account/accounts_list</c>.</summary>
+/// <param name="PageId">The brand channel's page id; null for the primary channel.</param>
+/// <param name="SigninUrl">The server-issued <c>/signin</c> URL that selects this identity.</param>
+public sealed record AccountChannel(
+    string? PageId,
+    string? ChannelId,
+    string Name,
+    string? Handle,
+    Artwork? Photo,
+    bool IsSelected,
+    string? SigninUrl,
+    string? DatasyncId);
+
+/// <summary>The Google account and the channels underneath it.</summary>
+public sealed record AccountsList(string? Email, string? Name, AccountChannel[] Channels);
+
 /// <summary>What a signed-in account holds, as one sync read it.</summary>
 public sealed record AccountLibrary(
     Song[] Liked,
