@@ -8,8 +8,8 @@
     NavigationCacheMode="Enabled">
     <Grid>
         <ScrollViewer x:Name="Scroll">
-            <StackPanel Margin="26,16,26,32" Spacing="28">
-                <Grid>
+            <StackPanel Margin="0,16,0,32" Spacing="28">
+                <Grid Margin="26,0,26,0">
                     <TextBlock x:Name="Greeting" Text="Home" Style="{ThemeResource TitleTextBlockStyle}" VerticalAlignment="Center" />
                     <Button
                         x:Name="RefreshButton"
@@ -28,7 +28,7 @@
                 </Grid>
 
                 <!-- The first screenful does the work (Mac sibling): Your Mix beside Quick picks. -->
-                <Grid x:Name="Top" ColumnSpacing="28" RowSpacing="28" SizeChanged="OnTopSizeChanged">
+                <Grid x:Name="Top" ColumnSpacing="28" RowSpacing="28" SizeChanged="OnTopSizeChanged" Margin="26,0,26,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="MixColumn" Width="380" />
                         <ColumnDefinition Width="*" />
