@@ -32,10 +32,10 @@
 
                     <!-- Wheel scrolls the page; these step the shelf a screen at a time. -->
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Bottom" Margin="0,0,26,0">
-                        <Button Width="32" Height="32" Padding="0" Click="OnStepLeft" ToolTipService.ToolTip="Scroll left" AutomationProperties.Name="Scroll shelf left">
+                        <Button x:Name="StepLeftButton" Width="32" Height="32" Padding="0" IsEnabled="False" Click="OnStepLeft" ToolTipService.ToolTip="Scroll left" AutomationProperties.Name="Scroll shelf left">
                             <FontIcon Glyph="&#xE76B;" FontSize="12" />
                         </Button>
-                        <Button Width="32" Height="32" Padding="0" Click="OnStepRight" ToolTipService.ToolTip="Scroll right" AutomationProperties.Name="Scroll shelf right">
+                        <Button x:Name="StepRightButton" Width="32" Height="32" Padding="0" IsEnabled="False" Click="OnStepRight" ToolTipService.ToolTip="Scroll right" AutomationProperties.Name="Scroll shelf right">
                             <FontIcon Glyph="&#xE76C;" FontSize="12" />
                         </Button>
                     </StackPanel>

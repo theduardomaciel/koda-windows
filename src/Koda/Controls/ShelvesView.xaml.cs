@@ -36,7 +36,28 @@ public sealed partial class ShelvesView : UserControl
             list.Tag = "menu";
             SongMenu.Attach(list, () => list.DataContext is ShelfView shelf ? shelf.Songs : []);
             list.AddHandler(PointerWheelChangedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler(OnShelfWheel), true);
+
+            if (FindShelfRow(list) is { } row && Descendant<ScrollViewer>(list) is { } scroller)
+            {
+                // Extent grows as covers are realized, so watch it as well as the offset.
+                scroller.RegisterPropertyChangedCallback(ScrollViewer.ScrollableWidthProperty, (_, _) => SyncButtons(row, scroller));
+                scroller.ViewChanged += (_, _) => SyncButtons(row, scroller);
+                scroller.SizeChanged += (_, _) => SyncButtons(row, scroller);
+                SyncButtons(row, scroller);
+            }
         }
+    }
+
+    /// <summary>Turns off a step button once its end of the shelf is reached.</summary>
+    private static void SyncButtons(Grid row, ScrollViewer scroller)
+    {
+        if (Find(row, "StepLeftButton") is not Button left || Find(row, "StepRightButton") is not Button right)
+        {
+            return;
+        }
+
+        left.IsEnabled = scroller.HorizontalOffset > 0.5;
+        right.IsEnabled = scroller.ScrollableWidth - scroller.HorizontalOffset > 0.5;
     }
 
     /// <summary>
@@ -80,7 +101,10 @@ public sealed partial class ShelvesView : UserControl
         scroller.ChangeView(System.Math.Max(0, target), null, null);
     }
 
-    private static ListView? FindShelfList(FrameworkElement from)
+    private static ListView? FindShelfList(FrameworkElement from) =>
+        FindShelfRow(from)?.Children.OfType<ListView>().FirstOrDefault();
+
+    private static Grid? FindShelfRow(FrameworkElement from)
     {
         DependencyObject? node = from;
         while (node is not null && node is not Grid { RowDefinitions.Count: 2 })
@@ -88,7 +112,26 @@ public sealed partial class ShelvesView : UserControl
             node = VisualTreeHelper.GetParent(node);
         }
 
-        return node is Grid grid ? grid.Children.OfType<ListView>().FirstOrDefault() : null;
+        return node as Grid;
+    }
+
+    private static FrameworkElement? Find(DependencyObject root, string name)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement { Name: var found } element && found == name)
+            {
+                return element;
+            }
+
+            if (Find(child, name) is { } deeper)
+            {
+                return deeper;
+            }
+        }
+
+        return null;
     }
 
     private static T? Descendant<T>(DependencyObject root) where T : DependencyObject
