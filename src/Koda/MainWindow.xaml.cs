@@ -548,18 +548,23 @@ public sealed partial class MainWindow : Window
     /// <summary>The arrow's own fade and scale, and the slot width that carries the icon and name.</summary>
     private void AnimateBack(double opacity, double scale, double slotWidth, Action completed)
     {
-        var duration = TimeSpan.FromMilliseconds(170);
+        var duration = TimeSpan.FromMilliseconds(slotWidth > 0 ? 300 : 260);
         var fadeEasing = new Microsoft.UI.Xaml.Media.Animation.CubicEase
         {
             EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut,
         };
         Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase spring = slotWidth > 0
-            ? new Microsoft.UI.Xaml.Media.Animation.ElasticEase
+            ? new Microsoft.UI.Xaml.Media.Animation.BackEase
             {
-                Oscillations = 1,
-                Springiness = 4,
+                Amplitude = 0.12,
                 EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut,
             }
+            : new Microsoft.UI.Xaml.Media.Animation.CubicEase
+            {
+                EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut,
+            };
+        Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase shrink = slotWidth > 0
+            ? spring
             : new Microsoft.UI.Xaml.Media.Animation.CubicEase
             {
                 EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseIn,
@@ -589,7 +594,7 @@ public sealed partial class MainWindow : Window
         {
             To = scale,
             Duration = duration,
-            EasingFunction = spring,
+            EasingFunction = shrink,
             EnableDependentAnimation = true,
         };
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(grow, BackScale);
@@ -599,7 +604,7 @@ public sealed partial class MainWindow : Window
         {
             To = scale,
             Duration = duration,
-            EasingFunction = spring,
+            EasingFunction = shrink,
             EnableDependentAnimation = true,
         };
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(growY, BackScale);
@@ -1474,77 +1479,50 @@ public sealed partial class MainWindow : Window
     {
         var roster = Koda.Services.Profiles.Roster;
         var active = roster.Active;
-        var flyout = new Flyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight };
-        var content = new StackPanel();
+        var menu = new MenuFlyout();
 
-        // Who is signed in, in the Store's account-panel shape: photo, name, email, sign out.
-        var header = new Grid { ColumnSpacing = 12, Padding = new Thickness(0, 0, 0, 8) };
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        header.Children.Add(ProfilesDialog.Picture(active, 44));
-
-        var identity = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-        identity.Children.Add(new TextBlock
-        {
-            Text = active.IsSignedIn ? active.AccountName ?? active.DisplayName : active.DisplayName,
-            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            TextWrapping = TextWrapping.NoWrap,
-        });
+        var heading = active.IsSignedIn
+            ? active.AccountName ?? active.DisplayName
+            : active.DisplayName;
+        menu.Items.Add(new MenuFlyoutItem { Text = heading, IsEnabled = false });
 
         if (active.IsSignedIn)
         {
-            var signOut = new Button
-            {
-                Content = "Sign out",
-                Background = new SolidColorBrush(Colors.Transparent),
-                BorderThickness = new Thickness(0),
-                Padding = new Thickness(0),
-                Margin = new Thickness(0, 6, 0, 0),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                MinHeight = 0,
-                Height = 24,
-                FontSize = 13,
-                Foreground = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"],
-            };
-            signOut.Click += (_, _) =>
-            {
-                flyout.Hide();
-                SignOutActive();
-            };
-            identity.Children.Add(signOut);
-        }
-
-        Grid.SetColumn(identity, 1);
-        header.Children.Add(identity);
-        content.Children.Add(header);
-        content.Children.Add(Divider());
-
-        if (active.IsSignedIn)
-        {
-            content.Children.Add(SectionHeader("Channels"));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            var change = new MenuFlyoutSubItem { Text = "Change channel" };
             if (active.Channels.Count > 0)
             {
                 foreach (var channel in active.Channels)
                 {
                     var target = channel;
-                    var selected = string.Equals(channel.PageId, active.ActiveChannelPageId, StringComparison.Ordinal);
-                    content.Children.Add(FlyoutRow(channel.DisplayName, selected, flyout, () => _ = SwitchChannelAsync(target)));
+                    var item = new RadioMenuFlyoutItem
+                    {
+                        Text = channel.DisplayName,
+                        GroupName = "Channel",
+                        IsChecked = string.Equals(channel.PageId, active.ActiveChannelPageId, StringComparison.Ordinal),
+                    };
+                    item.Click += (_, _) => _ = SwitchChannelAsync(target);
+                    change.Items.Add(item);
                 }
             }
             else
             {
                 var reason = Koda.Services.Profiles.LastChannelsError;
-                content.Children.Add(FlyoutNote(reason is null
-                    ? "Channels unavailable"
-                    : $"Channels unavailable: {reason}"));
-                content.Children.Add(FlyoutRow("Try again", false, flyout, async () =>
+                change.Items.Add(new MenuFlyoutItem
+                {
+                    Text = reason is null ? "Channels unavailable" : $"Channels unavailable: {reason}",
+                    IsEnabled = false,
+                });
+                var retry = new MenuFlyoutItem { Text = "Try again", Icon = new FontIcon { Glyph = "\uE72C" } };
+                retry.Click += async (_, _) =>
                 {
                     await Koda.Services.Profiles.RefreshChannelsAsync();
                     await System.Threading.Tasks.Task.Delay(150);
                     ShowProfileMenu(anchor);
-                }, "\uE72C"));
+                };
+                change.Items.Add(retry);
             }
+            menu.Items.Add(change);
         }
 
         var accounts = roster.Profiles
@@ -1552,12 +1530,13 @@ public sealed partial class MainWindow : Window
             .ToList();
         if (accounts.Count > 0)
         {
-            content.Children.Add(SectionHeader("Other accounts"));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            var other = new MenuFlyoutSubItem { Text = "Other accounts" };
             foreach (var profile in accounts)
             {
-                var target = profile;
-                content.Children.Add(FlyoutRow(profile.DisplayName, false, flyout, () => _ = Koda.Services.Profiles.SwitchAsync(target.Id)));
+                other.Items.Add(ProfileRow(profile, roster.ActiveId));
             }
+            menu.Items.Add(other);
         }
 
         var offline = roster.Profiles
@@ -1565,100 +1544,37 @@ public sealed partial class MainWindow : Window
             .ToList();
         if (offline.Count > 0)
         {
-            content.Children.Add(SectionHeader("Offline"));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            var group = new MenuFlyoutSubItem { Text = "Offline" };
             foreach (var profile in offline)
             {
-                var target = profile;
-                content.Children.Add(FlyoutRow(profile.DisplayName, false, flyout, () => _ = Koda.Services.Profiles.SwitchAsync(target.Id)));
+                group.Items.Add(ProfileRow(profile, roster.ActiveId));
             }
+            menu.Items.Add(group);
         }
 
-        if (content.Children.Count > 0 && content.Children[^1] is not Border)
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(SongMenu.Item("Add account…", "\uE710", () => _ = Koda.Services.Profiles.AddSignedInAsync()));
+        menu.Items.Add(SongMenu.Item("Manage profiles…", "\uE713", () => _ = ProfilesDialog.ShowAsync()));
+        if (active.IsSignedIn)
         {
-            content.Children.Add(Divider());
+            menu.Items.Add(SongMenu.Item("Sign out", "\uE7E8", SignOutActive));
         }
 
-        content.Children.Add(FlyoutRow("Add account…", false, flyout, () => _ = Koda.Services.Profiles.AddSignedInAsync(), "\uE710"));
-        content.Children.Add(FlyoutRow("Manage profiles…", false, flyout, () => _ = ProfilesDialog.ShowAsync(), "\uE713"));
-
-        flyout.Content = new ScrollViewer
-        {
-            Content = content,
-            MaxHeight = 520,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollMode = ScrollMode.Auto,
-            MinWidth = 320,
-            MaxWidth = 380,
-        };
-        flyout.ShowAt(anchor);
+        menu.Placement = FlyoutPlacementMode.BottomEdgeAlignedRight;
+        menu.ShowAt(anchor);
     }
 
-    private static Border Divider() => new()
+    private static RadioMenuFlyoutItem ProfileRow(Koda.Core.Profiles.KodaProfile profile, Guid activeId)
     {
-        Height = 1,
-        Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
-    };
-
-    private static TextBlock SectionHeader(string text) => new()
-    {
-        Text = text,
-        Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-        Margin = new Thickness(14, 10, 14, 4),    };
-
-    private static TextBlock FlyoutNote(string text) => new()
-    {
-        Text = text,
-        Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-        TextWrapping = TextWrapping.Wrap,
-        Margin = new Thickness(14, 6, 14, 6),
-    };
-
-    /// <summary>One Store-style row: an optional leading glyph, the label, and the action.</summary>
-    private static Button FlyoutRow(string text, bool selected, Flyout flyout, Action action, string? glyph = null)
-    {
-        var content = new Grid { ColumnSpacing = 10 };
-        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
-        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        content.Children.Add(new FontIcon
+        var item = new RadioMenuFlyoutItem
         {
-            Glyph = glyph ?? (selected ? "\uE73E" : ""),
-            FontSize = 14,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = selected
-                ? (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"]
-                : (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-        });
-        var label = new TextBlock
-        {
-            Text = text,
-            FontSize = 14,
-            VerticalAlignment = VerticalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            TextWrapping = TextWrapping.NoWrap,
+            Text = profile.DisplayName,
+            GroupName = "Profile",
+            IsChecked = profile.Id == activeId,
         };
-        Grid.SetColumn(label, 1);
-        content.Children.Add(label);
-
-        var button = new Button
-        {
-            Content = content,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            Background = new SolidColorBrush(Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(4),
-            MinHeight = 0,
-            Height = 36,
-            Padding = new Thickness(12, 0, 12, 0),
-        };
-        button.Click += (_, _) =>
-        {
-            flyout.Hide();
-            action();
-        };
-        return button;
+        item.Click += (_, _) => _ = Koda.Services.Profiles.SwitchAsync(profile.Id);
+        return item;
     }
 
     /// <summary>Signing out keeps the library and downloads on this PC; the profile becomes
