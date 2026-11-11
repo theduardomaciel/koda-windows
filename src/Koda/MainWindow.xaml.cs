@@ -548,12 +548,15 @@ public sealed partial class MainWindow : Window
     /// <summary>The arrow's own fade and scale, and the slot width that carries the icon and name.</summary>
     private void AnimateBack(double opacity, double scale, double slotWidth, Action completed)
     {
-        var duration = TimeSpan.FromMilliseconds(slotWidth > 0 ? 300 : 260);
+        var showing = slotWidth > 0;
+        var duration = TimeSpan.FromMilliseconds(showing ? 320 : 400);
+        var slideBegin = showing ? TimeSpan.Zero : TimeSpan.FromMilliseconds(120);
+        var slideDuration = showing ? duration : TimeSpan.FromMilliseconds(280);
         var fadeEasing = new Microsoft.UI.Xaml.Media.Animation.CubicEase
         {
             EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut,
         };
-        Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase spring = slotWidth > 0
+        Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase spring = showing
             ? new Microsoft.UI.Xaml.Media.Animation.BackEase
             {
                 Amplitude = 0.12,
@@ -563,7 +566,7 @@ public sealed partial class MainWindow : Window
             {
                 EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut,
             };
-        Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase shrink = slotWidth > 0
+        Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase shrink = showing
             ? spring
             : new Microsoft.UI.Xaml.Media.Animation.CubicEase
             {
@@ -573,17 +576,21 @@ public sealed partial class MainWindow : Window
         var width = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
         {
             To = slotWidth,
-            Duration = duration,
+            Duration = slideDuration,
+            BeginTime = slideBegin,
             EasingFunction = spring,
             EnableDependentAnimation = true,
         };
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(width, BackSlot);
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(width, "Width");
 
+        // Going out, the arrow fades away first and only then does the slot close, so the
+        // icon and name slide back on their own.
         var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
         {
             To = opacity,
-            Duration = duration,
+            Duration = showing ? duration : TimeSpan.FromMilliseconds(120),
+            BeginTime = TimeSpan.Zero,
             EasingFunction = fadeEasing,
             EnableDependentAnimation = true,
         };
@@ -593,7 +600,8 @@ public sealed partial class MainWindow : Window
         var grow = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
         {
             To = scale,
-            Duration = duration,
+            Duration = slideDuration,
+            BeginTime = slideBegin,
             EasingFunction = shrink,
             EnableDependentAnimation = true,
         };
@@ -603,7 +611,8 @@ public sealed partial class MainWindow : Window
         var growY = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
         {
             To = scale,
-            Duration = duration,
+            Duration = slideDuration,
+            BeginTime = slideBegin,
             EasingFunction = shrink,
             EnableDependentAnimation = true,
         };
@@ -617,7 +626,18 @@ public sealed partial class MainWindow : Window
         storyboard.Children.Add(growY);
         storyboard.Completed += (_, _) => completed();
 
+        // Stopping the previous storyboard reverts the animated properties to their base
+        // values. Read where the slot and arrow are now, stop, and write those values back
+        // as the base, or a hide would snap the slot to 0 before its own animation starts.
+        var startWidth = BackSlot.Width;
+        var startOpacity = BackButton.Opacity;
+        var startScale = BackScale.ScaleX;
         _backStoryboard?.Stop();
+        BackSlot.Width = startWidth;
+        BackButton.Opacity = startOpacity;
+        BackScale.ScaleX = startScale;
+        BackScale.ScaleY = startScale;
+
         _backStoryboard = storyboard;
         storyboard.Begin();
     }
