@@ -5,8 +5,8 @@ alignment of covers, hover backgrounds, titles and loading skeletons.
 
 The short version:
 
-- **Content padding** is on the item container (`CardItemStyle` /
-  `CardGridItemStyle`).
+- **Content padding** is on the item container (`CardItemStyle`,
+  `LibraryCardItemStyle` or `CardGridItemStyle`).
 - **Outer padding** is on the `ListView` / `GridView` that holds the items.
 - **Gaps** are the item container's `Margin`.
 - **Hover insets** are owned by WinUI, not by the app. On Windows 11 a
@@ -17,9 +17,10 @@ The short version:
 
 | Value | File | What it does |
 |---|---|---|
-| `Padding` | `src/Koda/App.xaml`, `CardItemStyle` / `CardGridItemStyle` | Space inside each item cell, between the cell edge and the cover. Also controls how much hover background surrounds the cover. |
+| `Padding` | `src/Koda/App.xaml`, `CardItemStyle`, `LibraryCardItemStyle` / `CardGridItemStyle` | Space inside each item cell, between the cell edge and the cover. Also controls how much hover background surrounds the cover. |
 | `Margin` | Same styles | Space between item cells. In a shelf this is the horizontal gap; in a grid it is the column/row gap. |
 | `ListView.Padding` | `src/Koda/Controls/ShelvesView.xaml` | Outer left/right padding of a shelf row. |
+| `GridView.Margin` / `GridView.Padding` | `src/Koda/Pages/LibraryGridPage.xaml` | Outer alignment and available width of the library grid. |
 | `StackPanel Spacing` | `ShelvesView.xaml` | Vertical distance between shelves. |
 | `Grid RowSpacing` | `ShelvesView.xaml` | Distance between a shelf title and its cards. |
 | Header buttons `Margin` | `ShelvesView.xaml` | Right edge of the scroll buttons. Keep it aligned with the cover inset. |
@@ -50,14 +51,24 @@ Shelf list (`ShelvesView.xaml`):
 <ListView Padding="20,0,23,0" ...>
 ```
 
-Grid cards (`GridViewItem`, Library and Browse):
+Library grid (`GridViewItem`):
 
 ```xml
-<Style x:Key="CardGridItemStyle" TargetType="GridViewItem" ...>
-    <Setter Property="Padding" Value="6" />
-    <Setter Property="Margin" Value="0,0,6,0" />
+<Style x:Key="LibraryCardItemStyle" TargetType="GridViewItem" BasedOn="{StaticResource CardGridItemStyle}">
+    <Setter Property="Padding" Value="8,10" />
+    <Setter Property="Margin" Value="0,0,5,4" />
 </Style>
 ```
+
+Library page (`LibraryGridPage.xaml`):
+
+```xml
+<Grid Padding="26,16,26,0" RowSpacing="10">
+<GridView Margin="-8,0" Padding="0,0,4,28" ... />
+```
+
+The Browse mood grid still uses `CardGridItemStyle` (`Padding=6`,
+`Margin=0,0,6,0`).
 
 Skeleton (`Skeletons.Shelves`): shelf spacing `22`, card row spacing `21`,
 card width `160`.
@@ -147,7 +158,8 @@ Current values:
    - A good default is `P = C`, the cover radius.
    - For shelves, `M` is negative to compensate for the native hover inset.
 3. Compute the outer padding per side: `T - P - M`.
-4. Update `CardItemStyle` and `ShelvesView.xaml`.
+4. Update `CardItemStyle` and `ShelvesView.xaml`. For the library grid, update
+   `LibraryCardItemStyle` and `LibraryGridPage.xaml`.
 5. Keep the scroll buttons' right margin equal to `T`.
 6. Recompute vertical spacing if you changed `P`:
    - `RowSpacing = desired title-to-cover - P.Top`
@@ -171,22 +183,43 @@ Current values:
 
 ## Grid-specific notes
 
-`CardGridItemStyle` is used by the Library grid and the Browse mood tiles. It is
-not the same as the shelf style:
+`LibraryCardItemStyle` is the album/playlist/artist grid. `CardGridItemStyle`
+remains the Browse mood-tile style. `GridViewItem` hover fills the cell, so a
+negative margin would make hover backgrounds overlap rather than close a native
+inset.
 
-- `GridViewItem` hover fills the cell, so a negative margin would make hover
-  backgrounds overlap rather than close a native inset.
-- To keep the first grid cover aligned with the page padding, set the
-  `GridView.Margin` to `-Padding`:
+### Matching a shelf card in a GridView
 
-  ```xml
-  <GridView Margin="-6,0" ... />
-  ```
+To reproduce a `ListView` shelf's visible card edges in a `GridView`, strip the
+native `ListViewItem` hover inset out of the padding and margin:
 
-  With `Padding=12`, that becomes `Margin="-12,0"`.
-- If you also need to preserve the original column count/available width, add
-  right padding equal to twice the padding increase. The current
-  `LibraryGridPage` and `BrowsePage` values are the reference.
+```text
+P_grid_h = P_shelf_h - H_shelf_h        = 12 - 4 = 8
+M_grid_h = M_shelf_h + 2 * H_shelf_h    = -3 + 8 = 5
+P_grid_v = P_shelf_v - H_shelf_v        = 12 - 2 = 10
+M_grid_v = M_shelf_v + 2 * H_shelf_v    = 0 + 4 = 4
+```
+
+That produces the same visible result:
+
+| Measurement | Shelf | Library grid |
+|---|---|---|
+| Cover gap, horizontal | `2 * 12 - 3 = 21` | `2 * 8 + 5 = 21` |
+| Visible hover gap, horizontal | `-3 + 2 * 4 = 5` | `5` |
+| Visible hover gap, vertical | `0 + 2 * 2 = 4` | `4` |
+| Hover extension beyond cover, horizontal | `12 - 4 = 8` | `8` |
+| Hover extension beyond cover, vertical | `12 - 2 = 10` | `10` |
+| Item pitch, horizontal | `160 + 2 * 12 - 3 = 181` | `160 + 2 * 8 + 5 = 181` |
+
+To keep the first grid cover aligned with the page padding, set
+`GridView.Margin.Left = -P_grid_h` (`-8`). If you also need to preserve the
+original available width, add right padding equal to twice the horizontal
+padding increase (`4` here; from `6` to `8`). The current `LibraryGridPage` uses
+`Margin="-8,0"` and `Padding="0,0,4,28"`.
+
+When the vertical item padding changes from `6` to `10`, the first cover moves
+down `4 px`. Reduce the page `RowSpacing` by the same amount (`14` to `10`) to
+keep the first row where it was.
 
 ## Corner radius
 
@@ -203,7 +236,8 @@ not the same as the shelf style:
 
 `CardItemStyle` is used by every `ShelvesView`: Home, Album versions, Artist
 releases, Mood, and Search. Changing it changes all shelves, not just Home.
-`CardGridItemStyle` affects both the Library grid and the Browse mood grid.
+`LibraryCardItemStyle` affects the Library albums, playlists and artists grid.
+`CardGridItemStyle` affects the Browse mood grid.
 
 `ShelvesView.xaml` hard-codes `ItemContainerStyle="{StaticResource
 CardItemStyle}"`. If Home ever needs different metrics, add a configurable

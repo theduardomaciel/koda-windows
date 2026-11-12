@@ -36,13 +36,21 @@
                 <Setter Property="VerticalContentAlignment" Value="Top" />
             </Style>
 
-            <!-- The same card metrics on a GridView: its container is a GridViewItem, and a style for
-                 the wrong container type fails inside XAML when the first item is realized. -->
+            <!-- Base GridView card container. LibraryCardItemStyle builds on it for the album
+                 grid; Browse uses it directly for mood tiles. -->
             <Style x:Key="CardGridItemStyle" TargetType="GridViewItem" BasedOn="{StaticResource DefaultGridViewItemStyle}">
                 <Setter Property="Padding" Value="6" />
                 <Setter Property="Margin" Value="0,0,6,0" />
                 <Setter Property="MinWidth" Value="0" />
                 <Setter Property="VerticalContentAlignment" Value="Top" />
+            </Style>
+
+            <!-- Library cards: the shelf metrics translated to a GridViewItem. A GridView
+                 hover fills the cell, so the ListView's 4/2 px inset is folded into this
+                 padding and margin instead. See docs/card-layout.md. -->
+            <Style x:Key="LibraryCardItemStyle" TargetType="GridViewItem" BasedOn="{StaticResource CardGridItemStyle}">
+                <Setter Property="Padding" Value="8,10" />
+                <Setter Property="Margin" Value="0,0,5,4" />
             </Style>
 
             <!-- A song row: thumb, title over artist line, video chip, duration. -->
