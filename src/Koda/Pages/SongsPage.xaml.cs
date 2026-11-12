@@ -63,6 +63,9 @@ public sealed partial class SongsPage : Page
             "recent" => ("\uE823", Color.FromArgb(255, 232, 137, 12)),
             "downloads" => ("\uE896", Color.FromArgb(255, 43, 124, 211)),
             "offline" => ("\uE709", Color.FromArgb(255, 31, 146, 84)),
+            // A generated mix, not the listener's likes: its own equalizer mark, in the violet
+            // of the mix card on Home, rather than the Liked Songs heart.
+            "mix" => ("\uE9E9", Color.FromArgb(255, 90, 79, 207)),
             _ => ("\uEB52", Color.FromArgb(255, 227, 76, 122)),
         };
         HeroGlyph.Glyph = glyph;
@@ -178,6 +181,8 @@ public sealed partial class SongsPage : Page
             "downloads" => ("No downloads yet", "Right-click a song and choose Download, or use Download on an album or playlist. Downloads stay on this PC and play without a connection.", "\uE896"),
             "offline" => ("Nothing ready offline",
                 "Songs you download, and songs you play all the way through, are kept on this PC and play without a connection.", "\uE709"),
+            "mix" => ("Nothing in your mix yet",
+                "Play a few songs and Koda will build a mix from what you listen to.", "\uE9E9"),
             _ => ("No liked songs yet", "Songs you like appear here. Right-click any song, or use the heart in the player bar.", "\uEB52"),
         };
         Empty.Show(title, message, glyph);

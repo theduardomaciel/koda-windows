@@ -198,10 +198,12 @@ internal sealed class Taskbar : IDisposable
 
     private void CreateIcons()
     {
-        _previousIcon = GlyphIcons.Create("\uE892", light: _lightIcons);
-        _playIcon = GlyphIcons.Create("\uE768", light: _lightIcons);
-        _pauseIcon = GlyphIcons.Create("\uE769", light: _lightIcons);
-        _nextIcon = GlyphIcons.Create("\uE893", light: _lightIcons);
+        // The filled transport glyphs, as Windows' own media flyout draws them: the plain
+        // Previous/Play/Pause/Next glyphs are outlines.
+        _previousIcon = GlyphIcons.Create("\uF8AC", light: _lightIcons); // BackSolidBold
+        _playIcon = GlyphIcons.Create("\uF5B0", light: _lightIcons); // PlaySolid
+        _pauseIcon = GlyphIcons.Create("\uF8AE", light: _lightIcons); // PauseBold
+        _nextIcon = GlyphIcons.Create("\uF8AD", light: _lightIcons); // ForwardSolidBold
     }
 
     private void DestroyIcons()

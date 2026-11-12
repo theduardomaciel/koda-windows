@@ -361,7 +361,10 @@
                                     <TextBlock Text="{Binding Song.Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                     <TextBlock Text="{Binding Song.ArtistLine}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="#99FFFFFF" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                 </StackPanel>
-                                <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{Binding Song.Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="#80FFFFFF" />
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                                    <controls:LikeButton VerticalAlignment="Center" />
+                                    <TextBlock VerticalAlignment="Center" Text="{Binding Song.Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="#80FFFFFF" />
+                                </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>

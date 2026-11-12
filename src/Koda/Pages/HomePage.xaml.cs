@@ -11,6 +11,8 @@ using Koda.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 
 namespace Koda.Pages;
@@ -460,8 +462,22 @@ public sealed partial class HomePage : Page
         if (_state?.Mix is { } mix) _ = PlaybackService.Instance.ShuffleAsync(mix.Songs);
     }
 
-    // The card opens the mix's songs; its Play and Shuffle buttons handle their own taps.
-    private void OnMixCardTapped(object sender, TappedRoutedEventArgs e) => OpenMix();
+    // The card opens the mix's songs; its Play, Shuffle and Show songs buttons handle their own
+    // taps. A Tapped raised by one of them must not open the mix a second time, pushing the same
+    // page twice onto the back stack.
+    private void OnMixCardTapped(object sender, TappedRoutedEventArgs e)
+    {
+        for (var node = e.OriginalSource as DependencyObject; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is ButtonBase)
+            {
+                return;
+            }
+        }
+
+        e.Handled = true;
+        OpenMix();
+    }
 
     private void OnMixSongsClick(object sender, RoutedEventArgs e) => OpenMix();
 

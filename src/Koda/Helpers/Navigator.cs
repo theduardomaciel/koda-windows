@@ -74,6 +74,8 @@ public static class SongMenu
     {
         Song song => song,
         TrackRow row => row.Song,
+        HistoryPlayRow play => play.Song,
+        RankedSongRow ranked => ranked.Song,
         Playback.QueueItem queued => queued.Song,
         CardItem { Item: MusicItem.SongRecord s } => s.Value,
         _ => null,

@@ -266,25 +266,27 @@ public sealed partial class YouTubeMusic : IDisposable
     }
 
     /// <summary>The next page of a playlist's tracks.</summary>
-    public async Task<QueuePage> PlaylistMoreAsync(string continuation, CancellationToken cancellation = default)
+    public async Task<QueuePage> PlaylistMoreAsync(string continuation, CancellationToken cancellation = default,
+        Signing signing = Signing.IfSignedIn)
     {
         var root = await _api.MusicAsync("browse",
-            new JsonObject { ["continuation"] = continuation }, cancellation);
+            new JsonObject { ["continuation"] = continuation }, cancellation, signing);
         var next = Pages.PlaylistContinuation(root);
         var songs = Pages.PlaylistSongs(root);
         return new QueuePage(songs, next == continuation ? null : next);
     }
 
     /// <summary>Every track of a playlist, following continuations.</summary>
-    public async Task<Song[]> PlaylistSongsAsync(string browseId, int limit = 1000, CancellationToken cancellation = default)
+    public async Task<Song[]> PlaylistSongsAsync(string browseId, int limit = 1000, CancellationToken cancellation = default,
+        Signing signing = Signing.IfSignedIn)
     {
-        var root = await _api.MusicAsync("browse", new JsonObject { ["browseId"] = browseId }, cancellation);
+        var root = await _api.MusicAsync("browse", new JsonObject { ["browseId"] = browseId }, cancellation, signing);
         var songs = new List<Song>(Pages.PlaylistSongs(root));
         var token = Pages.PlaylistContinuation(root);
         var seen = new HashSet<string>();
         while (token is { } current && songs.Count < limit && seen.Add(current))
         {
-            var page = await PlaylistMoreAsync(current, cancellation);
+            var page = await PlaylistMoreAsync(current, cancellation, signing);
             songs.AddRange(page.Songs);
             token = page.Continuation;
         }

@@ -26,9 +26,12 @@
                     <TextBlock Text="{Binding Title}" Style="{ThemeResource BodyTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     <TextBlock Text="{Binding Subtitle}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                 </StackPanel>
-                <TextBlock Grid.Column="3" MinWidth="40" TextAlignment="Right" VerticalAlignment="Center"
-                           Text="{Binding Duration, Converter={StaticResource SecondsText}}"
-                           Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <controls:LikeButton VerticalAlignment="Center" />
+                    <TextBlock MinWidth="40" TextAlignment="Right" VerticalAlignment="Center"
+                               Text="{Binding Duration, Converter={StaticResource SecondsText}}"
+                               Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                </StackPanel>
             </Grid>
         </DataTemplate>
 

@@ -80,6 +80,7 @@
                             <TextBlock Text="Video" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </Border>
                         <controls:DownloadIndicator VerticalAlignment="Center" />
+                        <controls:LikeButton VerticalAlignment="Center" />
                         <TextBlock MinWidth="40" TextAlignment="Right" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                     </StackPanel>
                 </Grid>
@@ -107,7 +108,10 @@
                         <TextBlock Text="{Binding ArtistLine}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     </StackPanel>
                     <TextBlock Grid.Column="3" Text="{Binding AlbumTitle}" VerticalAlignment="Center" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                    <TextBlock Grid.Column="4" MinWidth="40" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                        <controls:LikeButton VerticalAlignment="Center" />
+                        <TextBlock MinWidth="40" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
                 </Grid>
             </DataTemplate>
 
@@ -124,7 +128,10 @@
                         <TextBlock Text="{Binding Title}" Style="{ThemeResource BodyTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                         <TextBlock Text="{Binding ArtistLine}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     </StackPanel>
-                    <TextBlock Grid.Column="2" MinWidth="40" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                        <controls:LikeButton VerticalAlignment="Center" />
+                        <TextBlock MinWidth="40" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
                 </Grid>
             </DataTemplate>
 

@@ -553,18 +553,6 @@
                             <FontIcon Glyph="&#xE8FD;" FontSize="16" />
                         </Button>
                         <Button
-                            x:Name="MuteButton"
-                            Width="36"
-                            Height="36"
-                            Padding="0"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="OnMuteClick"
-                            ToolTipService.ToolTip="Mute"
-                            AutomationProperties.Name="Mute">
-                            <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" />
-                        </Button>
-                        <Button
                             x:Name="OutputButton"
                             Width="36"
                             Height="36"
@@ -575,6 +563,18 @@
                             ToolTipService.ToolTip="Audio output"
                             AutomationProperties.Name="Audio output">
                             <FontIcon Glyph="&#xE7F5;" FontSize="16" />
+                        </Button>
+                        <Button
+                            x:Name="MuteButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Click="OnMuteClick"
+                            ToolTipService.ToolTip="Mute"
+                            AutomationProperties.Name="Mute">
+                            <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" />
                         </Button>
                         <Slider
                             x:Name="VolumeSlider"

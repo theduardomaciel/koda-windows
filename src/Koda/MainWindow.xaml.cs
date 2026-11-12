@@ -716,6 +716,8 @@ public sealed partial class MainWindow : Window
             "recent" => "recent",
             "downloads" => "downloads",
             "offline" => "offline",
+            // The mix is a generated playlist, not the listener's liked songs.
+            "mix" => "playlists",
             _ => "liked",
         },
         nameof(LibraryGridPage) => (parameter as string) switch

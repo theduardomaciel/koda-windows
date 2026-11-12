@@ -34,13 +34,15 @@ public sealed partial class YouTubeMusic
 
     // MARK: Library
 
-    /// <summary>Liked songs, newest first, every page up to <paramref name="limit"/>. All or
-    /// nothing: a page that fails throws rather than returning part of the list, which a sync
-    /// would read as unlikes.</summary>
+    /// <summary>Liked songs, newest first, every page up to <paramref name="limit"/>. This is the
+    /// account's Liked Music playlist (<c>LM</c>), not Library → Songs
+    /// (<c>FEmusic_liked_videos</c>): the library also holds every track of the albums saved to
+    /// it, which were never liked. All or nothing: a page that fails throws rather than returning
+    /// part of the list, which a sync would read as unlikes.</summary>
     public async Task<Song[]> LikedSongsAsync(int limit = 5000, CancellationToken cancellation = default)
     {
-        var items = await LibraryAsync("FEmusic_liked_videos", limit, cancellation);
-        return [.. items.OfType<MusicItem.SongRecord>().Select(record => record.Value)];
+        var songs = await PlaylistSongsAsync("VLLM", limit, cancellation, Signing.Required);
+        return [.. Pages.DedupeById(songs, song => song.Id).Take(limit)];
     }
 
     /// <summary>Playlists in the library: the account's own and ones it saved. Liked Music and

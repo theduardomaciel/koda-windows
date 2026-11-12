@@ -45,6 +45,7 @@
                     <Border Padding="6,1" CornerRadius="4" VerticalAlignment="Center" BorderThickness="1" BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" Visibility="{Binding IsVideo, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="Video" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </Border>
+                    <controls:LikeButton VerticalAlignment="Center" />
                     <TextBlock MinWidth="40" TextAlignment="Right" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                 </StackPanel>
             </Grid>
