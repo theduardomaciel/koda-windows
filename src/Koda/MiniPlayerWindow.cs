@@ -18,8 +18,12 @@ namespace Koda;
 /// </summary>
 public sealed class MiniPlayerWindow : Window
 {
-    private const double CardWidth = 600;
-    private const double CardHeight = 250;
+    private const double CardWidth = 560;
+    private const double CardHeight = 232;
+
+    /// <summary>Windows' caption button width; the compact overlay only has Close, but
+    /// the value is the same. Used when the title bar has not measured itself yet.</summary>
+    private const double DefaultCaptionInset = 46;
 
     private readonly MiniPlayerPage _page;
     private bool _customTitleBar;
@@ -76,11 +80,9 @@ public sealed class MiniPlayerWindow : Window
         };
 
         _page.FullPlayerRequested += OnFullPlayerRequested;
-        _page.MinimizeRequested += OnMinimizeRequested;
         Closed += (_, _) =>
         {
             _page.FullPlayerRequested -= OnFullPlayerRequested;
-            _page.MinimizeRequested -= OnMinimizeRequested;
             _page.Detach();
         };
     }
@@ -125,7 +127,16 @@ public sealed class MiniPlayerWindow : Window
             scale = 1;
         }
 
-        _page.SetCaptionInset(AppWindow.TitleBar.RightInset / scale);
+        // Before the title bar has measured itself RightInset is 0, and during a
+        // presenter change it can report a value that has nothing to do with the
+        // one close button. Keep the app's button next to Close in both cases.
+        var inset = AppWindow.TitleBar.RightInset / scale;
+        if (!double.IsFinite(inset) || inset < 32 || inset > 96)
+        {
+            inset = DefaultCaptionInset;
+        }
+
+        _page.SetCaptionInset(inset);
     }
 
     /// <summary>The caption button floats on the page's background, so it takes its colors
@@ -175,8 +186,4 @@ public sealed class MiniPlayerWindow : Window
         Close();
         App.Shell?.ShowNowPlaying(panel);
     }
-
-    /// <summary>The compact overlay's own minimize button; the native frame only offers close.</summary>
-    private void OnMinimizeRequested() =>
-        _ = Win32.ShowWindowAsync(Handle, Win32.SW_SHOWMINIMIZED);
 }

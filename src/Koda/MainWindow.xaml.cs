@@ -1958,13 +1958,17 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// Brings the running window forward: from the tray, or because a second
-    /// launch was redirected here. Restores a minimised/hidden window first.
+    /// launch was redirected here. A minimised window is restored; a maximised
+    /// or windowed one keeps the state and size the listener left it in.
     /// </summary>
     public void ShowFromTray()
     {
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         AppWindow.Show();
-        Win32.ShowWindowAsync(hwnd, Win32.SW_RESTORE);
+        if (Win32.IsIconic(hwnd))
+        {
+            Win32.ShowWindowAsync(hwnd, Win32.SW_RESTORE);
+        }
         Activate();
         if (!Win32.SetForegroundWindow(hwnd) || Win32.GetForegroundWindow() != hwnd)
         {

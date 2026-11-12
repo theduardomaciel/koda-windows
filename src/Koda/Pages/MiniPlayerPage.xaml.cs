@@ -29,9 +29,6 @@ public sealed partial class MiniPlayerPage : Page
     /// panel to open there: <c>"lyrics"</c>, <c>"queue"</c>, or null for the player itself.</summary>
     public event Action<string?>? FullPlayerRequested;
 
-    /// <summary>Raised when the listener minimizes the overlay.</summary>
-    public event Action? MinimizeRequested;
-
     /// <summary>The strip the window hands to Windows as its drag region.</summary>
     public FrameworkElement DragRegion => DragBar;
 
@@ -247,8 +244,6 @@ public sealed partial class MiniPlayerPage : Page
 
     private void OnQueueClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke("queue");
 
-    private void OnMinimizeClick(object sender, RoutedEventArgs e) => MinimizeRequested?.Invoke();
-
     private void OnRestoreClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
 
     private void OnRestoreTapped(object sender, DoubleTappedRoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
@@ -261,7 +256,7 @@ public sealed partial class MiniPlayerPage : Page
     /// <summary>The title block centers on the card, so its cap is the page width minus
     /// the cover and the same margin on the other side.</summary>
     private void OnSizeChanged(object sender, SizeChangedEventArgs e) =>
-        TitleBlock.MaxWidth = Math.Max(120, e.NewSize.Width - 240);
+        TitleBlock.MaxWidth = Math.Max(120, e.NewSize.Width - 216);
 
     private static string FormatTime(double seconds)
     {
