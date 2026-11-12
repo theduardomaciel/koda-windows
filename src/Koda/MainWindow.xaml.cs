@@ -307,10 +307,18 @@ public sealed partial class MainWindow : Window
         }
 
         var scale = AppTitleBar.XamlRoot.RasterizationScale;
+        if (!double.IsFinite(scale) || scale <= 0 || !double.IsFinite(_titleScale) || _titleScale <= 0)
+        {
+            return;
+        }
+
         // The title bar content lays out at the room divided by the title scale, then is
-        // scaled back up, so its insets are in that layout space too.
-        LeftInset.Width = new GridLength(AppWindow.TitleBar.LeftInset / scale / _titleScale);
-        RightInset.Width = new GridLength(AppWindow.TitleBar.RightInset / scale / _titleScale);
+        // scaled back up, so its insets are in that layout space too. Windows reports
+        // physical pixels, and can report a negative inset while the bar is hidden or the
+        // window is changing presenter; a negative inset reserves no space.
+        var titleBar = AppWindow.TitleBar;
+        LeftInset.Width = new GridLength(Math.Max(0, titleBar.LeftInset / scale / _titleScale));
+        RightInset.Width = new GridLength(Math.Max(0, titleBar.RightInset / scale / _titleScale));
 
         var rects = new List<RectInt32>();
         foreach (var element in new FrameworkElement[] { SidebarButton, TitleSearch, TitleProfileButton, BackButton })
