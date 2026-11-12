@@ -60,16 +60,16 @@
     </Page.Resources>
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="*" />
+            <!--<RowDefinition Height="*" />-->
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- The window's title bar is extended into the page, so this transparent strip is
              the drag region where the system used to draw a white bar. It stays above the
              controls and out of their way. -->
-        <Border x:Name="DragBar" Grid.RowSpan="2" Height="24" VerticalAlignment="Top" Background="Transparent" />
+        <Border x:Name="DragBar" Grid.RowSpan="2" Height="8" VerticalAlignment="Top" Background="Transparent" />
 
-        <Grid Padding="12,24,8,8" ColumnSpacing="12">
+        <Grid Padding="12,8,8,8" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />

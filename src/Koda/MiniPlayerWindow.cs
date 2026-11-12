@@ -60,7 +60,7 @@ public sealed class MiniPlayerWindow : Window
 
         try
         {
-            appWindow.Resize(new SizeInt32(420, 156));
+            appWindow.Resize(new SizeInt32(420, 96));
         }
         catch (Exception)
         {
