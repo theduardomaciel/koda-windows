@@ -32,6 +32,8 @@ public sealed partial class SearchPage : Page
         SongMenu.Attach(TopSongsList, () => _all?.Songs ?? []);
         SongMenu.Attach(VideosList, () => _all?.Videos ?? []);
         SongMenu.Attach(FilterList, () => _filterSongs);
+        AlbumMenu.Attach(FilterList);
+        AlbumMenu.Attach(TopCard, () => _top is MusicItem.AlbumRecord album ? album.Value : null);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs args)
