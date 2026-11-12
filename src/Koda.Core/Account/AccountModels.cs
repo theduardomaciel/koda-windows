@@ -152,9 +152,10 @@ public sealed class AccountMirror
         var goneAlbums = Gone(AccountChangeKind.Album, account.Albums.Select(a => a.Id));
         var gonePlaylists = Gone(AccountChangeKind.Playlist, account.Playlists.Select(p => p.Id));
         var goneArtists = Gone(AccountChangeKind.Artist, account.Artists.Select(a => a.Id));
+        var likedOrder = account.Liked.Where(s => !removedLiked.Contains(s.Id)).ToArray();
 
         library.MergeAccount(
-            account.Liked.Where(s => !removedLiked.Contains(s.Id)).ToArray(),
+            likedOrder,
             account.Albums.Where(a => !removedAlbums.Contains(a.Id)).ToArray(),
             account.Playlists.Where(p => !removedPlaylists.Contains(p.Id)).ToArray(),
             account.Artists.Where(a => !removedArtists.Contains(a.Id)).ToArray());
@@ -171,6 +172,10 @@ public sealed class AccountMirror
             keepArtists.ExceptWith(goneArtists);
             library.DropMissing(keepLiked, keepAlbums, keepPlaylists, keepArtists);
         }
+
+        // Liked Songs follows the account's own order. A like made here but not sent yet stays
+        // ahead of it, and a song only ever liked here keeps its place after the account's songs.
+        library.OrderLiked(likedOrder, Unsent(AccountChangeKind.Liked, adding: true));
 
         Remember(account);
     }

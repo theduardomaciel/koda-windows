@@ -372,6 +372,40 @@ public sealed class Library
         return result;
     }
 
+    /// <summary>
+    /// Put the liked songs in the account's order after a sync. A like made here that has not
+    /// reached the account yet stays at the top, and anything only ever liked here follows the
+    /// account's songs, so a reorder never loses a like.
+    /// </summary>
+    public void OrderLiked(IReadOnlyList<Song> accountOrder, IReadOnlySet<string>? pendingLikes = null) =>
+        EditQuietly(s =>
+        {
+            var current = s.Liked.ToDictionary(song => song.Id, StringComparer.Ordinal);
+            var accountIds = accountOrder.Select(song => song.Id).ToHashSet(StringComparer.Ordinal);
+            var ordered = new List<Song>(s.Liked.Count);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+
+            if (pendingLikes is not null)
+            {
+                foreach (var song in s.Liked.Where(song => pendingLikes.Contains(song.Id) && !accountIds.Contains(song.Id)))
+                {
+                    if (seen.Add(song.Id)) ordered.Add(song);
+                }
+            }
+
+            foreach (var song in accountOrder)
+            {
+                if (seen.Add(song.Id)) ordered.Add(current.GetValueOrDefault(song.Id, song));
+            }
+
+            foreach (var song in s.Liked)
+            {
+                if (seen.Add(song.Id)) ordered.Add(song);
+            }
+
+            s.Liked = ordered;
+        });
+
     // MARK: Playlists made here
 
     public UserPlaylist? UserPlaylist(Guid id) { lock (_lock) return _s.UserPlaylists.Find(p => p.Id == id); }

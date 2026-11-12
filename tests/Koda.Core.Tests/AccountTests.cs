@@ -417,6 +417,22 @@ public class AccountTests
         Assert.Equal(0, changed);
     }
 
+    [Fact]
+    public void AReconcilePutsLikedSongsInTheAccountsOrderWithUnsentLikesFirst()
+    {
+        var library = new Library(null);
+        library.ToggleLike(Song("a"));
+        library.ToggleLike(Song("b"));
+        library.ToggleLike(Song("localOnly"));
+        library.ToggleLike(Song("likedOffline"));
+        var mirror = new AccountMirror { Liked = ["a", "b"] };
+        mirror.Queue(new AccountChange(AccountChangeKind.Liked, "likedOffline", true));
+
+        mirror.Reconcile(library, new AccountLibrary([Song("b"), Song("a")], [], [], []));
+
+        Assert.Equal(new[] { "likedOffline", "b", "a", "localOnly" }, library.Liked.Select(s => s.Id));
+    }
+
     // MARK: History
 
     [Fact]
