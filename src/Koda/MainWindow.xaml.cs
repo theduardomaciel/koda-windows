@@ -164,6 +164,7 @@ public sealed partial class MainWindow : Window
         App.AudioStore.Changed += () => dispatch.TryEnqueue(RefreshSidebar);
         App.Library.Changed += () => dispatch.TryEnqueue(UpdateLike);
         App.Settings.Changed += _ => dispatch.TryEnqueue(ApplySkipSettings);
+        App.Settings.Changed += _ => dispatch.TryEnqueue(RefreshNextSong);
 
         // A toast clicked while Koda was closed waited for the playback service and the
         // bar's events; now its action can run against a working app.
@@ -880,10 +881,11 @@ public sealed partial class MainWindow : Window
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(GlanceItem, label);
     }
 
-    /// <summary>The song after this one, as a row of the pane; invoked, it opens the queue.</summary>
+    /// <summary>The song after this one, as a row of the pane; invoked, it opens the queue.
+    /// The listener can keep it out of the pane with Settings' Show next song.</summary>
     private void UpdateUpNext()
     {
-        var next = Playback.Queue.Upcoming.FirstOrDefault();
+        var next = App.Settings.ShowsNextSong ? Playback.Queue.Upcoming.FirstOrDefault() : null;
         _hasUpNext = next is not null;
         UpNextTitle.Text = next?.Song.Title ?? "";
         UpNextArtist.Text = next is null || string.IsNullOrEmpty(next.Song.ArtistLine)
@@ -1272,12 +1274,20 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>What plays after this one; follows the queue as it is shuffled or reordered.</summary>
+    /// <summary>What plays after this one; follows the queue as it is shuffled or reordered.
+    /// Only shown when Settings' Show next song is on.</summary>
     private void RefreshNextUp()
     {
-        var next = Playback.CurrentSong is null ? null : Playback.NextSong;
+        var next = App.Settings.ShowsNextSong && Playback.CurrentSong is not null ? Playback.NextSong : null;
         NextUpText.Text = next is null ? "" : $"Next: {next.Title}";
         NextUpText.Visibility = next is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>The setting moves both places at once: the bar's line and the pane's row.</summary>
+    private void RefreshNextSong()
+    {
+        RefreshNextUp();
+        UpdateUpNext();
     }
 
     private void OnQueueModesChanged()
@@ -1462,6 +1472,13 @@ public sealed partial class MainWindow : Window
     {
         // Under 760 the volume goes speaker-only.
         VolumeSlider.Visibility = e.NewSize.Width < 760 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>The title and artist take the room the cover, the gaps and the heart leave;
+    /// past that they trim, so the heart stays beside the words instead of at the cell's edge.</summary>
+    private void OnTrackInfoSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        TrackInfoText.MaxWidth = Math.Max(80, e.NewSize.Width - 56 - 36 - 36);
     }
 
     // MARK: profiles

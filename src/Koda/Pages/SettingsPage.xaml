@@ -265,6 +265,27 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Show next song" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="What plays next, under the title in the player bar and as a row in the sidebar."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="NextSongSwitch"
+                            Grid.Column="1"
+                            Style="{StaticResource SettingsToggle}"
+                            AutomationProperties.Name="Show next song"
+                            Toggled="OnNextSongToggled" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="Close to the tray" Style="{ThemeResource BodyStrongTextBlockStyle}" />
                             <TextBlock
                                 Text="Closing the window keeps Koda in the notification area, still playing."

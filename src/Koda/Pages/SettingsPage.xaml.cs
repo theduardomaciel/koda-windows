@@ -100,6 +100,7 @@ public sealed partial class SettingsPage : Page
         CrossfadeSlider.IsEnabled = settings.Crossfades;
         CrossfadeValue.Text = $"{settings.CrossfadeSeconds:F0} s";
         SkipButtonsSwitch.IsOn = settings.ShowsSkipButtons;
+        NextSongSwitch.IsOn = settings.ShowsNextSong;
 
         SkipBox.Items.Clear();
         foreach (var seconds in Settings.SkipIntervals)
@@ -748,6 +749,12 @@ public sealed partial class SettingsPage : Page
     {
         if (!_loaded) return;
         App.Settings.Update(s => s.ShowsSkipButtons = SkipButtonsSwitch.IsOn);
+    }
+
+    private void OnNextSongToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded) return;
+        App.Settings.Update(s => s.ShowsNextSong = NextSongSwitch.IsOn);
     }
 
     private void OnSkipChanged(object sender, SelectionChangedEventArgs e)

@@ -1,14 +1,17 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Numerics;
 using Koda.Core;
 using Koda.Helpers;
 using Koda.Playback;
 using Koda.Services;
 using Microsoft.UI;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
@@ -59,11 +62,15 @@ public sealed partial class NowPlayingPage : Page
 
     private string? _lyricsFor;
 
+    /// <summary>The lyrics fade is a composition mask, built once the page has a XamlRoot.</summary>
+    private bool _lyricsMasked;
+
     public NowPlayingPage()
     {
         InitializeComponent();
         UpNext.ItemsSource = _upcoming;
         UpNext.ContextRequested += OnUpNextContext;
+        Loaded += (_, _) => EnsureLyricsMask();
 
         var escape = new KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
         escape.Invoked += (_, args) =>
@@ -129,6 +136,7 @@ public sealed partial class NowPlayingPage : Page
         RenderQueue();
         RenderPlayState();
         ApplyLayout();
+        EnsureLyricsMask();
         if (_lyricsOpen)
         {
             // The panel was left open when the page was closed: it starts following again.
@@ -252,6 +260,48 @@ public sealed partial class NowPlayingPage : Page
 
         _lyrics?.PlayEntrance();
     }
+
+    /// <summary>
+    /// The lyrics fade is a real alpha mask: the panel is rendered into a composition
+    /// surface and drawn back through a white-to-transparent gradient, so the words go
+    /// transparent over the blurred cover instead of darkening it with a black wash.
+    /// </summary>
+    private void EnsureLyricsMask()
+    {
+        if (_lyricsMasked || LyricsView.XamlRoot is null)
+        {
+            return;
+        }
+
+        _lyricsMasked = true;
+        var compositor = ElementCompositionPreview.GetElementVisual(LyricsView).Compositor;
+
+        CompositionSurfaceBrush Capture(UIElement element)
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(element);
+            var surface = compositor.CreateVisualSurface();
+            surface.SourceVisual = visual;
+            var size = compositor.CreateExpressionAnimation($"{nameof(visual)}.Size");
+            size.SetReferenceParameter(nameof(visual), visual);
+            surface.StartAnimation(nameof(surface.SourceSize), size);
+
+            // The surface keeps the element's rendered pixels; the element itself is
+            // hidden, so its copy is only ever seen through the mask.
+            var brush = compositor.CreateSurfaceBrush(surface);
+            visual.Opacity = 0;
+            return brush;
+        }
+
+        var mask = compositor.CreateMaskBrush();
+        mask.Source = Capture(LyricsMaskedContent);
+        mask.Mask = Capture(LyricsMask);
+
+        var sprite = compositor.CreateSpriteVisual();
+        sprite.RelativeSizeAdjustment = Vector2.One;
+        sprite.Brush = mask;
+        ElementCompositionPreview.SetElementChildVisual(LyricsView, sprite);
+    }
+
     /// <summary>The background takes the cover's three strongest colours.</summary>
     private async System.Threading.Tasks.Task PaintAsync(Song song)
     {
@@ -640,6 +690,7 @@ public sealed partial class NowPlayingPage : Page
         }
 
         ApplyLayout();
+        EnsureLyricsMask();
         if (_lyricsOpen)
         {
             _lyrics?.PlayEntrance();
@@ -777,12 +828,17 @@ public sealed partial class NowPlayingPage : Page
 
         if (want == PanelPlace.Narrow)
         {
+            LyricsView.Margin = new Thickness(0);
             NarrowLyricsHost.Content = LyricsView;
         }
         else
         {
+            // From the page's top edge to its bottom edge: the panel's own column, with
+            // the layout's padding taken back, so the words fade at the real edges.
+            LyricsView.Margin = new Thickness(0, -Layout.Padding.Top, 0, -Layout.Padding.Bottom);
             Layout.Children.Add(LyricsView);
-            Grid.SetRow(LyricsView, 1);
+            Grid.SetRow(LyricsView, 0);
+            Grid.SetRowSpan(LyricsView, 2);
             Grid.SetColumn(LyricsView, 1);
         }
 

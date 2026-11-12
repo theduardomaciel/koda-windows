@@ -287,6 +287,10 @@ public sealed class Settings
     /// <summary>Buttons beside previous and next jump back or ahead within the song.</summary>
     public bool ShowsSkipButtons { get; set; } = true;
 
+    /// <summary>The next song under the title in the player bar, and as a row in the sidebar.
+    /// Off by default: the bar and the pane keep to what is playing until it is asked for.</summary>
+    public bool ShowsNextSong { get; set; }
+
     /// <summary>How far those buttons jump. Only the four the settings offer are kept;
     /// anything else reads as ten seconds, the Mac's default.</summary>
     public int SkipSeconds

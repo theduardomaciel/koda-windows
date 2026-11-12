@@ -24,6 +24,9 @@ public sealed partial class MiniPlayerPage : Page
     /// <summary>Raised when the listener asks for the full window.</summary>
     public event Action? RestoreRequested;
 
+    /// <summary>The strip the window hands to Windows as its drag region.</summary>
+    public FrameworkElement DragRegion => DragBar;
+
     private PlaybackService Playback => PlaybackService.Instance;
 
     public MiniPlayerPage()
