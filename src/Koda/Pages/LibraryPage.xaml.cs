@@ -33,6 +33,7 @@ public sealed partial class LibraryPage : Page
     {
         InitializeComponent();
         SongMenu.Attach(Items, () => _songs);
+        ArtistMenu.Attach(Items);
         App.Library.Changed += OnLibraryChanged;
         Unloaded += (_, _) => App.Library.Changed -= OnLibraryChanged;
     }

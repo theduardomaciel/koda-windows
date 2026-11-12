@@ -23,6 +23,7 @@ public sealed partial class LibraryGridPage : Page
     {
         InitializeComponent();
         AlbumMenu.Attach(Cards);
+        ArtistMenu.Attach(Cards);
         App.Library.Changed += OnLibraryChanged;
         Unloaded += (_, _) => App.Library.Changed -= OnLibraryChanged;
     }

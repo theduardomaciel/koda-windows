@@ -114,6 +114,7 @@ public sealed partial class ShelvesView : UserControl
             list.Tag = "menu";
             SongMenu.Attach(list, () => list.DataContext is ShelfView shelf ? shelf.Songs : []);
             AlbumMenu.Attach(list);
+            ArtistMenu.Attach(list);
             ApplyContentInset(list);
             list.AddHandler(PointerWheelChangedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler(OnShelfWheel), true);
 
