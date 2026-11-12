@@ -17,6 +17,16 @@ namespace Koda.Controls;
 /// </summary>
 public sealed class LikeButton : Button
 {
+    /// <summary>Set on a list whose rows should not show like hearts (Home's Quick picks).
+    /// The rows share their template with places that do show them, so the list, not the
+    /// row, decides.</summary>
+    public static readonly DependencyProperty HideInRowsProperty = DependencyProperty.RegisterAttached(
+        "HideInRows", typeof(bool), typeof(LikeButton), new PropertyMetadata(false));
+
+    public static void SetHideInRows(DependencyObject element, bool value) => element.SetValue(HideInRowsProperty, value);
+
+    public static bool GetHideInRows(DependencyObject element) => (bool)element.GetValue(HideInRowsProperty);
+
     private readonly FontIcon _icon = new() { Glyph = "\uEB51", FontSize = 15 };
     private bool _attached;
 
@@ -37,6 +47,20 @@ public sealed class LikeButton : Button
     }
 
     private Song? CurrentSong => SongMenu.SongOf(DataContext);
+
+    /// <summary>Whether a list above this row asked for hearts to stay hidden.</summary>
+    private bool HiddenByAncestor()
+    {
+        for (var node = VisualTreeHelper.GetParent(this); node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (GetHideInRows(node))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private void Attach()
     {
@@ -60,7 +84,7 @@ public sealed class LikeButton : Button
 
     private void Render()
     {
-        if (CurrentSong is not { } song)
+        if (CurrentSong is not { } song || HiddenByAncestor())
         {
             Visibility = Visibility.Collapsed;
             return;

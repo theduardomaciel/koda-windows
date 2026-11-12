@@ -24,6 +24,7 @@
             <!-- Buttons derived from Button do not pick up its implicit style; give the download
                  button the native Fluent template, its rounding and hover states. -->
             <Style TargetType="controls:DownloadButton" BasedOn="{StaticResource DefaultButtonStyle}" />
+            <Style TargetType="controls:LikeButton" BasedOn="{StaticResource DefaultButtonStyle}" />
 
             <!-- Dense catalog rows: 56 tall, no hover inflation. -->
             <Style x:Key="CatalogRowStyle" TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
@@ -80,8 +81,10 @@
                             <TextBlock Text="Video" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </Border>
                         <controls:DownloadIndicator VerticalAlignment="Center" />
-                        <controls:LikeButton VerticalAlignment="Center" />
-                        <TextBlock MinWidth="40" TextAlignment="Right" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="4">
+                            <controls:LikeButton VerticalAlignment="Center" />
+                            <TextBlock MinWidth="40" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </DataTemplate>
@@ -108,7 +111,7 @@
                         <TextBlock Text="{Binding ArtistLine}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     </StackPanel>
                     <TextBlock Grid.Column="3" Text="{Binding AlbumTitle}" VerticalAlignment="Center" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4">
                         <controls:LikeButton VerticalAlignment="Center" />
                         <TextBlock MinWidth="40" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                     </StackPanel>
@@ -128,7 +131,7 @@
                         <TextBlock Text="{Binding Title}" Style="{ThemeResource BodyTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                         <TextBlock Text="{Binding ArtistLine}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                     </StackPanel>
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="4">
                         <controls:LikeButton VerticalAlignment="Center" />
                         <TextBlock MinWidth="40" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding Duration, Converter={StaticResource SecondsText}}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                     </StackPanel>

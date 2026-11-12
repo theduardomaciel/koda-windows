@@ -103,6 +103,7 @@
                             Loaded="OnPicksLoaded"
                             ScrollViewer.VerticalScrollMode="Disabled"
                             ScrollViewer.HorizontalScrollMode="Disabled"
+                            controls:LikeButton.HideInRows="True"
                             ItemTemplate="{StaticResource SongRowTemplate}">
                             <GridView.ItemContainerStyle>
                                 <Style TargetType="GridViewItem" BasedOn="{StaticResource DefaultGridViewItemStyle}">
