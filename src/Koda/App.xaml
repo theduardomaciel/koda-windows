@@ -21,6 +21,10 @@
             <CornerRadius x:Key="ListViewItemCornerRadius">8</CornerRadius>
             <CornerRadius x:Key="GridViewItemCornerRadius">8</CornerRadius>
 
+            <!-- Buttons derived from Button do not pick up its implicit style; give the download
+                 button the native Fluent template, its rounding and hover states. -->
+            <Style TargetType="controls:DownloadButton" BasedOn="{StaticResource DefaultButtonStyle}" />
+
             <!-- Dense catalog rows: 56 tall, no hover inflation. -->
             <Style x:Key="CatalogRowStyle" TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
                 <Setter Property="MinHeight" Value="56" />

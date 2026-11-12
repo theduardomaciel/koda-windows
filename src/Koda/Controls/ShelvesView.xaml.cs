@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Koda.Helpers;
@@ -10,6 +11,11 @@ namespace Koda.Controls;
 /// <summary>Rows of covers (Home, a mood, an artist's releases): a tap opens or plays, right-click on a song offers its menu.</summary>
 public sealed partial class ShelvesView : UserControl
 {
+    /// <summary>The inset of each shelf's title and covers from this control's edges.</summary>
+    public static readonly DependencyProperty ContentInsetProperty = DependencyProperty.Register(
+        nameof(ContentInset), typeof(double), typeof(ShelvesView),
+        new PropertyMetadata(32d, OnContentInsetChanged));
+
     public ShelvesView()
     {
         InitializeComponent();
@@ -19,6 +25,78 @@ public sealed partial class ShelvesView : UserControl
     {
         get => ShelfList.ItemsSource as IReadOnlyList<ShelfView> ?? [];
         set => ShelfList.ItemsSource = value;
+    }
+
+    /// <summary>
+    /// The inset of each shelf's title and covers from this control's edges. The default
+    /// matches the full-bleed shelves on Home; a page that already pads its content sets
+    /// this to <c>0</c> so its shelves share that same margin.
+    /// </summary>
+    public double ContentInset
+    {
+        get => (double)GetValue(ContentInsetProperty);
+        set => SetValue(ContentInsetProperty, value);
+    }
+
+    private static void OnContentInsetChanged(DependencyObject sender, DependencyPropertyChangedEventArgs args) =>
+        ((ShelvesView)sender).ApplyContentInset();
+
+    /// <summary>Lay out each realized shelf so its title and covers both land on <see cref="ContentInset"/>.</summary>
+    private void ApplyContentInset()
+    {
+        foreach (var list in Lists(ShelfList))
+        {
+            ApplyContentInset(list);
+        }
+    }
+
+    private void ApplyContentInset(ListView list)
+    {
+        if (FindShelfRow(list) is not { } row)
+        {
+            return;
+        }
+
+        var inset = Math.Max(0, ContentInset);
+        // CardItemStyle's Padding and right Margin; see docs/card-layout.md.
+        var left = Outer(inset, 12);
+        var right = Outer(inset, 9);
+        list.Padding = new Thickness(left.Padding, 0, right.Padding, 0);
+        list.Margin = new Thickness(left.Margin, 0, right.Margin, 0);
+
+        if (Find(row, "ShelfTitle") is FrameworkElement title)
+        {
+            title.Margin = new Thickness(inset, 0, 0, 0);
+        }
+
+        if (Find(row, "ShelfButtons") is FrameworkElement buttons)
+        {
+            buttons.Margin = new Thickness(0, 0, inset, 0);
+        }
+    }
+
+    /// <summary>The outer padding, or a margin when the hover bleed is wider than the inset.</summary>
+    private static (double Padding, double Margin) Outer(double inset, double itemInset)
+    {
+        var outer = inset - itemInset;
+        return outer >= 0 ? (outer, 0) : (0, outer);
+    }
+
+    private static IEnumerable<ListView> Lists(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ListView list)
+            {
+                yield return list;
+            }
+
+            foreach (var nested in Lists(child))
+            {
+                yield return nested;
+            }
+        }
     }
 
     private void OnCardClick(object sender, ItemClickEventArgs args)
@@ -36,6 +114,7 @@ public sealed partial class ShelvesView : UserControl
             list.Tag = "menu";
             SongMenu.Attach(list, () => list.DataContext is ShelfView shelf ? shelf.Songs : []);
             AlbumMenu.Attach(list);
+            ApplyContentInset(list);
             list.AddHandler(PointerWheelChangedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler(OnShelfWheel), true);
 
             if (FindShelfRow(list) is { } row && Descendant<ScrollViewer>(list) is { } scroller)

@@ -23,7 +23,7 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel VerticalAlignment="Bottom" Margin="32,0,0,0">
+                    <StackPanel x:Name="ShelfTitle" VerticalAlignment="Bottom" Margin="32,0,0,0">
                         <TextBlock
                             Text="{Binding Strapline}"
                             Style="{ThemeResource CaptionTextBlockStyle}"
@@ -33,7 +33,7 @@
                     </StackPanel>
 
                     <!-- Wheel scrolls the page; these step the shelf a screen at a time. -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Bottom" Margin="0,0,32,0">
+                    <StackPanel x:Name="ShelfButtons" Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Bottom" Margin="0,0,32,0">
                         <Button x:Name="StepLeftButton" Width="32" Height="32" Padding="0" IsEnabled="False" Click="OnStepLeft" ToolTipService.ToolTip="Scroll left" AutomationProperties.Name="Scroll shelf left">
                             <FontIcon Glyph="&#xE76B;" FontSize="12" />
                         </Button>

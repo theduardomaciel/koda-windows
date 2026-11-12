@@ -23,7 +23,7 @@ public sealed class DownloadButton : Button
 
     public DownloadButton()
     {
-        Padding = new Thickness(14, 7, 14, 7);
+        Padding = new Thickness(18, 7, 18, 7);
         Content = new StackPanel
         {
             Orientation = Orientation.Horizontal,

@@ -63,7 +63,7 @@
                 </StackPanel>
             </ListView.Header>
             <ListView.Footer>
-                <controls:ShelvesView x:Name="Versions" Margin="12,28,12,0" />
+                <controls:ShelvesView x:Name="Versions" Margin="0,28,0,0" ContentInset="0" />
             </ListView.Footer>
         </ListView>
 

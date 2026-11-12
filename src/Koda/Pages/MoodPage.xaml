@@ -8,7 +8,7 @@
         <ScrollViewer>
             <StackPanel Margin="26,16,26,32" Spacing="20">
                 <TextBlock x:Name="TitleText" Style="{ThemeResource TitleTextBlockStyle}" />
-                <controls:ShelvesView x:Name="Shelves" />
+                <controls:ShelvesView x:Name="Shelves" ContentInset="0" />
                 <ContentPresenter x:Name="SkeletonHost" />
             </StackPanel>
         </ScrollViewer>

@@ -66,7 +66,8 @@
                         ItemTemplate="{StaticResource TrackRowTemplate}" />
                 </StackPanel>
 
-                <controls:ShelvesView x:Name="Releases" />
+                <!-- The page already supplies the content margin; shelves share it instead of adding their own. -->
+                <controls:ShelvesView x:Name="Releases" ContentInset="0" />
 
                 <StackPanel x:Name="AboutSection" Spacing="10" MaxWidth="820" HorizontalAlignment="Left">
                     <TextBlock Text="About" Style="{ThemeResource SubtitleTextBlockStyle}" />

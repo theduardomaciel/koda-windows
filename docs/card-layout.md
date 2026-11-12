@@ -19,7 +19,8 @@ The short version:
 |---|---|---|
 | `Padding` | `src/Koda/App.xaml`, `CardItemStyle`, `LibraryCardItemStyle` / `CardGridItemStyle` | Space inside each item cell, between the cell edge and the cover. Also controls how much hover background surrounds the cover. |
 | `Margin` | Same styles | Space between item cells. In a shelf this is the horizontal gap; in a grid it is the column/row gap. |
-| `ListView.Padding` | `src/Koda/Controls/ShelvesView.xaml` | Outer left/right padding of a shelf row. |
+| `ContentInset` | `src/Koda/Controls/ShelvesView.xaml.cs` | Inset of a shelf's title and covers from the control's edges (`32` by default). Pages that already pad their content set it to `0`. |
+| `ListView.Padding` / `Margin` | `src/Koda/Controls/ShelvesView.xaml.cs` | Outer space around a shelf row, calculated from `ContentInset` and the card metrics. |
 | `GridView.Margin` / `GridView.Padding` | `src/Koda/Pages/LibraryGridPage.xaml` | Outer alignment and available width of the library grid. |
 | `StackPanel Spacing` | `ShelvesView.xaml` | Vertical distance between shelves. |
 | `Grid RowSpacing` | `ShelvesView.xaml` | Distance between a shelf title and its cards. |
@@ -42,7 +43,7 @@ Shelf cards (`ListViewItem`):
 </Style>
 ```
 
-Shelf list (`ShelvesView.xaml`):
+Shelf list (`ShelvesView.xaml`, default `ContentInset="32"`):
 
 ```xml
 <StackPanel Spacing="22" />          <!-- between shelves -->
@@ -50,6 +51,12 @@ Shelf list (`ShelvesView.xaml`):
 <StackPanel ... Margin="0,0,32,0">   <!-- scroll buttons -->
 <ListView Padding="20,0,23,0" ...>
 ```
+
+`ShelvesView` calculates the title margin, list padding and scroll-button
+margin from `ContentInset`. With the default `32` the values are the ones
+shown above; with `ContentInset="0"` the title and covers sit on the control's
+edges, and the list's outer space moves into a negative margin so the hover
+bleed can extend into the page's own padding.
 
 Library grid (`GridViewItem`):
 
@@ -158,9 +165,11 @@ Current values:
    - A good default is `P = C`, the cover radius.
    - For shelves, `M` is negative to compensate for the native hover inset.
 3. Compute the outer padding per side: `T - P - M`.
-4. Update `CardItemStyle` and `ShelvesView.xaml`. For the library grid, update
-   `LibraryCardItemStyle` and `LibraryGridPage.xaml`.
-5. Keep the scroll buttons' right margin equal to `T`.
+4. Update `CardItemStyle` and `ShelvesView`'s `ContentInset` (its default is the
+   shelf target `T = 32`). For the library grid, update `LibraryCardItemStyle`
+   and `LibraryGridPage.xaml`.
+5. Keep the scroll buttons' right margin equal to `T`; `ContentInset` applies
+   it to both the title and the buttons.
 6. Recompute vertical spacing if you changed `P`:
    - `RowSpacing = desired title-to-cover - P.Top`
    - `StackPanel.Spacing = desired text-to-next-title - P.Bottom`
@@ -242,3 +251,8 @@ releases, Mood, and Search. Changing it changes all shelves, not just Home.
 `ShelvesView.xaml` hard-codes `ItemContainerStyle="{StaticResource
 CardItemStyle}"`. If Home ever needs different metrics, add a configurable
 style/DP to `ShelvesView` rather than duplicating the control.
+
+Home leaves `ContentInset` at `32`, because its shelves are full-bleed. Pages
+that wrap a `ShelvesView` in their own 26 px content margin (Artist, Album,
+Mood, Search) set `ContentInset="0"`, so their shelf titles and covers share
+that page margin instead of adding another 32 px.

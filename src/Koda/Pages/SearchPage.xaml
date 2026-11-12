@@ -121,7 +121,7 @@
                     </StackPanel>
                 </Grid>
 
-                <controls:ShelvesView x:Name="KindShelves" />
+                <controls:ShelvesView x:Name="KindShelves" ContentInset="0" />
 
                 <StackPanel x:Name="VideosSection" Spacing="10">
                     <TextBlock Text="Videos" Style="{ThemeResource SubtitleTextBlockStyle}" />
