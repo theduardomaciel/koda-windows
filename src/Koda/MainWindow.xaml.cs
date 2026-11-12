@@ -2008,6 +2008,32 @@ public sealed partial class MainWindow : Window
         mini.Activate();
     }
 
+    /// <summary>Bring the library forward with Now Playing showing, optionally with one of
+    /// its side panels open. The mini player uses this as its way out.</summary>
+    public void ShowNowPlaying(string? panel = null)
+    {
+        ShowFromTray();
+        if (Playback.CurrentSong is null)
+        {
+            return;
+        }
+
+        if (ContentFrame.Content is NowPlayingPage open)
+        {
+            if (panel is not null)
+            {
+                open.OpenPanel(panel);
+            }
+
+            return;
+        }
+
+        ContentFrame.Navigate(
+            typeof(NowPlayingPage),
+            panel,
+            new Microsoft.UI.Xaml.Media.Animation.DrillInNavigationTransitionInfo());
+    }
+
     private VideoPipWindow? _videoPip;
 
     /// <summary>The video in its own always-on-top overlay; a second request toggles it closed.</summary>

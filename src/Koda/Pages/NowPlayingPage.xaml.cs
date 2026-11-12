@@ -120,6 +120,13 @@ public sealed partial class NowPlayingPage : Page
             _queueOpen = true;
             _lyricsOpen = false;
         }
+        else if (args.Parameter is "lyrics")
+        {
+            // The mini player's lyrics button asks for the words directly. The same
+            // one-column rule applies: the queue goes away when the lyrics arrive.
+            _lyricsOpen = true;
+            _queueOpen = false;
+        }
 
         Playback.TrackChanged += OnTrackChanged;
         Playback.QueueChanged += OnQueueChanged;
@@ -670,25 +677,18 @@ public sealed partial class NowPlayingPage : Page
 
     private void OnRetryClick(object sender, RoutedEventArgs e) => Playback.Toggle();
 
-    private void OnQueueToggleClick(object sender, RoutedEventArgs e)
+    private void OnQueueToggleClick(object sender, RoutedEventArgs e) =>
+        OpenPanel(QueueToggle.IsChecked == true ? "queue" : null);
+
+    private void OnLyricsToggleClick(object sender, RoutedEventArgs e) =>
+        OpenPanel(LyricsToggle.IsChecked == true ? "lyrics" : null);
+
+    /// <summary>Open one of the side panels, or close both. The mini player asks for one
+    /// when the page is already showing, so this does not need a fresh navigation.</summary>
+    public void OpenPanel(string? panel)
     {
-        _queueOpen = QueueToggle.IsChecked == true;
-        if (_queueOpen)
-        {
-            _lyricsOpen = false;
-        }
-
-        ApplyLayout();
-    }
-
-    private void OnLyricsToggleClick(object sender, RoutedEventArgs e)
-    {
-        _lyricsOpen = LyricsToggle.IsChecked == true;
-        if (_lyricsOpen)
-        {
-            _queueOpen = false;
-        }
-
+        _queueOpen = panel is "queue";
+        _lyricsOpen = panel is "lyrics";
         ApplyLayout();
         EnsureLyricsMask();
         if (_lyricsOpen)

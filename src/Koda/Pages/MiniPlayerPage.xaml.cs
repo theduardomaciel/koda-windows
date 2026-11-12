@@ -1,28 +1,36 @@
 using System;
+using System.Linq;
 using Koda.Core;
 using Koda.Helpers;
 using Koda.Playback;
-using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Windows.UI;
 
 namespace Koda.Pages;
 
 /// <summary>
-/// The compact overlay's surface: the cover, what is playing, and the only controls a
-/// window this size needs. It follows the player like the bar does, and its one exit is
-/// the full window, because Windows already gives the overlay a close button.
+/// The compact overlay's surface: the cover, what is playing, the seek bar, and the few
+/// controls a window this size needs. It follows the player like the bar does, and its way
+/// out is the full Now Playing page, because Windows already gives the overlay a close button.
 /// </summary>
 public sealed partial class MiniPlayerPage : Page
 {
     private bool _attached;
+    private bool _scrubbing;
+    private bool _suppressVolume;
+    private bool _volumeDirty;
+    private DispatcherQueueTimer? _volumeSave;
 
-    /// <summary>Raised when the listener asks for the full window.</summary>
-    public event Action? RestoreRequested;
+    /// <summary>Raised when the listener asks for the full player. The argument is the
+    /// panel to open there: <c>"lyrics"</c>, <c>"queue"</c>, or null for the player itself.</summary>
+    public event Action<string?>? FullPlayerRequested;
+
+    /// <summary>Raised when the listener minimizes the overlay.</summary>
+    public event Action? MinimizeRequested;
 
     /// <summary>The strip the window hands to Windows as its drag region.</summary>
     public FrameworkElement DragRegion => DragBar;
@@ -33,11 +41,25 @@ public sealed partial class MiniPlayerPage : Page
     {
         InitializeComponent();
         Attach();
+
+        _volumeSave = DispatcherQueue.CreateTimer();
+        _volumeSave.Interval = TimeSpan.FromMilliseconds(300);
+        _volumeSave.IsRepeating = false;
+        _volumeSave.Tick += (_, _) =>
+        {
+            _volumeDirty = false;
+            App.SetVolume(VolumeSlider.Value);
+        };
+
+        VolumeSlider.Value = App.Volume;
+        VolumeSlider.ValueChanged += OnVolumeChanged;
+
+        Scrubbing.Attach(Progress, on => _scrubbing = on, Playback.SeekSeconds);
+
         RenderTrack();
         RenderPlayState();
         RenderPosition();
-
-        ActualThemeChanged += (_, _) => RenderLike();
+        RenderVolume();
     }
 
     private void Attach()
@@ -51,7 +73,8 @@ public sealed partial class MiniPlayerPage : Page
         Playback.TrackChanged += OnTrackChanged;
         Playback.PlayStateChanged += OnPlayStateChanged;
         Playback.PositionTick += OnPositionTick;
-        App.Library.Changed += OnLibraryChanged;
+        Playback.QueueChanged += OnQueueChanged;
+        App.Settings.Changed += OnSettingsChanged;
         Unloaded += OnUnloaded;
     }
 
@@ -67,8 +90,22 @@ public sealed partial class MiniPlayerPage : Page
         Playback.TrackChanged -= OnTrackChanged;
         Playback.PlayStateChanged -= OnPlayStateChanged;
         Playback.PositionTick -= OnPositionTick;
-        App.Library.Changed -= OnLibraryChanged;
+        Playback.QueueChanged -= OnQueueChanged;
+        App.Settings.Changed -= OnSettingsChanged;
         Unloaded -= OnUnloaded;
+
+        // A volume change made just before closing should still be the one the next
+        // launch opens with, even if the debounce had not fired yet.
+        if (_volumeDirty)
+        {
+            _volumeSave?.Stop();
+            _volumeDirty = false;
+            App.SetVolume(VolumeSlider.Value);
+        }
+        else
+        {
+            _volumeSave?.Stop();
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e) => Detach();
@@ -79,7 +116,9 @@ public sealed partial class MiniPlayerPage : Page
 
     private void OnPositionTick() => RenderPosition();
 
-    private void OnLibraryChanged() => DispatcherQueue.TryEnqueue(RenderLike);
+    private void OnQueueChanged() => RenderPlayState();
+
+    private void OnSettingsChanged(Settings settings) => DispatcherQueue.TryEnqueue(RenderVolume);
 
     private void RenderTrack()
     {
@@ -88,12 +127,8 @@ public sealed partial class MiniPlayerPage : Page
         ArtistText.Text = song?.ArtistLine ?? "";
         Art.SetSource(CoverImage, song?.Artwork);
         CoverGlyph.Visibility = song?.Artwork is null ? Visibility.Visible : Visibility.Collapsed;
-        LikeButton.Visibility = song is null ? Visibility.Collapsed : Visibility.Visible;
 
-        PreviousButton.IsEnabled = song is not null;
-        PlayButton.IsEnabled = song is not null;
-        NextButton.IsEnabled = Playback.CanNext;
-        RenderLike();
+        RenderPlayState();
         RenderPosition();
     }
 
@@ -107,34 +142,99 @@ public sealed partial class MiniPlayerPage : Page
         LoadingRing.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
         ToolTipService.SetToolTip(PlayButton, playing ? "Pause" : "Play");
         AutomationProperties.SetName(PlayButton, playing ? "Pause" : "Play");
-        PlayButton.IsEnabled = Playback.CurrentSong is not null;
+
+        var hasSong = Playback.CurrentSong is not null;
+        PreviousButton.IsEnabled = hasSong;
+        PlayButton.IsEnabled = hasSong;
         NextButton.IsEnabled = Playback.CanNext;
+        MoreButton.IsEnabled = hasSong;
+        LyricsButton.IsEnabled = hasSong;
+        QueueButton.IsEnabled = hasSong;
     }
 
     private void RenderPosition()
     {
         var duration = Playback.DurationSeconds;
-        var position = Playback.PositionSeconds;
-        Progress.Visibility = duration > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var hasDuration = duration > 0;
+
+        Progress.IsEnabled = hasDuration;
+        if (_scrubbing)
+        {
+            return;
+        }
+
         Progress.Maximum = Math.Max(1, duration);
-        Progress.Value = Math.Clamp(position, 0, Progress.Maximum);
-        PositionText.Text = duration > 0
-            ? $"{FormatTime(position)} / {FormatTime(duration)}"
-            : "";
+        Progress.Value = hasDuration ? Math.Clamp(Playback.PositionSeconds, 0, duration) : 0;
+        UpdateTimes(Progress.Value, duration);
     }
 
-    private void RenderLike()
+    private void OnProgressChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        var liked = Playback.CurrentSong is { } song && App.Library.IsLiked(song);
-        LikeIcon.Glyph = liked ? "\uEB52" : "\uEB51";
-        LikeIcon.Foreground = liked
-            ? new SolidColorBrush(Color.FromArgb(255, 0xFF, 0x4F, 0x8B))
-            : new SolidColorBrush(ActualTheme == ElementTheme.Dark
-                ? Colors.White
-                : Color.FromArgb(255, 0x20, 0x20, 0x20));
-        var label = liked ? "Remove from Liked" : "Add to Liked";
-        ToolTipService.SetToolTip(LikeButton, label);
-        AutomationProperties.SetName(LikeButton, label);
+        if (_scrubbing)
+        {
+            UpdateTimes(e.NewValue, Playback.DurationSeconds);
+        }
+    }
+
+    private void UpdateTimes(double position, double duration)
+    {
+        if (duration <= 0)
+        {
+            ElapsedText.Text = "";
+            RemainingText.Text = "";
+            return;
+        }
+
+        ElapsedText.Text = FormatTime(position);
+        RemainingText.Text = "-" + FormatTime(Math.Max(0, duration - position));
+    }
+
+    private void RenderVolume()
+    {
+        var muted = Playback.IsMuted || App.Volume <= 0;
+        var glyph = muted ? "\uE74F" : "\uE767";
+        VolumeIcon.Glyph = glyph;
+        MuteIcon.Glyph = glyph;
+
+        var label = Playback.IsMuted ? "Unmute" : "Mute";
+        ToolTipService.SetToolTip(MuteButton, label);
+        AutomationProperties.SetName(MuteButton, label);
+    }
+
+    private void OnVolumeFlyoutOpening(object sender, object e)
+    {
+        _suppressVolume = true;
+        VolumeSlider.Value = App.Volume;
+        _suppressVolume = false;
+        RenderVolume();
+    }
+
+    private void OnVolumeChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressVolume)
+        {
+            return;
+        }
+
+        Playback.SetVolumePercent(e.NewValue);
+        _volumeDirty = true;
+        _volumeSave?.Stop();
+        _volumeSave?.Start();
+    }
+
+    private void OnMuteClick(object sender, RoutedEventArgs e)
+    {
+        Playback.SetMuted(!Playback.IsMuted);
+        RenderVolume();
+    }
+
+    private void OnMoreClick(object sender, RoutedEventArgs e)
+    {
+        if (Playback.CurrentSong is { } song)
+        {
+            var menu = SongMenu.Build(song, Playback.Queue.Items.Select(i => i.Song).ToArray());
+            menu.ShowAt(MoreButton);
+        }
     }
 
     private void OnPreviousClick(object sender, RoutedEventArgs e) => _ = Playback.PreviousAsync();
@@ -143,21 +243,29 @@ public sealed partial class MiniPlayerPage : Page
 
     private void OnNextClick(object sender, RoutedEventArgs e) => _ = Playback.NextAsync();
 
-    private void OnLikeClick(object sender, RoutedEventArgs e)
-    {
-        if (Playback.CurrentSong is { } song)
-        {
-            App.Library.ToggleLike(song);
-        }
-    }
+    private void OnLyricsClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke("lyrics");
 
-    private void OnRestoreClick(object sender, RoutedEventArgs e) => RestoreRequested?.Invoke();
+    private void OnQueueClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke("queue");
 
-    private void OnRestoreTapped(object sender, DoubleTappedRoutedEventArgs e) => RestoreRequested?.Invoke();
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) => MinimizeRequested?.Invoke();
+
+    private void OnRestoreClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
+
+    private void OnRestoreTapped(object sender, DoubleTappedRoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
+
+    /// <summary>The native caption buttons float over the page's top-right; the window
+    /// measures their width so the app's own full-player button can sit beside them.</summary>
+    public void SetCaptionInset(double width) =>
+        CaptionInset.Width = Math.Max(0, width);
+
+    /// <summary>The title block centers on the card, so its cap is the page width minus
+    /// the cover and the same margin on the other side.</summary>
+    private void OnSizeChanged(object sender, SizeChangedEventArgs e) =>
+        TitleBlock.MaxWidth = Math.Max(120, e.NewSize.Width - 240);
 
     private static string FormatTime(double seconds)
     {
-        var total = (long)Math.Round(Math.Max(0, seconds));
+        var total = (long)Math.Floor(Math.Max(0, seconds));
         var hours = total / 3600;
         var minutes = total % 3600 / 60;
         var secs = total % 60;

@@ -6,223 +6,296 @@
     xmlns:helpers="using:Koda.Helpers"
     Background="Transparent">
     <Page.Resources>
-        <!-- A true circle: the accent style's corner radius is replaced with an Ellipse,
-             so a 36px button stays round at every DPI and its hover state never squares off. -->
-        <Style x:Key="RoundAccentPlayButton" TargetType="Button">
+        <!-- The mini player's glyph buttons: flat, round on hover, and the same at every DPI. -->
+        <Style x:Key="MiniGlyphButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
             <Setter Property="Width" Value="36" />
             <Setter Property="Height" Value="36" />
             <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
-            <Setter Property="Foreground" Value="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Grid Background="Transparent">
-                            <Ellipse x:Name="Fill" Fill="{TemplateBinding Background}" />
-                            <ContentPresenter
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Content="{TemplateBinding Content}"
-                                ContentTemplate="{TemplateBinding ContentTemplate}"
-                                Foreground="{TemplateBinding Foreground}" />
-                            <VisualStateManager.VisualStateGroups>
-                                <VisualStateGroup x:Name="CommonStates">
-                                    <VisualState x:Name="Normal" />
-                                    <VisualState x:Name="PointerOver">
-                                        <Storyboard>
-                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="Fill" Storyboard.TargetProperty="Fill">
-                                                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource AccentFillColorSecondaryBrush}" />
-                                            </ObjectAnimationUsingKeyFrames>
-                                        </Storyboard>
-                                    </VisualState>
-                                    <VisualState x:Name="Pressed">
-                                        <Storyboard>
-                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="Fill" Storyboard.TargetProperty="Fill">
-                                                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource AccentFillColorTertiaryBrush}" />
-                                            </ObjectAnimationUsingKeyFrames>
-                                        </Storyboard>
-                                    </VisualState>
-                                    <VisualState x:Name="Disabled">
-                                        <Storyboard>
-                                            <ObjectAnimationUsingKeyFrames Storyboard.TargetName="Fill" Storyboard.TargetProperty="Fill">
-                                                <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource AccentFillColorDisabledBrush}" />
-                                            </ObjectAnimationUsingKeyFrames>
-                                        </Storyboard>
-                                    </VisualState>
-                                </VisualStateGroup>
-                            </VisualStateManager.VisualStateGroups>
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
+            <Setter Property="CornerRadius" Value="18" />
+        </Style>
+        <Style x:Key="MiniTransportButton" TargetType="Button" BasedOn="{StaticResource MiniGlyphButton}">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="CornerRadius" Value="20" />
+        </Style>
+        <Style x:Key="MiniPlayButton" TargetType="Button" BasedOn="{StaticResource MiniGlyphButton}">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
+            <Setter Property="CornerRadius" Value="22" />
         </Style>
     </Page.Resources>
-    <Grid>
+
+    <Grid x:Name="Root" SizeChanged="OnSizeChanged">
         <Grid.RowDefinitions>
-            <!--<RowDefinition Height="*" />-->
+            <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- The window's title bar is extended into the page, so this transparent strip is
-             the drag region where the system used to draw a white bar. It stays above the
-             controls and out of their way. -->
-        <Border x:Name="DragBar" Grid.RowSpan="2" Height="8" VerticalAlignment="Top" Background="Transparent" />
-
-        <Grid Padding="12,8,8,8" ColumnSpacing="12">
+        <!-- The title bar reaches into the page, so this transparent strip is what Windows
+             drags. The caption area is a separate column: the app's full-player button and
+             the native minimize/close buttons are client content there, not part of the drag
+             region, so they stay clickable. -->
+        <Grid Height="32" VerticalAlignment="Top">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Border x:Name="DragBar" Background="Transparent" />
+            <Grid Grid.Column="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button
+                    x:Name="MinimizeButton"
+                    Width="32"
+                    Height="32"
+                    CornerRadius="16"
+                    Style="{StaticResource MiniGlyphButton}"
+                    Click="OnMinimizeClick"
+                    ToolTipService.ToolTip="Minimize"
+                    AutomationProperties.Name="Minimize">
+                    <FontIcon Glyph="&#xE921;" FontSize="12" />
+                </Button>
+                <Button
+                    x:Name="RestoreButton"
+                    Grid.Column="1"
+                    Width="32"
+                    Height="32"
+                    CornerRadius="16"
+                    Style="{StaticResource MiniGlyphButton}"
+                    Click="OnRestoreClick"
+                    ToolTipService.ToolTip="Open the full player"
+                    AutomationProperties.Name="Open the full player">
+                    <FontIcon Glyph="&#xE740;" FontSize="12" />
+                </Button>
+                <!-- The window measures the native caption buttons into this spacer. -->
+                <Border x:Name="CaptionInset" Grid.Column="2" Width="0" />
+            </Grid>
+        </Grid>
+
+        <!-- Cover, what is playing, and the seek row. The title block spans both columns and
+             centers on the card, but its MaxWidth (set from the page size) keeps it clear of
+             the cover on the left and the same distance on the right. -->
+        <Grid x:Name="Main" Margin="20,0" VerticalAlignment="Center" RowSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="100" />
+                <RowDefinition Height="24" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="100" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <!-- The cover opens the full window; there is a button for it too. -->
             <Border
-                Width="64"
-                Height="64"
-                VerticalAlignment="Center"
+                x:Name="CoverHost"
+                Width="100"
+                Height="100"
                 CornerRadius="8"
                 Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                 DoubleTapped="OnRestoreTapped"
-                ToolTipService.ToolTip="Open Koda"
-                AutomationProperties.Name="Open Koda">
+                ToolTipService.ToolTip="Open the full player"
+                AutomationProperties.Name="Open the full player">
                 <Grid>
                     <FontIcon
                         x:Name="CoverGlyph"
                         Glyph="&#xE8D6;"
-                        FontSize="18"
+                        FontSize="20"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                    <Image x:Name="CoverImage" helpers:Art.Pixels="64" Stretch="UniformToFill" />
+                    <Image x:Name="CoverImage" helpers:Art.Pixels="100" Stretch="UniformToFill" />
                 </Grid>
             </Border>
 
-            <Grid Grid.Column="1" VerticalAlignment="Center" RowSpacing="4">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            <StackPanel
+                x:Name="TitleBlock"
+                Grid.ColumnSpan="2"
+                MaxWidth="360"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="2">
+                <TextBlock
+                    x:Name="TitleText"
+                    Text="Nothing playing"
+                    FontSize="20"
+                    FontWeight="SemiBold"
+                    TextAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="NoWrap"
+                    AutomationProperties.Name="Track title" />
+                <TextBlock
+                    x:Name="ArtistText"
+                    FontSize="15"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="NoWrap"
+                    AutomationProperties.Name="Track artist" />
+            </StackPanel>
 
-                <Grid ColumnSpacing="4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock
-                            x:Name="TitleText"
-                            Text="Nothing playing"
-                            Style="{ThemeResource BodyStrongTextBlockStyle}"
-                            TextTrimming="CharacterEllipsis"
-                            TextWrapping="NoWrap"
-                            AutomationProperties.Name="Track title" />
-                        <TextBlock
-                            x:Name="ArtistText"
-                            Style="{ThemeResource CaptionTextBlockStyle}"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            TextTrimming="CharacterEllipsis"
-                            TextWrapping="NoWrap"
-                            AutomationProperties.Name="Track artist" />
-                    </StackPanel>
+            <TextBlock
+                x:Name="ElapsedText"
+                Grid.Row="1"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontSize="13"
+                Style="{ThemeResource CaptionTextBlockStyle}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                AutomationProperties.Name="Elapsed time" />
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
-                        <Button
-                            x:Name="LikeButton"
-                            Width="30"
-                            Height="30"
-                            Padding="0"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Visibility="Collapsed"
-                            Click="OnLikeClick"
-                            ToolTipService.ToolTip="Add to Liked"
-                            AutomationProperties.Name="Add to Liked">
-                            <FontIcon x:Name="LikeIcon" Glyph="&#xEB51;" FontSize="14" />
-                        </Button>
-                        <Button
-                            x:Name="RestoreButton"
-                            Width="30"
-                            Height="30"
-                            Padding="0"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="OnRestoreClick"
-                            ToolTipService.ToolTip="Open Koda"
-                            AutomationProperties.Name="Open Koda">
-                            <FontIcon Glyph="&#xE8A7;" FontSize="14" />
-                        </Button>
-                    </StackPanel>
-                </Grid>
-
-                <Grid Grid.Row="1" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-                        <Button
-                            x:Name="PreviousButton"
-                            Width="30"
-                            Height="30"
-                            Padding="0"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="OnPreviousClick"
-                            ToolTipService.ToolTip="Previous"
-                            AutomationProperties.Name="Previous">
-                            <FontIcon Glyph="&#xE892;" FontSize="14" />
-                        </Button>
-                        <Button
-                            x:Name="PlayButton"
-                            Style="{StaticResource RoundAccentPlayButton}"
-                            Click="OnPlayClick"
-                            ToolTipService.ToolTip="Play"
-                            AutomationProperties.Name="Play">
-                            <Grid>
-                                <FontIcon x:Name="PlayIcon" Glyph="&#xF5B0;" FontSize="14" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-                                <ProgressRing
-                                    x:Name="LoadingRing"
-                                    Width="16"
-                                    Height="16"
-                                    IsActive="False"
-                                    Visibility="Collapsed"
-                                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-                            </Grid>
-                        </Button>
-                        <Button
-                            x:Name="NextButton"
-                            Width="30"
-                            Height="30"
-                            Padding="0"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="OnNextClick"
-                            ToolTipService.ToolTip="Next"
-                            AutomationProperties.Name="Next">
-                            <FontIcon Glyph="&#xE893;" FontSize="14" />
-                        </Button>
-                    </StackPanel>
-
-                    <TextBlock
-                        x:Name="PositionText"
-                        Grid.Column="2"
-                        VerticalAlignment="Center"
-                        Style="{ThemeResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        AutomationProperties.Name="Playback position" />
-                </Grid>
+            <Grid Grid.Row="1" Grid.Column="1" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Slider
+                    x:Name="Progress"
+                    Margin="-6,0,0,0"
+                    VerticalAlignment="Center"
+                    Minimum="0"
+                    Maximum="1"
+                    IsThumbToolTipEnabled="False"
+                    ValueChanged="OnProgressChanged"
+                    AutomationProperties.Name="Playback position">
+                    <Slider.Resources>
+                        <x:Double x:Key="SliderTrackThemeHeight">3</x:Double>
+                        <x:Double x:Key="SliderHorizontalHeight">24</x:Double>
+                        <!-- A slim vertical pill, like the reference: the default style's
+                             white outer circle is dropped and only the inner thumb remains. -->
+                        <x:Double x:Key="SliderInnerThumbWidth">4</x:Double>
+                        <x:Double x:Key="SliderInnerThumbHeight">14</x:Double>
+                        <CornerRadius x:Key="SliderThumbCornerRadius">7</CornerRadius>
+                        <SolidColorBrush x:Key="SliderOuterThumbBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="SliderThumbBackground" Color="{ThemeResource TextFillColorPrimary}" />
+                        <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{ThemeResource TextFillColorPrimary}" />
+                        <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{ThemeResource TextFillColorPrimary}" />
+                    </Slider.Resources>
+                </Slider>
+                <TextBlock
+                    x:Name="RemainingText"
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Style="{ThemeResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    AutomationProperties.Name="Remaining time" />
             </Grid>
         </Grid>
 
-        <ProgressBar
-            x:Name="Progress"
-            Grid.Row="1"
-            Height="3"
-            Minimum="0"
-            Maximum="1"
-            Value="0"
-            CornerRadius="0"
-            Background="Transparent"
-            Foreground="{ThemeResource AccentFillColorDefaultBrush}"
-            AutomationProperties.Name="Playback progress" />
+        <!-- Volume and options on the left, transport centered in the window, lyrics and the
+             playing-next list on the right. The volume sits under the cover; the ellipsis
+             starts where the cover ends. -->
+        <Grid Grid.Row="1" Height="56" Margin="20,8,20,12">
+            <Grid HorizontalAlignment="Left" VerticalAlignment="Center">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="100" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button
+                    x:Name="VolumeButton"
+                    HorizontalAlignment="Center"
+                    Style="{StaticResource MiniGlyphButton}"
+                    ToolTipService.ToolTip="Volume"
+                    AutomationProperties.Name="Volume">
+                    <FontIcon x:Name="VolumeIcon" Glyph="&#xE767;" FontSize="16" />
+                    <Button.Flyout>
+                        <Flyout Placement="Top" Opening="OnVolumeFlyoutOpening">
+                            <StackPanel Orientation="Horizontal" Spacing="8" Width="200">
+                                <Button
+                                    x:Name="MuteButton"
+                                    Style="{StaticResource MiniGlyphButton}"
+                                    Click="OnMuteClick"
+                                    ToolTipService.ToolTip="Mute"
+                                    AutomationProperties.Name="Mute">
+                                    <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" />
+                                </Button>
+                                <Slider
+                                    x:Name="VolumeSlider"
+                                    Width="150"
+                                    Minimum="0"
+                                    Maximum="100"
+                                    Value="100"
+                                    AutomationProperties.Name="Volume" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+                <Button
+                    x:Name="MoreButton"
+                    Grid.Column="1"
+                    Margin="4,0,0,0"
+                    Style="{StaticResource MiniGlyphButton}"
+                    Click="OnMoreClick"
+                    ToolTipService.ToolTip="More options"
+                    AutomationProperties.Name="More options">
+                    <FontIcon Glyph="&#xE712;" FontSize="16" />
+                </Button>
+            </Grid>
+
+            <StackPanel
+                Orientation="Horizontal"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="16">
+                <Button
+                    x:Name="PreviousButton"
+                    Style="{StaticResource MiniTransportButton}"
+                    Click="OnPreviousClick"
+                    ToolTipService.ToolTip="Previous"
+                    AutomationProperties.Name="Previous">
+                    <FontIcon Glyph="&#xE892;" FontSize="18" />
+                </Button>
+                <Button
+                    x:Name="PlayButton"
+                    Style="{StaticResource MiniPlayButton}"
+                    Click="OnPlayClick"
+                    ToolTipService.ToolTip="Play"
+                    AutomationProperties.Name="Play">
+                    <Grid>
+                        <FontIcon x:Name="PlayIcon" Glyph="&#xF5B0;" FontSize="22" />
+                        <ProgressRing
+                            x:Name="LoadingRing"
+                            Width="20"
+                            Height="20"
+                            IsActive="False"
+                            Visibility="Collapsed"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="NextButton"
+                    Style="{StaticResource MiniTransportButton}"
+                    Click="OnNextClick"
+                    ToolTipService.ToolTip="Next"
+                    AutomationProperties.Name="Next">
+                    <FontIcon Glyph="&#xE893;" FontSize="18" />
+                </Button>
+            </StackPanel>
+
+            <StackPanel
+                Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Spacing="4">
+                <Button
+                    x:Name="LyricsButton"
+                    Style="{StaticResource MiniGlyphButton}"
+                    Click="OnLyricsClick"
+                    ToolTipService.ToolTip="Lyrics"
+                    AutomationProperties.Name="Lyrics">
+                    <FontIcon Glyph="&#xE8F2;" FontSize="16" />
+                </Button>
+                <Button
+                    x:Name="QueueButton"
+                    Style="{StaticResource MiniGlyphButton}"
+                    Click="OnQueueClick"
+                    ToolTipService.ToolTip="Playing next"
+                    AutomationProperties.Name="Playing next">
+                    <FontIcon Glyph="&#xE8FD;" FontSize="16" />
+                </Button>
+            </StackPanel>
+        </Grid>
     </Grid>
 </Page>

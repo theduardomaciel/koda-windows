@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Koda.Interop;
 using Koda.Pages;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
@@ -17,6 +18,9 @@ namespace Koda;
 /// </summary>
 public sealed class MiniPlayerWindow : Window
 {
+    private const double CardWidth = 600;
+    private const double CardHeight = 250;
+
     private readonly MiniPlayerPage _page;
     private bool _customTitleBar;
 
@@ -33,15 +37,15 @@ public sealed class MiniPlayerWindow : Window
         appWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "icon.ico"));
 
         // Windows sizes a compact overlay from a preset, then lets the app make it its
-        // own. A strip, not a video frame: wide enough for a title, short enough to sit
-        // over a browser without hiding it.
+        // own. A card, not a video frame: wide enough for the cover and the title, tall
+        // enough for the seek bar and a full control row.
         var presenter = CompactOverlayPresenter.Create();
         presenter.InitialSize = CompactOverlaySize.Small;
         appWindow.SetPresenter(presenter);
 
-        // No system title bar over the strip: the page reaches the window's top edge and
+        // No system title bar over the card: the page reaches the window's top edge and
         // its first strip is the drag region, so the artwork and Mica run edge to edge
-        // instead of sitting under a white band. Only the caption button floats above it.
+        // instead of sitting under a white band. The caption buttons float above it.
         try
         {
             ExtendsContentIntoTitleBar = true;
@@ -58,25 +62,74 @@ public sealed class MiniPlayerWindow : Window
         _page.ActualThemeChanged += (_, _) => PaintCaptionButtons();
         PaintCaptionButtons();
 
+        ResizeCard();
+        SyncCaptionInset();
+
+        _page.Loaded += (_, _) => SyncCaptionInset();
+        Activated += (_, _) => SyncCaptionInset();
+        appWindow.Changed += (_, args) =>
+        {
+            if (args.DidSizeChange)
+            {
+                SyncCaptionInset();
+            }
+        };
+
+        _page.FullPlayerRequested += OnFullPlayerRequested;
+        _page.MinimizeRequested += OnMinimizeRequested;
+        Closed += (_, _) =>
+        {
+            _page.FullPlayerRequested -= OnFullPlayerRequested;
+            _page.MinimizeRequested -= OnMinimizeRequested;
+            _page.Detach();
+        };
+    }
+
+    /// <summary>The window handle, for the DPI-aware size.</summary>
+    private nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+    /// <summary>The card's size in effective pixels, scaled to the monitor's DPI.</summary>
+    private void ResizeCard()
+    {
+        var scale = Win32.GetDpiForWindow(Handle) / 96.0;
+        if (!double.IsFinite(scale) || scale <= 0)
+        {
+            scale = 1;
+        }
+
         try
         {
-            appWindow.Resize(new SizeInt32(420, 96));
+            AppWindow.Resize(new SizeInt32(
+                (int)Math.Round(CardWidth * scale),
+                (int)Math.Round(CardHeight * scale)));
         }
         catch (Exception)
         {
             // The preset is a perfectly good mini player if the shell refuses the size.
         }
+    }
 
-        _page.RestoreRequested += OnRestoreRequested;
-        Closed += (_, _) =>
+    /// <summary>The native caption buttons sit over the page, so the page reserves their
+    /// width and the app's own full-player button sits to their left.</summary>
+    private void SyncCaptionInset()
+    {
+        if (!_customTitleBar)
         {
-            _page.RestoreRequested -= OnRestoreRequested;
-            _page.Detach();
-        };
+            _page.SetCaptionInset(0);
+            return;
+        }
+
+        var scale = _page.XamlRoot?.RasterizationScale ?? 1;
+        if (!double.IsFinite(scale) || scale <= 0)
+        {
+            scale = 1;
+        }
+
+        _page.SetCaptionInset(AppWindow.TitleBar.RightInset / scale);
     }
 
     /// <summary>The caption button floats on the page's background, so it takes its colors
-    /// from the theme like the rest of the strip.</summary>
+    /// from the theme like the rest of the card.</summary>
     private void PaintCaptionButtons()
     {
         var bar = AppWindow.TitleBar;
@@ -115,10 +168,15 @@ public sealed class MiniPlayerWindow : Window
         bar.ButtonPressedForegroundColor = bar.ButtonForegroundColor;
     }
 
-    /// <summary>Leave the overlay and bring the library forward.</summary>
-    private void OnRestoreRequested()
+    /// <summary>Leave the overlay and show the full player, optionally with one of its
+    /// side panels open.</summary>
+    private void OnFullPlayerRequested(string? panel)
     {
         Close();
-        App.Shell?.ShowFromTray();
+        App.Shell?.ShowNowPlaying(panel);
     }
+
+    /// <summary>The compact overlay's own minimize button; the native frame only offers close.</summary>
+    private void OnMinimizeRequested() =>
+        _ = Win32.ShowWindowAsync(Handle, Win32.SW_SHOWMINIMIZED);
 }
