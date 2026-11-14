@@ -24,6 +24,7 @@ public sealed class MiniPlayerWindow : Window
 
     private readonly MiniPlayerPage _page;
     private bool _customTitleBar;
+    private bool _frameApplied;
 
     public MiniPlayerWindow()
     {
@@ -64,6 +65,19 @@ public sealed class MiniPlayerWindow : Window
         PaintCaptionButtons();
 
         ResizeCard();
+
+        // The compact presenter restyles the window after the constructor; apply the
+        // frame theme once the window is really on screen.
+        Activated += (_, _) =>
+        {
+            if (_frameApplied)
+            {
+                return;
+            }
+
+            _frameApplied = true;
+            PaintCaptionButtons();
+        };
 
         _page.FullPlayerRequested += OnFullPlayerRequested;
         Closed += (_, _) =>
@@ -137,6 +151,13 @@ public sealed class MiniPlayerWindow : Window
         bar.ButtonPressedForegroundColor = foreground;
 
         _page.SetCaptionButtonColors(foreground, hover, pressed);
+
+        // The window frame belongs to DWM, not XAML: without this it can stay in the
+        // light frame while the card is dark, and the rounded top corners catch the
+        // light as two white dots. Keep the frame in the card's mode.
+        var immersiveDark = dark ? 1u : 0u;
+        _ = Win32.DwmSetWindowAttribute(
+            Handle, Win32.DWMWA_USE_IMMERSIVE_DARK_MODE, ref immersiveDark, sizeof(uint));
     }
 
     /// <summary>Leave the overlay and show the full player, optionally with one of its

@@ -133,6 +133,11 @@ internal static partial class Win32
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(nint hwnd);
 
+    public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+    [DllImport("dwmapi.dll")]
+    public static extern int DwmSetWindowAttribute(nint hwnd, int attribute, ref uint value, int size);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern nint LoadImageW(nint hInstance, string lpName, uint uType, int cxDesired, int cyDesired, uint fuLoad);
 

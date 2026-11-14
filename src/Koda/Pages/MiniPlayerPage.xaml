@@ -77,15 +77,6 @@
     </Page.Resources>
 
     <Grid x:Name="Root">
-        <!-- The compact overlay's system frame draws a 1px highlight at the rounded top
-             corners. A hairline of the card's base colour covers the part of it that is
-             inside the client area without changing the Mica below. -->
-        <Border
-            Height="2"
-            VerticalAlignment="Top"
-            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-            IsHitTestVisible="False" />
-
         <!-- One 16px card padding, then three rows:
              1. Cover | Title + Artist
              2. Current time | Progress | Remaining time
