@@ -248,6 +248,10 @@ public sealed partial class MiniPlayerPage : Page
 
     private void OnRestoreTapped(object sender, DoubleTappedRoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
 
+    /// <summary>The title bar's right header is measured after the bar itself, so its
+    /// passthrough area must be recomputed once the loaded layout is complete.</summary>
+    private void OnTitleBarLoaded(object sender, RoutedEventArgs e) => MiniTitleBar.RecomputeDragRegions();
+
     private static string FormatTime(double seconds)
     {
         var total = (long)Math.Floor(Math.Max(0, seconds));
