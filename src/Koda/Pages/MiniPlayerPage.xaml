@@ -29,7 +29,7 @@
              1. Cover | Title + Artist
              2. Current time | Progress | Remaining time
              3. Volume + More | Transport | Lyrics + Queue -->
-        <Grid x:Name="Card" Padding="16" RowSpacing="8">
+        <Grid x:Name="Card" Padding="16" RowSpacing="6">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" MinHeight="80" />
                 <RowDefinition Height="32" />
@@ -91,7 +91,7 @@
 
             <!-- Row 2: current time, the same default Slider the player bar uses,
                  and the remaining time. -->
-            <Grid Grid.Row="1" ColumnSpacing="10" VerticalAlignment="Center">
+            <Grid Grid.Row="1" ColumnSpacing="10" Padding="12,0,12,0" VerticalAlignment="Center">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -128,7 +128,7 @@
 
             <!-- Row 3: the left cluster, the transport centered in the card, and the
                  right cluster. The star columns are equal, so the transport stays centered. -->
-            <Grid Grid.Row="2">
+            <Grid Grid.Row="2" Padding="12,0,12,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -140,7 +140,7 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Center"
-                    Spacing="4">
+                    Spacing="16">
                     <Button
                         x:Name="VolumeButton"
                         Style="{StaticResource MiniGlyphButton}"
@@ -224,7 +224,7 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
-                    Spacing="4">
+                    Spacing="16">
                     <Button
                         x:Name="LyricsButton"
                         Style="{StaticResource MiniGlyphButton}"
