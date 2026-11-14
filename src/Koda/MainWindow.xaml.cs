@@ -1997,6 +1997,7 @@ public sealed partial class MainWindow : Window
         if (_mini is not null)
         {
             _mini.Activate();
+            MinimizeShell();
             return;
         }
 
@@ -2010,6 +2011,17 @@ public sealed partial class MainWindow : Window
             }
         };
         mini.Activate();
+        MinimizeShell();
+    }
+
+    /// <summary>The overlay is the player now, so the library gets out of the way. The
+    /// main window keeps its restored/maximised placement for when it comes back.</summary>
+    private void MinimizeShell()
+    {
+        if (AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.Minimize();
+        }
     }
 
     /// <summary>Bring the library forward with Now Playing showing, optionally with one of

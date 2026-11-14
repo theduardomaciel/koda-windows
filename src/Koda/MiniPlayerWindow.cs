@@ -18,8 +18,8 @@ namespace Koda;
 /// </summary>
 public sealed class MiniPlayerWindow : Window
 {
-    private const double CardWidth = 560;
-    private const double CardHeight = 232;
+    private const double CardWidth = 450;
+    private const double CardHeight = 200; // 187.5 to keep the old proportion
 
     /// <summary>Windows' caption button width; the compact overlay only has Close, but
     /// the value is the same. Used when the title bar has not measured itself yet.</summary>

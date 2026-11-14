@@ -253,11 +253,6 @@ public sealed partial class MiniPlayerPage : Page
     public void SetCaptionInset(double width) =>
         CaptionInset.Width = Math.Max(0, width);
 
-    /// <summary>The title block centers on the card, so its cap is the page width minus
-    /// the cover and the same margin on the other side.</summary>
-    private void OnSizeChanged(object sender, SizeChangedEventArgs e) =>
-        TitleBlock.MaxWidth = Math.Max(120, e.NewSize.Width - 216);
-
     private static string FormatTime(double seconds)
     {
         var total = (long)Math.Floor(Math.Max(0, seconds));
