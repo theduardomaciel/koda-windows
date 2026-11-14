@@ -240,15 +240,16 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var dark = Root.ActualTheme == ElementTheme.Dark;
+        var dark = CaptionChrome.IsDark(Root.ActualTheme);
+        var foreground = CaptionChrome.Foreground(dark);
         bar.ButtonBackgroundColor = Colors.Transparent;
         bar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        bar.ButtonForegroundColor = dark ? Colors.White : Colors.Black;
-        bar.ButtonInactiveForegroundColor = dark ? Windows.UI.Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF) : Windows.UI.Color.FromArgb(0x80, 0, 0, 0);
-        bar.ButtonHoverBackgroundColor = dark ? Windows.UI.Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF) : Windows.UI.Color.FromArgb(0x10, 0, 0, 0);
-        bar.ButtonHoverForegroundColor = bar.ButtonForegroundColor;
-        bar.ButtonPressedBackgroundColor = dark ? Windows.UI.Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF) : Windows.UI.Color.FromArgb(0x08, 0, 0, 0);
-        bar.ButtonPressedForegroundColor = bar.ButtonForegroundColor;
+        bar.ButtonForegroundColor = foreground;
+        bar.ButtonInactiveForegroundColor = CaptionChrome.InactiveForeground(dark);
+        bar.ButtonHoverBackgroundColor = CaptionChrome.HoverBackground(dark);
+        bar.ButtonHoverForegroundColor = foreground;
+        bar.ButtonPressedBackgroundColor = CaptionChrome.PressedBackground(dark);
+        bar.ButtonPressedForegroundColor = foreground;
     }
 
     private void OnActivated(object sender, WindowActivatedEventArgs args)

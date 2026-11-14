@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Koda.Helpers;
 using Koda.Interop;
 using Koda.Pages;
 using Microsoft.UI;
@@ -105,7 +106,11 @@ public sealed class MiniPlayerWindow : Window
             return;
         }
 
-        var dark = _page.ActualTheme != ElementTheme.Light;
+        var dark = CaptionChrome.IsDark(_page.ActualTheme);
+        var foreground = CaptionChrome.Foreground(dark);
+        var hover = CaptionChrome.HoverBackground(dark);
+        var pressed = CaptionChrome.PressedBackground(dark);
+
         if (_customTitleBar)
         {
             bar.BackgroundColor = Colors.Transparent;
@@ -117,27 +122,21 @@ public sealed class MiniPlayerWindow : Window
         {
             // The system bar is still there: give it the theme's own background instead
             // of the white it would otherwise use in a light-themed shell.
-            var background = dark
-                ? Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20)
-                : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF3, 0xF3);
+            var background = CaptionChrome.BarBackground(dark);
             bar.BackgroundColor = background;
             bar.InactiveBackgroundColor = background;
             bar.ButtonBackgroundColor = background;
             bar.ButtonInactiveBackgroundColor = background;
         }
 
-        bar.ButtonForegroundColor = dark ? Colors.White : Colors.Black;
-        bar.ButtonInactiveForegroundColor = dark
-            ? Windows.UI.Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(0x80, 0, 0, 0);
-        bar.ButtonHoverBackgroundColor = dark
-            ? Windows.UI.Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(0x10, 0, 0, 0);
-        bar.ButtonHoverForegroundColor = bar.ButtonForegroundColor;
-        bar.ButtonPressedBackgroundColor = dark
-            ? Windows.UI.Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(0x08, 0, 0, 0);
-        bar.ButtonPressedForegroundColor = bar.ButtonForegroundColor;
+        bar.ButtonForegroundColor = foreground;
+        bar.ButtonInactiveForegroundColor = CaptionChrome.InactiveForeground(dark);
+        bar.ButtonHoverBackgroundColor = hover;
+        bar.ButtonHoverForegroundColor = foreground;
+        bar.ButtonPressedBackgroundColor = pressed;
+        bar.ButtonPressedForegroundColor = foreground;
+
+        _page.SetCaptionButtonColors(foreground, hover, pressed);
     }
 
     /// <summary>Leave the overlay and show the full player, optionally with one of its

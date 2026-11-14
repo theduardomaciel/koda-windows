@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 
 namespace Koda.Pages;
 
@@ -251,6 +252,23 @@ public sealed partial class MiniPlayerPage : Page
     /// <summary>The title bar's right header is measured after the bar itself, so its
     /// passthrough area must be recomputed once the loaded layout is complete.</summary>
     private void OnTitleBarLoaded(object sender, RoutedEventArgs e) => MiniTitleBar.RecomputeDragRegions();
+
+    /// <summary>The caption palette belongs to the window; the app-drawn expand button
+    /// follows the same colors as the native buttons beside it.</summary>
+    public void SetCaptionButtonColors(Windows.UI.Color foreground, Windows.UI.Color hover, Windows.UI.Color pressed)
+    {
+        if (Resources["MiniCaptionHoverBrush"] is SolidColorBrush hoverBrush)
+        {
+            hoverBrush.Color = hover;
+        }
+
+        if (Resources["MiniCaptionPressedBrush"] is SolidColorBrush pressedBrush)
+        {
+            pressedBrush.Color = pressed;
+        }
+
+        RestoreButton.Foreground = new SolidColorBrush(foreground);
+    }
 
     private static string FormatTime(double seconds)
     {

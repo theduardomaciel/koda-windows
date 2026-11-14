@@ -7,20 +7,10 @@
     Background="Transparent">
     <Page.Resources>
         <ResourceDictionary>
-            <ResourceDictionary.ThemeDictionaries>
-                <ResourceDictionary x:Key="Default">
-                    <SolidColorBrush x:Key="MiniCaptionHoverBrush" Color="#18FFFFFF" />
-                    <SolidColorBrush x:Key="MiniCaptionPressedBrush" Color="#10FFFFFF" />
-                </ResourceDictionary>
-                <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="MiniCaptionHoverBrush" Color="#10000000" />
-                    <SolidColorBrush x:Key="MiniCaptionPressedBrush" Color="#08000000" />
-                </ResourceDictionary>
-                <ResourceDictionary x:Key="HighContrast">
-                    <StaticResource x:Key="MiniCaptionHoverBrush" ResourceKey="SystemControlHighlightListLowBrush" />
-                    <StaticResource x:Key="MiniCaptionPressedBrush" ResourceKey="SystemControlHighlightListMediumBrush" />
-                </ResourceDictionary>
-            </ResourceDictionary.ThemeDictionaries>
+            <!-- Filled from the same palette PaintCaptionButtons gives the native
+                 caption buttons; the window updates the colors on a theme change. -->
+            <SolidColorBrush x:Key="MiniCaptionHoverBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="MiniCaptionPressedBrush" Color="Transparent" />
 
             <!-- The expand button is the app's own caption button: square, full height and
                  with the same hover/pressed fills the system uses for the caption group. -->
@@ -42,12 +32,12 @@
                                         <VisualState x:Name="Normal" />
                                         <VisualState x:Name="PointerOver">
                                             <VisualState.Setters>
-                                                <Setter Target="RootGrid.Background" Value="{ThemeResource MiniCaptionHoverBrush}" />
+                                                <Setter Target="RootGrid.Background" Value="{StaticResource MiniCaptionHoverBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Pressed">
                                             <VisualState.Setters>
-                                                <Setter Target="RootGrid.Background" Value="{ThemeResource MiniCaptionPressedBrush}" />
+                                                <Setter Target="RootGrid.Background" Value="{StaticResource MiniCaptionPressedBrush}" />
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Disabled">
@@ -344,7 +334,10 @@
                     Click="OnRestoreClick"
                     ToolTipService.ToolTip="Open the full player"
                     AutomationProperties.Name="Open the full player">
-                    <FontIcon Glyph="&#xE740;" FontSize="10" />
+                    <FontIcon
+                        Glyph="&#xE740;"
+                        FontSize="12"
+                        Foreground="{Binding Foreground, ElementName=RestoreButton}" />
                 </Button>
             </TitleBar.RightHeader>
         </TitleBar>
