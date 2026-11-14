@@ -66,6 +66,10 @@ public sealed partial class MainWindow : Window
     private double _zoom = 1;
     private bool _shutdown;
 
+    /// <summary>Whether the app folded the sidebar because the window is compact; widening
+    /// may unfold it again unless the listener has made a choice since.</summary>
+    private bool _sidebarCollapsedForWidth;
+
     private delegate nint WndProc(nint hwnd, uint msg, nint wParam, nint lParam);
     private static readonly WndProc SubclassedProc = OnWndProc;
 
@@ -81,6 +85,10 @@ public sealed partial class MainWindow : Window
 
     /// <summary>The sidebar collapsed to icons, as MainWindow.xaml sets it.</summary>
     private const double CompactPaneWidth = 52;
+
+    /// <summary>Below this width the search takes its smallest step and the sidebar folds
+    /// to its icons; above it both open up again.</summary>
+    private const double NarrowWindowWidth = 860;
 
     public MainWindow()
     {
@@ -200,7 +208,17 @@ public sealed partial class MainWindow : Window
         ApplySidebar();
 
         ContentFrame.Navigated += OnContentNavigated;
-        Nav.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) => UpdatePaneChrome());
+        Nav.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) =>
+        {
+            // Opening the pane while the window is narrow is the listener's choice;
+            // widening must not open it on top of that.
+            if (_sidebarCollapsedForWidth && Nav.IsPaneOpen)
+            {
+                _sidebarCollapsedForWidth = false;
+            }
+
+            UpdatePaneChrome();
+        });
         NavigateRoot(typeof(HomePage), null, "home");
         RefreshSidebar();
 
@@ -281,10 +299,34 @@ public sealed partial class MainWindow : Window
         }
 
         TitleProfileName.Visibility = width < 980 ? Visibility.Collapsed : Visibility.Visible;
-        TitleSearch.Width = width >= 1040 ? 420 : width >= 860 ? 340 : 240;
+        TitleSearch.Width = width >= 1040 ? 420 : width >= NarrowWindowWidth ? 340 : 240;
+        CollapseSidebarForWidth(width);
         DispatcherQueue.TryEnqueue(
             Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
             () => AppTitleBar.RecomputeDragRegions());
+    }
+
+    /// <summary>The sidebar folds to its icons when the window gets narrow and unfolds
+    /// when it has room again. Opening it while narrow counts as a choice, so widening
+    /// then leaves it as the listener left it.</summary>
+    private void CollapseSidebarForWidth(double width)
+    {
+        if (width < NarrowWindowWidth)
+        {
+            if (!_sidebarCollapsedForWidth && Nav.IsPaneVisible && Nav.IsPaneOpen)
+            {
+                _sidebarCollapsedForWidth = true;
+                Nav.IsPaneOpen = false;
+            }
+        }
+        else if (_sidebarCollapsedForWidth)
+        {
+            _sidebarCollapsedForWidth = false;
+            if (Nav.IsPaneVisible)
+            {
+                Nav.IsPaneOpen = true;
+            }
+        }
     }
 
     // MARK: navigation
