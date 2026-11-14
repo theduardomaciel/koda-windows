@@ -149,6 +149,14 @@
                         <FontIcon x:Name="VolumeIcon" Glyph="&#xE767;" FontSize="18" />
                         <Button.Flyout>
                             <Flyout Placement="Top" Opening="OnVolumeFlyoutOpening">
+                                <Flyout.FlyoutPresenterStyle>
+                                    <Style TargetType="FlyoutPresenter">
+                                        <Setter Property="Padding" Value="8" />
+                                        <Setter Property="MinWidth" Value="0" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="CornerRadius" Value="8" />
+                                    </Style>
+                                </Flyout.FlyoutPresenterStyle>
                                 <StackPanel Orientation="Horizontal" Spacing="8" Width="200">
                                     <Button
                                         x:Name="MuteButton"
