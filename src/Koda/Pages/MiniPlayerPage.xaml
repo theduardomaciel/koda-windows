@@ -135,18 +135,18 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <Grid Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Center">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="80" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                <StackPanel
+                    Grid.Column="0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Spacing="4">
                     <Button
                         x:Name="VolumeButton"
-                        HorizontalAlignment="Center"
                         Style="{StaticResource MiniGlyphButton}"
                         ToolTipService.ToolTip="Volume"
                         AutomationProperties.Name="Volume">
-                        <FontIcon x:Name="VolumeIcon" Glyph="&#xE767;" FontSize="14" />
+                        <FontIcon x:Name="VolumeIcon" Glyph="&#xE767;" FontSize="18" />
                         <Button.Flyout>
                             <Flyout Placement="Top" Opening="OnVolumeFlyoutOpening">
                                 <StackPanel Orientation="Horizontal" Spacing="8" Width="200">
@@ -156,7 +156,7 @@
                                         Click="OnMuteClick"
                                         ToolTipService.ToolTip="Mute"
                                         AutomationProperties.Name="Mute">
-                                        <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="14" />
+                                        <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="18" />
                                     </Button>
                                     <Slider
                                         x:Name="VolumeSlider"
@@ -171,15 +171,13 @@
                     </Button>
                     <Button
                         x:Name="MoreButton"
-                        Grid.Column="1"
-                        Margin="4,0,0,0"
                         Style="{StaticResource MiniGlyphButton}"
                         Click="OnMoreClick"
                         ToolTipService.ToolTip="More options"
                         AutomationProperties.Name="More options">
-                        <FontIcon Glyph="&#xE712;" FontSize="14" />
+                        <FontIcon Glyph="&#xE712;" FontSize="18" />
                     </Button>
-                </Grid>
+                </StackPanel>
 
                 <StackPanel
                     Grid.Column="1"
@@ -192,7 +190,7 @@
                         Click="OnPreviousClick"
                         ToolTipService.ToolTip="Previous"
                         AutomationProperties.Name="Previous">
-                        <FontIcon Glyph="&#xF8AC;" FontSize="16" />
+                        <FontIcon Glyph="&#xF8AC;" FontSize="18" />
                     </Button>
                     <Button
                         x:Name="PlayButton"
@@ -217,7 +215,7 @@
                         Click="OnNextClick"
                         ToolTipService.ToolTip="Next"
                         AutomationProperties.Name="Next">
-                        <FontIcon Glyph="&#xF8AD;" FontSize="16" />
+                        <FontIcon Glyph="&#xF8AD;" FontSize="18" />
                     </Button>
                 </StackPanel>
 
@@ -233,10 +231,7 @@
                         Click="OnLyricsClick"
                         ToolTipService.ToolTip="Lyrics"
                         AutomationProperties.Name="Lyrics">
-                        <Grid Width="18" Height="18">
-                            <FontIcon Glyph="&#xE90A;" FontSize="15" />
-                            <FontIcon Glyph="&#xE8D6;" FontSize="9" Margin="1,0,0,1" />
-                        </Grid>
+                        <FontIcon Glyph="&#xE8BD;" FontSize="18" />
                     </Button>
                     <Button
                         x:Name="QueueButton"
@@ -244,7 +239,7 @@
                         Click="OnQueueClick"
                         ToolTipService.ToolTip="Playing next"
                         AutomationProperties.Name="Playing next">
-                        <FontIcon Glyph="&#xE8FD;" FontSize="15" />
+                        <FontIcon Glyph="&#xE8FD;" FontSize="18" />
                     </Button>
                 </StackPanel>
             </Grid>
