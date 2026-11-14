@@ -59,19 +59,14 @@ internal static class WindowPlacement
     /// <summary>Remember the normal rectangle and whether it was maximised.</summary>
     public static void Save(nint hwnd)
     {
-        var placement = new Win32.WINDOWPLACEMENT
+        if (!TryGetPlacement(hwnd, out var placement))
         {
-            length = System.Runtime.InteropServices.Marshal.SizeOf<Win32.WINDOWPLACEMENT>(),
-        };
-
-        try
-        {
-            if (!Win32.GetWindowPlacement(hwnd, ref placement))
-            {
-                return;
-            }
+            return;
         }
-        catch (Exception)
+
+        // A minimised window reports SW_SHOWMINIMIZED rather than the state it will
+        // come back to; the rectangle has not moved, so what was saved is still true.
+        if (placement.showCmd == Win32.SW_SHOWMINIMIZED)
         {
             return;
         }
@@ -101,6 +96,54 @@ internal static class WindowPlacement
         settings.WindowHeight = normal.Height;
         settings.WindowMaximized = maximized;
         settings.Save();
+    }
+
+    /// <summary>
+    /// Remember only whether the window is maximised. The caption's maximise and
+    /// restore buttons - and a double-click on the bar - change the state without
+    /// ending a drag, so <c>WM_EXITSIZEMOVE</c> never sees them; the rectangle is
+    /// untouched by those, so only the flag needs writing.
+    /// </summary>
+    public static void SaveState(nint hwnd)
+    {
+        if (!TryGetPlacement(hwnd, out var placement))
+        {
+            return;
+        }
+
+        // A minimised window reports SW_SHOWMINIMIZED and does not say what it will
+        // come back to, so leave the saved state as it was.
+        if (placement.showCmd == Win32.SW_SHOWMINIMIZED)
+        {
+            return;
+        }
+
+        var settings = Settings.Current;
+        var maximized = placement.showCmd == Win32.SW_SHOWMAXIMIZED;
+        if (settings.WindowMaximized == maximized)
+        {
+            return;
+        }
+
+        settings.WindowMaximized = maximized;
+        settings.Save();
+    }
+
+    private static bool TryGetPlacement(nint hwnd, out Win32.WINDOWPLACEMENT placement)
+    {
+        placement = new Win32.WINDOWPLACEMENT
+        {
+            length = System.Runtime.InteropServices.Marshal.SizeOf<Win32.WINDOWPLACEMENT>(),
+        };
+
+        try
+        {
+            return Win32.GetWindowPlacement(hwnd, ref placement);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private static bool IsVisibleOnSomeMonitor(Win32.RECT rect)

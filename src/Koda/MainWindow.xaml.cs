@@ -1964,12 +1964,29 @@ public sealed partial class MainWindow : Window
     public void ShowFromTray()
     {
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        AppWindow.Show();
+
+        // AppWindow.Show() brings a minimised window back at its normal rectangle,
+        // dropping the maximised state; a hidden window keeps it. Reveal only a
+        // hidden window here, and let the shell restore a minimised one to the
+        // state it was minimised from.
+        if (!Win32.IsWindowVisible(hwnd))
+        {
+            AppWindow.Show();
+        }
+
+        var restoredMaximized = false;
         if (Win32.IsIconic(hwnd))
         {
-            Win32.ShowWindowAsync(hwnd, Win32.SW_RESTORE);
+            Win32.ShowWindow(hwnd, Win32.SW_RESTORE);
+            restoredMaximized = Win32.IsZoomed(hwnd);
         }
-        Activate();
+
+        // Activate() shows the window normally and would undo a restored maximised
+        // state; that one comes forward through the foreground calls below instead.
+        if (!restoredMaximized)
+        {
+            Activate();
+        }
         if (!Win32.SetForegroundWindow(hwnd) || Win32.GetForegroundWindow() != hwnd)
         {
             Win32.SwitchToThisWindow(hwnd, altTab: true);
@@ -2166,6 +2183,21 @@ public sealed partial class MainWindow : Window
                     _current.CloseMiniPlayer();
                     _current.AppWindow.Hide();
                     return 0;
+                }
+
+                break;
+
+            case Win32.WM_SIZE:
+                // Maximising and restoring from the caption never ends a drag, so
+                // WM_EXITSIZEMOVE does not fire for them. Save the state as soon as
+                // it flips; during a drag it has not changed, so nothing is written.
+                // Until the saved placement has been applied, WinUI's own first show
+                // is still moving the window, and its state is not the listener's.
+                if (_current is not null
+                    && _current._placementApplied
+                    && ((int)wParam == Win32.SIZE_MAXIMIZED || (int)wParam == Win32.SIZE_RESTORED))
+                {
+                    WindowPlacement.SaveState(hwnd);
                 }
 
                 break;
