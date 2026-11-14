@@ -29,8 +29,8 @@ public sealed partial class MiniPlayerPage : Page
     /// panel to open there: <c>"lyrics"</c>, <c>"queue"</c>, or null for the player itself.</summary>
     public event Action<string?>? FullPlayerRequested;
 
-    /// <summary>The strip the window hands to Windows as its drag region.</summary>
-    public FrameworkElement DragRegion => DragBar;
+    /// <summary>The title bar the window hands to Windows as its drag region.</summary>
+    public TitleBar TitleBarControl => MiniTitleBar;
 
     private PlaybackService Playback => PlaybackService.Instance;
 
@@ -247,11 +247,6 @@ public sealed partial class MiniPlayerPage : Page
     private void OnRestoreClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
 
     private void OnRestoreTapped(object sender, DoubleTappedRoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
-
-    /// <summary>The native caption buttons float over the page's top-right; the window
-    /// measures their width so the app's own full-player button can sit beside them.</summary>
-    public void SetCaptionInset(double width) =>
-        CaptionInset.Width = Math.Max(0, width);
 
     private static string FormatTime(double seconds)
     {

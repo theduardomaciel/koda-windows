@@ -21,10 +21,6 @@ public sealed class MiniPlayerWindow : Window
     private const double CardWidth = 450;
     private const double CardHeight = 200; // 187.5 to keep the old proportion
 
-    /// <summary>Windows' caption button width; the compact overlay only has Close, but
-    /// the value is the same. Used when the title bar has not measured itself yet.</summary>
-    private const double DefaultCaptionInset = 46;
-
     private readonly MiniPlayerPage _page;
     private bool _customTitleBar;
 
@@ -53,7 +49,7 @@ public sealed class MiniPlayerWindow : Window
         try
         {
             ExtendsContentIntoTitleBar = true;
-            SetTitleBar(_page.DragRegion);
+            SetTitleBar(_page.TitleBarControl);
             _customTitleBar = true;
         }
         catch (Exception)
@@ -67,17 +63,6 @@ public sealed class MiniPlayerWindow : Window
         PaintCaptionButtons();
 
         ResizeCard();
-        SyncCaptionInset();
-
-        _page.Loaded += (_, _) => SyncCaptionInset();
-        Activated += (_, _) => SyncCaptionInset();
-        appWindow.Changed += (_, args) =>
-        {
-            if (args.DidSizeChange)
-            {
-                SyncCaptionInset();
-            }
-        };
 
         _page.FullPlayerRequested += OnFullPlayerRequested;
         Closed += (_, _) =>
@@ -111,39 +96,15 @@ public sealed class MiniPlayerWindow : Window
         }
     }
 
-    /// <summary>The native caption buttons sit over the page, so the page reserves their
-    /// width and the app's own full-player button sits to their left.</summary>
-    private void SyncCaptionInset()
-    {
-        if (!_customTitleBar)
-        {
-            _page.SetCaptionInset(0);
-            return;
-        }
-
-        var scale = _page.XamlRoot?.RasterizationScale ?? 1;
-        if (!double.IsFinite(scale) || scale <= 0)
-        {
-            scale = 1;
-        }
-
-        // Before the title bar has measured itself RightInset is 0, and during a
-        // presenter change it can report a value that has nothing to do with the
-        // one close button. Keep the app's button next to Close in both cases.
-        var inset = AppWindow.TitleBar.RightInset / scale;
-        if (!double.IsFinite(inset) || inset < 32 || inset > 96)
-        {
-            inset = DefaultCaptionInset;
-        }
-
-        _page.SetCaptionInset(inset);
-    }
-
     /// <summary>The caption button floats on the page's background, so it takes its colors
     /// from the theme like the rest of the card.</summary>
     private void PaintCaptionButtons()
     {
-        var bar = AppWindow.TitleBar;
+        if (AppWindow?.TitleBar is not { } bar)
+        {
+            return;
+        }
+
         var dark = _page.ActualTheme != ElementTheme.Light;
         if (_customTitleBar)
         {

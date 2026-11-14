@@ -43,10 +43,6 @@ public sealed partial class MainWindow : Window
     /// the account chip with room above and below, while the caption buttons stay native.</summary>
     private const double TitleBarHeight = 48;
 
-    /// <summary>The title bar's own content follows the UI zoom, but not below 75%:
-    /// a back button and a search field still have to be usable.</summary>
-    private const double TitleBarMinScale = 0.75;
-
     private TrayIconHost? _tray;
     private Taskbar? _taskbar;
     private MiniPlayerWindow? _mini;
@@ -68,9 +64,6 @@ public sealed partial class MainWindow : Window
     private YouTubeLink? _linkSuggestion;
     private DispatcherQueueTimer? _zoomTimer;
     private double _zoom = 1;
-    private double _titleScale = 1;
-    private bool _backShown;
-    private Microsoft.UI.Xaml.Media.Animation.Storyboard? _backStoryboard;
     private bool _shutdown;
 
     private delegate nint WndProc(nint hwnd, uint msg, nint wParam, nint lParam);
@@ -110,8 +103,7 @@ public sealed partial class MainWindow : Window
         Root.RowDefinitions[0].Height = new GridLength(TitleBarHeight);
         Root.ActualThemeChanged += (_, _) => PaintCaptionButtons();
         PaintCaptionButtons();
-        AppTitleBar.SizeChanged += OnTitleBarPartsChanged;
-        TitleBarContent.SizeChanged += OnTitleBarPartsChanged;
+        AppTitleBar.SizeChanged += OnTitleBarSizeChanged;
         ApplyTitleBarChrome();
         Activated += OnActivated;
 
@@ -202,7 +194,6 @@ public sealed partial class MainWindow : Window
 
         ZoomHost.SizeChanged += (_, _) => ApplyZoom();
         RestoreZoom();
-        ApplyTitleBarScale();
 
         AddShortcuts();
         ApplySkipSettings();
@@ -244,7 +235,11 @@ public sealed partial class MainWindow : Window
 
     private void PaintCaptionButtons()
     {
-        var bar = AppWindow.TitleBar;
+        if (AppWindow?.TitleBar is not { } bar)
+        {
+            return;
+        }
+
         var dark = Root.ActualTheme == ElementTheme.Dark;
         bar.ButtonBackgroundColor = Colors.Transparent;
         bar.ButtonInactiveBackgroundColor = Colors.Transparent;
@@ -258,10 +253,6 @@ public sealed partial class MainWindow : Window
 
     private void OnActivated(object sender, WindowActivatedEventArgs args)
     {
-        // Windows dims an inactive window's title; ours follows.
-        AppTitle.Foreground = (Brush)Application.Current.Resources[
-            args.WindowActivationState == WindowActivationState.Deactivated ? "TextFillColorTertiaryBrush" : "TextFillColorPrimaryBrush"];
-
         // SetWindowPlacement remembers the normal rectangle before the window is shown,
         // but WinUI activates it normal; the saved maximised state is applied once the
         // window is really on screen, so tearing it down starts from the same place.
@@ -275,16 +266,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>The caption buttons' space is kept clear, and the back button, search field and
-    /// account chip stay clickable.</summary>
-    private void OnTitleBarPartsChanged(object sender, SizeChangedEventArgs args)
-    {
-        ApplyTitleBarChrome();
-        ApplyTitleBarScale();
-    }
+    private void OnTitleBarSizeChanged(object sender, SizeChangedEventArgs args) => ApplyTitleBarChrome();
 
     /// <summary>The bar's own responsive step: the account name and the search field give way
-    /// as the window narrows, before anything overlaps.</summary>
+    /// as the window narrows, before anything overlaps. The TitleBar control owns the caption
+    /// inset and drag regions; ask it to re-read them after these content changes.</summary>
     private void ApplyTitleBarChrome()
     {
         var width = AppTitleBar.ActualWidth;
@@ -293,49 +279,11 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        AppTitle.Visibility = width < 820 ? Visibility.Collapsed : Visibility.Visible;
         TitleProfileName.Visibility = width < 980 ? Visibility.Collapsed : Visibility.Visible;
         TitleSearch.Width = width >= 1040 ? 420 : width >= 860 ? 340 : 240;
-        UpdateTitleBarRegions();
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
-    }
-
-    private void UpdateTitleBarRegions()
-    {
-        if (AppTitleBar.XamlRoot is null)
-        {
-            return;
-        }
-
-        var scale = AppTitleBar.XamlRoot.RasterizationScale;
-        if (!double.IsFinite(scale) || scale <= 0 || !double.IsFinite(_titleScale) || _titleScale <= 0)
-        {
-            return;
-        }
-
-        // The title bar content lays out at the room divided by the title scale, then is
-        // scaled back up, so its insets are in that layout space too. Windows reports
-        // physical pixels, and can report a negative inset while the bar is hidden or the
-        // window is changing presenter; a negative inset reserves no space.
-        var titleBar = AppWindow.TitleBar;
-        LeftInset.Width = new GridLength(Math.Max(0, titleBar.LeftInset / scale / _titleScale));
-        RightInset.Width = new GridLength(Math.Max(0, titleBar.RightInset / scale / _titleScale));
-
-        var rects = new List<RectInt32>();
-        foreach (var element in new FrameworkElement[] { SidebarButton, TitleSearch, TitleProfileButton, BackButton })
-        {
-            if (element.Visibility != Visibility.Visible || element.ActualWidth <= 0)
-            {
-                continue;
-            }
-
-            var bounds = element.TransformToVisual(null).TransformBounds(new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
-            rects.Add(new RectInt32(
-                (int)Math.Round(bounds.X * scale), (int)Math.Round(bounds.Y * scale),
-                (int)Math.Round(bounds.Width * scale), (int)Math.Round(bounds.Height * scale)));
-        }
-
-        InputNonClientPointerSource.GetForWindowId(AppWindow.Id).SetRegionRects(NonClientRegionKind.Passthrough, [.. rects]);
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => AppTitleBar.RecomputeDragRegions());
     }
 
     // MARK: navigation
@@ -506,7 +454,7 @@ public sealed partial class MainWindow : Window
         TitleSearch.Focus(FocusState.Programmatic);
     }
 
-    private void OnBackClick(object sender, RoutedEventArgs e) => GoBack();
+    private void OnBackRequested(TitleBar sender, object args) => GoBack();
 
     private void GoBack()
     {
@@ -516,165 +464,40 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>The back button exists only while there is somewhere to go. It slides in
-    /// inside a clipped slot, so the icon and name move with it instead of snapping.</summary>
+    /// <summary>The built-in back button appears while there is somewhere to go.</summary>
     private void UpdateBackButton()
     {
         var canGoBack = ContentFrame.CanGoBack;
-        if (canGoBack == _backShown)
+        if (AppTitleBar.IsBackButtonVisible == canGoBack
+            && AppTitleBar.IsBackButtonEnabled == canGoBack)
         {
             return;
         }
 
-        _backShown = canGoBack;
-        if (canGoBack)
-        {
-            BackButton.Visibility = Visibility.Visible;
-            BackButton.IsHitTestVisible = true;
-            BackButton.IsTabStop = true;
-            AnimateBack(1, 1, 28, () => { });
-        }
-        else
-        {
-            BackButton.IsHitTestVisible = false;
-            BackButton.IsTabStop = false;
-            AnimateBack(0, 0.82, 0, () =>
-            {
-                if (!_backShown)
-                {
-                    BackButton.Visibility = Visibility.Collapsed;
-                    BackSlot.Width = 0;
-                    UpdateTitleBarRegions();
-                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
-                }
-            });
-        }
-
-        UpdateTitleBarRegions();
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
-    }
-
-    /// <summary>The arrow's own fade and scale, and the slot width that carries the icon and name.</summary>
-    private void AnimateBack(double opacity, double scale, double slotWidth, Action completed)
-    {
-        var showing = slotWidth > 0;
-        var duration = TimeSpan.FromMilliseconds(showing ? 320 : 400);
-        var slideBegin = showing ? TimeSpan.Zero : TimeSpan.FromMilliseconds(120);
-        var slideDuration = showing ? duration : TimeSpan.FromMilliseconds(280);
-        var fadeEasing = new Microsoft.UI.Xaml.Media.Animation.CubicEase
-        {
-            EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut,
-        };
-        Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase spring = showing
-            ? new Microsoft.UI.Xaml.Media.Animation.BackEase
-            {
-                Amplitude = 0.12,
-                EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseOut,
-            }
-            : new Microsoft.UI.Xaml.Media.Animation.CubicEase
-            {
-                EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseInOut,
-            };
-        Microsoft.UI.Xaml.Media.Animation.EasingFunctionBase shrink = showing
-            ? spring
-            : new Microsoft.UI.Xaml.Media.Animation.CubicEase
-            {
-                EasingMode = Microsoft.UI.Xaml.Media.Animation.EasingMode.EaseIn,
-            };
-
-        var width = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
-        {
-            To = slotWidth,
-            Duration = slideDuration,
-            BeginTime = slideBegin,
-            EasingFunction = spring,
-            EnableDependentAnimation = true,
-        };
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(width, BackSlot);
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(width, "Width");
-
-        // Going out, the arrow fades away first and only then does the slot close, so the
-        // icon and name slide back on their own.
-        var fade = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
-        {
-            To = opacity,
-            Duration = showing ? duration : TimeSpan.FromMilliseconds(120),
-            BeginTime = TimeSpan.Zero,
-            EasingFunction = fadeEasing,
-            EnableDependentAnimation = true,
-        };
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(fade, BackButton);
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(fade, "Opacity");
-
-        var grow = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
-        {
-            To = scale,
-            Duration = slideDuration,
-            BeginTime = slideBegin,
-            EasingFunction = shrink,
-            EnableDependentAnimation = true,
-        };
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(grow, BackScale);
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(grow, "ScaleX");
-
-        var growY = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
-        {
-            To = scale,
-            Duration = slideDuration,
-            BeginTime = slideBegin,
-            EasingFunction = shrink,
-            EnableDependentAnimation = true,
-        };
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(growY, BackScale);
-        Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(growY, "ScaleY");
-
-        var storyboard = new Microsoft.UI.Xaml.Media.Animation.Storyboard();
-        storyboard.Children.Add(width);
-        storyboard.Children.Add(fade);
-        storyboard.Children.Add(grow);
-        storyboard.Children.Add(growY);
-        storyboard.Completed += (_, _) => completed();
-
-        // Stopping the previous storyboard reverts the animated properties to their base
-        // values. Read where the slot and arrow are now, stop, and write those values back
-        // as the base, or a hide would snap the slot to 0 before its own animation starts.
-        var startWidth = BackSlot.Width;
-        var startOpacity = BackButton.Opacity;
-        var startScale = BackScale.ScaleX;
-        _backStoryboard?.Stop();
-        BackSlot.Width = startWidth;
-        BackButton.Opacity = startOpacity;
-        BackScale.ScaleX = startScale;
-        BackScale.ScaleY = startScale;
-
-        _backStoryboard = storyboard;
-        storyboard.Begin();
-    }
-
-    /// <summary>The slot clips the arrow while its width animates, so the arrow appears to
-    /// slide in from the left rather than being squeezed.</summary>
-    private void OnBackSlotSizeChanged(object sender, SizeChangedEventArgs args)
-    {
-        BackClip.Rect = new Windows.Foundation.Rect(0, 0, args.NewSize.Width, args.NewSize.Height);
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+        AppTitleBar.IsBackButtonVisible = canGoBack;
+        AppTitleBar.IsBackButtonEnabled = canGoBack;
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => AppTitleBar.RecomputeDragRegions());
     }
 
     /// <summary>The upstream sidebar button is optional; the pane's own toggle and Ctrl+B
     /// are always there.</summary>
     private void UpdateSidebarButton()
     {
-        var wanted = App.Settings.ShowsTitleBarSidebarToggle
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        if (SidebarButton.Visibility == wanted)
+        var visible = App.Settings.ShowsTitleBarSidebarToggle;
+        if (AppTitleBar.IsPaneToggleButtonVisible == visible)
         {
             return;
         }
 
-        SidebarButton.Visibility = wanted;
-        UpdateTitleBarRegions();
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+        AppTitleBar.IsPaneToggleButtonVisible = visible;
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => AppTitleBar.RecomputeDragRegions());
     }
+
+    private void OnPaneToggleRequested(TitleBar sender, object args) => ToggleSidebar();
 
     private void OnContentNavigated(object sender, Microsoft.UI.Xaml.Navigation.NavigationEventArgs args)
     {
@@ -1189,8 +1012,8 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>The content lays out at the room divided by the zoom, then is scaled back up:
-    /// text grows and less fits, as a browser zoom does. The title bar keeps Windows' caption
-    /// buttons but scales its own content with the zoom, down to a usable floor.</summary>
+    /// text grows and less fits, as a browser zoom does. The title bar and its caption
+    /// buttons stay native and keep their normal size.</summary>
     private void ApplyZoom()
     {
         var width = ZoomHost.ActualWidth;
@@ -1202,38 +1025,6 @@ public sealed partial class MainWindow : Window
             ZoomScale.ScaleX = _zoom;
             ZoomScale.ScaleY = _zoom;
         }
-
-        ApplyTitleBarScale();
-    }
-
-    /// <summary>The title bar content is laid out at the room divided by its scale, then
-    /// scaled back up, the same way the page content is. Windows' caption buttons keep
-    /// their native size, so the bar itself stays at the standard height.</summary>
-    private void ApplyTitleBarScale()
-    {
-        _titleScale = Math.Clamp(_zoom, TitleBarMinScale, 1);
-        var width = AppTitleBar.ActualWidth;
-        var height = AppTitleBar.ActualHeight;
-        if (width <= 0 || height <= 0)
-        {
-            return;
-        }
-
-        var layoutWidth = width / _titleScale;
-        var layoutHeight = height / _titleScale;
-        if (!double.IsFinite(TitleBarContent.Width) || Math.Abs(TitleBarContent.Width - layoutWidth) > 0.5)
-        {
-            TitleBarContent.Width = layoutWidth;
-        }
-
-        if (!double.IsFinite(TitleBarContent.Height) || Math.Abs(TitleBarContent.Height - layoutHeight) > 0.5)
-        {
-            TitleBarContent.Height = layoutHeight;
-        }
-
-        TitleBarScale.ScaleX = _titleScale;
-        TitleBarScale.ScaleY = _titleScale;
-        UpdateTitleBarRegions();
     }
 
     // MARK: player bar
@@ -1498,7 +1289,9 @@ public sealed partial class MainWindow : Window
         var label = $"{active.ListeningName}, {active.ListeningSubtitle}. Switch account or channel";
         ToolTipService.SetToolTip(TitleProfileButton, label);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(TitleProfileButton, label);
-        UpdateTitleBarRegions();
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => AppTitleBar.RecomputeDragRegions());
     }
 
     private async void OnProfileButtonClick(object sender, RoutedEventArgs e)
@@ -1826,8 +1619,6 @@ public sealed partial class MainWindow : Window
 
     // MARK: sidebar
 
-    private void OnSidebarClick(object sender, RoutedEventArgs e) => ToggleSidebar();
-
     private void ToggleSidebar()
     {
         if (_videoFullScreen)
@@ -1880,11 +1671,6 @@ public sealed partial class MainWindow : Window
                 settle.Start();
             }
         }
-
-        SidebarIcon.Glyph = hidden ? "\uE8A0" : "\uE89F";
-        var label = hidden ? "Show sidebar" : "Hide sidebar";
-        ToolTipService.SetToolTip(SidebarButton, $"{label} (Ctrl+B)");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SidebarButton, label);
     }
 
     // MARK: status ribbon
