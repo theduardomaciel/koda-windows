@@ -263,6 +263,17 @@
             Background="Transparent"
             IsBackButtonVisible="False"
             IsPaneToggleButtonVisible="False">
+            <TitleBar.Resources>
+                <!-- The compact overlay's caption buttons are 32 DIP tall, and the card is
+                     only 450 DIP wide. Keep the control's internal layout compact too;
+                     a right header alone would otherwise make it 48 tall and clip the
+                     button against the card. The default 48 DIP drag strip between the
+                     header and Close would also leave the expand button floating far from
+                     the caption buttons; the rest of the bar still drags the window. -->
+                <x:Double x:Key="TitleBarCompactHeight">32</x:Double>
+                <x:Double x:Key="TitleBarExpandedHeight">32</x:Double>
+                <x:Double x:Key="TitleBarMinDragRegionWidth">0</x:Double>
+            </TitleBar.Resources>
             <TitleBar.RightHeader>
                 <Button
                     x:Name="RestoreButton"
