@@ -107,6 +107,8 @@ public sealed partial class MainWindow : Window
         // the bar's content shrinks with the UI zoom.
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
+        // WinUI's TitleBar misreads the caption inset at non-100% DPI; see TitleBarInsets.
+        TitleBarInsets.Repair(AppTitleBar, this);
         appWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         Root.RowDefinitions[0].Height = new GridLength(TitleBarHeight);
         Root.ActualThemeChanged += (_, _) => PaintCaptionButtons();

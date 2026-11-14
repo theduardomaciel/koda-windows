@@ -52,6 +52,8 @@ public sealed class MiniPlayerWindow : Window
         {
             ExtendsContentIntoTitleBar = true;
             SetTitleBar(_page.TitleBarControl);
+            // WinUI's TitleBar misreads the caption inset at non-100% DPI; see TitleBarInsets.
+            TitleBarInsets.Repair(_page.TitleBarControl, this);
             _customTitleBar = true;
         }
         catch (Exception)
