@@ -180,6 +180,8 @@ internal sealed class LyricsPanel : IDisposable
     private bool _playing;
     private bool _needsGlide;
     private bool _needsFullPaint;
+    private int _repaintFrom = -1;
+    private int _repaintTo = -1;
     private double _position;
     private double _freezeAt = double.NaN;
     private double _panelWidth;
@@ -519,17 +521,25 @@ internal sealed class LyricsPanel : IDisposable
     {
         var next = positionSeconds + Lead - _offset;
         // A jump means a seek or a replay: the lines behind and ahead must be repainted,
-        // or the line that was partly sung keeps its half-filled words.
+        // or the line that was partly sung keeps its half-filled words. Only the span
+        // between the old and new lines can change state; repainting the whole song on
+        // every seek touched hundreds of text surfaces the panel never shows.
         if (next < _position - 0.15 || next > _position + 0.6)
         {
-            _needsFullPaint = true;
-        }
+            var oldIndex = _lyricLines.Count > 0
+                ? Lyrics.IndexOf(_position, _lyricLines) ?? -1
+                : -1;
+            var newIndex = _lyricLines.Count > 0
+                ? Lyrics.IndexOf(next, _lyricLines) ?? -1
+                : -1;
+            SetRepaintRange(oldIndex, newIndex);
 
-        // A backward jump is a seek/replay. The glows for the target line must be
-        // rebuilt, including letters whose glow had already ended and been freed.
-        if (next < _position - 0.15)
-        {
-            ReleaseGlows();
+            // A backward jump is a seek/replay. Re-arm the target window instead of
+            // disposing every glow: the ones still in the window can be reused.
+            if (next < _position - 0.15)
+            {
+                RearmGlows(newIndex);
+            }
         }
 
         _position = next;
@@ -602,6 +612,8 @@ internal sealed class LyricsPanel : IDisposable
         _frame.Stop();
         UserScrolled = false;
         ReleaseGlows();
+        _repaintFrom = -1;
+        _repaintTo = -1;
         _lines.Children.Clear();
         _rows.Clear();
         _lyricLines.Clear();
@@ -1469,7 +1481,17 @@ internal sealed class LyricsPanel : IDisposable
         if (_needsFullPaint)
         {
             _needsFullPaint = false;
+            _repaintFrom = -1;
+            _repaintTo = -1;
             RepaintWords(time);
+        }
+        else if (_repaintFrom >= 0 && _repaintTo >= _repaintFrom)
+        {
+            var from = _repaintFrom;
+            var to = _repaintTo;
+            _repaintFrom = -1;
+            _repaintTo = -1;
+            RepaintRange(from, to, time);
         }
 
         var index = knownIndex ?? (Lyrics.IndexOf(time, _lyricLines) ?? -1);
@@ -1566,6 +1588,45 @@ internal sealed class LyricsPanel : IDisposable
     {
         foreach (var row in _rows)
         {
+            var started = time >= row.Line.Time;
+            foreach (var word in row.WordItems)
+            {
+                Paint(word, time, _motion, lineStarted: started);
+            }
+
+            foreach (var word in row.BackgroundItems)
+            {
+                Paint(word, time, _motion, lineStarted: started);
+            }
+        }
+    }
+
+    /// <summary>Queues only the rows that can have changed between two song positions.
+    /// Everything before both positions is sung, everything after both is unsung, so
+    /// the old-to-new span (plus a small margin for tails) is all that needs a repaint.</summary>
+    private void SetRepaintRange(int oldIndex, int newIndex)
+    {
+        if (_rows.Count == 0)
+        {
+            return;
+        }
+
+        var from = Math.Max(0, Math.Min(oldIndex, newIndex) - 2);
+        var to = Math.Min(_rows.Count - 1, Math.Max(oldIndex, newIndex) + 2);
+        if (from > to)
+        {
+            return;
+        }
+
+        _repaintFrom = _repaintFrom < 0 ? from : Math.Min(_repaintFrom, from);
+        _repaintTo = Math.Max(_repaintTo, to);
+    }
+
+    private void RepaintRange(int from, int to, double time)
+    {
+        for (var i = from; i <= to && i < _rows.Count; i++)
+        {
+            var row = _rows[i];
             var started = time >= row.Line.Time;
             foreach (var word in row.WordItems)
             {
@@ -2191,6 +2252,29 @@ internal sealed class LyricsPanel : IDisposable
         if (_liveGlowSet.Add(letter))
         {
             _liveGlows.Add(letter);
+        }
+    }
+
+    /// <summary>Re-arms the glow window after a backward seek without disposing the
+    /// glows that are still in it. Only the letters whose glow ended (and were freed)
+    /// need a new mask; the rest are reused.</summary>
+    private void RearmGlows(int newIndex)
+    {
+        if (!_glow)
+        {
+            return;
+        }
+
+        if (newIndex < 0 || newIndex >= _rows.Count)
+        {
+            ReleaseGlows();
+            return;
+        }
+
+        _glowWindowIndex = -2;
+        foreach (var letter in _liveGlows)
+        {
+            letter.GlowDone = false;
         }
     }
 
