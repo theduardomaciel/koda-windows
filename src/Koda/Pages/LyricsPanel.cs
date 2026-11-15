@@ -463,6 +463,8 @@ internal sealed class LyricsPanel : IDisposable
         {
             _leadingDotItems = [];
             _leadingDots = MakeDots(_leadingDotItems, _fontSize, _lineGap * 0.75);
+            // The opening dots lead into the first line.
+            _leadingDots.HorizontalAlignment = SideOf(lyrics.Lines[0]);
             _leadingDots.Tapped += (_, _) =>
             {
                 // The intermission before the first line starts with the song.
@@ -476,23 +478,27 @@ internal sealed class LyricsPanel : IDisposable
         {
             var line = lyrics.Lines[index];
             var fontSize = _fontSize;
+            // A duet's second singer sits on the right. Everyone else sits on the left,
+            // including a group singing together: centering those lines made a duet's
+            // simultaneous lines read as one block in the middle of the panel.
+            var side = SideOf(line);
+            var rightAligned = side == HorizontalAlignment.Right;
             var row = new Row
             {
                 Line = line,
                 Words = line.Words.Count == 0
                     ? new StackPanel { Margin = new Thickness(0, 0, 24, 0) }
-                    : new WordWrapPanel { RowSpacing = 4 },
-                Background = new WordWrapPanel { RowSpacing = 2, Opacity = _idleFar * 0.7 },
+                    : new WordWrapPanel { RowSpacing = 4, AlignRight = rightAligned },
+                Background = new WordWrapPanel
+                {
+                    RowSpacing = 2,
+                    Opacity = _idleFar * 0.7,
+                    AlignRight = rightAligned,
+                },
             };
 
             var halfGap = _lineGap / 2;
             var host = new StackPanel { Margin = new Thickness(0, halfGap, 0, halfGap), Spacing = 6 };
-            // A duet's second singer sits on the right. Everyone else sits on the left,
-            // including a group singing together: centering those lines made a duet's
-            // simultaneous lines read as one block in the middle of the panel.
-            var side = line.Voice == LyricVoice.Duet
-                ? HorizontalAlignment.Right
-                : HorizontalAlignment.Left;
             host.HorizontalAlignment = side;
             row.Words.HorizontalAlignment = side;
             row.Background.HorizontalAlignment = side;
@@ -578,7 +584,9 @@ internal sealed class LyricsPanel : IDisposable
             if (next is not null && line.End is { } lineEnd && next.Time - lineEnd >= InterludeSeconds)
             {
                 row.DotsHost = MakeDots(row.Dots, fontSize, _lineGap * 0.75);
-                row.DotsHost.HorizontalAlignment = side;
+                // The dots lead into the next line, so in a duet they sit on that line's
+                // side, not the side of the singer who just finished.
+                row.DotsHost.HorizontalAlignment = SideOf(next);
                 var gapStart = lineEnd;
                 row.DotsHost.Tapped += (_, _) =>
                 {
@@ -601,6 +609,11 @@ internal sealed class LyricsPanel : IDisposable
         ApplyTextWidth();
         UpdateSpacers();
     }
+
+    /// <summary>Which side of the panel a line belongs to. A duet's second singer sits on
+    /// the right; everyone else, including a group singing together, sits on the left.</summary>
+    private static HorizontalAlignment SideOf(LyricLine line) =>
+        line.Voice == LyricVoice.Duet ? HorizontalAlignment.Right : HorizontalAlignment.Left;
 
     /// <summary>Three dots that fill in turn through an instrumental gap; they grow with
     /// the words so the pause reads at any size. They sit in the flow at half opacity even

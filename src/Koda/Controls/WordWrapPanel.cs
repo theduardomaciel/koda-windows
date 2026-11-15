@@ -41,6 +41,25 @@ internal sealed class WordWrapPanel : Panel
     /// <summary>The space between wrapped visual lines.</summary>
     public double RowSpacing { get; set; }
 
+    /// <summary>Whether the wrapped lines end at the same right edge, for a duet line that
+    /// belongs on the right of the panel.</summary>
+    public bool AlignRight
+    {
+        get => _alignRight;
+        set
+        {
+            if (_alignRight == value)
+            {
+                return;
+            }
+
+            _alignRight = value;
+            InvalidateArrange();
+        }
+    }
+
+    private bool _alignRight;
+
     /// <summary>The room kept clear on the right for the scrollbar.</summary>
     public double Inset { get; set; } = 24;
 
@@ -100,9 +119,12 @@ internal sealed class WordWrapPanel : Panel
     {
         var bounded = WrapWidth > 0 ? WrapWidth : finalSize.Width;
         var limit = Math.Max(0, bounded - Inset);
-        var x = 0.0;
-        var y = 0.0;
+        var right = Math.Min(finalSize.Width, limit);
+
+        var rowStart = 0;
+        var rowWidth = 0.0;
         var rowHeight = 0.0;
+        var y = 0.0;
 
         for (var index = 0; index < Children.Count;)
         {
@@ -118,23 +140,33 @@ internal sealed class WordWrapPanel : Panel
             }
             while (index < Children.Count && index < _joins.Count && _joins[index]);
 
-            if (x > 0 && x + unitWidth > limit)
+            if (rowWidth > 0 && rowWidth + unitWidth > limit)
             {
+                PlaceRow(rowStart, start, rowWidth, rowHeight, y, right);
                 y += rowHeight + RowSpacing;
-                x = 0;
+                rowStart = start;
+                rowWidth = 0;
                 rowHeight = 0;
             }
 
-            for (var part = start; part < index; part++)
-            {
-                var size = Children[part].DesiredSize;
-                Children[part].Arrange(new Rect(x, y, size.Width, size.Height));
-                x += size.Width;
-            }
-
+            rowWidth += unitWidth;
             rowHeight = Math.Max(rowHeight, unitHeight);
         }
 
+        PlaceRow(rowStart, Children.Count, rowWidth, rowHeight, y, right);
         return finalSize;
+    }
+
+    /// <summary>Places one visual line of words, ending at the same right edge when the
+    /// line belongs on the right.</summary>
+    private void PlaceRow(int start, int end, double width, double height, double y, double right)
+    {
+        var x = AlignRight ? Math.Max(0, right - width) : 0;
+        for (var part = start; part < end; part++)
+        {
+            var size = Children[part].DesiredSize;
+            Children[part].Arrange(new Rect(x, y, size.Width, size.Height));
+            x += size.Width;
+        }
     }
 }
