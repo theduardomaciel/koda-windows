@@ -117,12 +117,34 @@ public sealed partial class NowPlayingPage : Page
         // reads as a sequence of keyframes rather than a word being sung.
         _lyrics.PositionSource = () => Playback.PositionSeconds;
         _lyrics.ScrolledAwayChanged = away => ShowFollowPill(away);
-        LyricsScroll.PointerPressed += (_, _) => _lyrics.UserScrolled = true;
+        // A touch drag marks the press as handled when the ScrollViewer starts panning,
+        // so the plain event never arrives; without handledEventsToo the panel would keep
+        // following while a finger is moving it.
+        LyricsScroll.AddHandler(
+            UIElement.PointerPressedEvent,
+            new PointerEventHandler((_, _) => _lyrics.UserScrolled = true),
+            handledEventsToo: true);
         // The ScrollViewer marks the wheel as handled while it scrolls, so a plain handler
         // never hears it; the panel would keep quiet and never offer the way back.
         LyricsScroll.AddHandler(
             UIElement.PointerWheelChangedEvent,
             new PointerEventHandler((_, _) => _lyrics.UserScrolled = true),
+            handledEventsToo: true);
+        // The keyboard scrolls the panel too; the same rule applies.
+        LyricsScroll.AddHandler(
+            UIElement.KeyDownEvent,
+            new KeyEventHandler((_, e) =>
+            {
+                if (e.Key is Windows.System.VirtualKey.Up
+                    or Windows.System.VirtualKey.Down
+                    or Windows.System.VirtualKey.PageUp
+                    or Windows.System.VirtualKey.PageDown
+                    or Windows.System.VirtualKey.Home
+                    or Windows.System.VirtualKey.End)
+                {
+                    _lyrics.UserScrolled = true;
+                }
+            }),
             handledEventsToo: true);
         // The follow pill's chevron points at the line being sung; keep it true as the
         // panel scrolls, including with the wheel or the scrollbar.

@@ -783,12 +783,28 @@
                         <StackPanel VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="Look them up again" Style="{ThemeResource BodyStrongTextBlockStyle}" />
                             <TextBlock
-                                Text="Forgets the lyrics found this session, so the next song asks the services again."
+                                Text="Empties the saved lyrics, so the next song asks the services again."
                                 Style="{ThemeResource CaptionTextBlockStyle}"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 TextWrapping="Wrap" />
                         </StackPanel>
                         <Button Grid.Column="1" VerticalAlignment="Center" Content="Look up" Click="OnRelookLyricsClick" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Lyrics cache" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                x:Name="LyricsCacheText"
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button Grid.Column="1" VerticalAlignment="Center" Content="Clear" Click="OnClearLyricsCacheClick" />
                     </Grid>
                 </StackPanel>
             </Border>

@@ -194,6 +194,7 @@ public sealed partial class SettingsPage : Page
 
         _loaded = true;
         RefreshStorage();
+        RefreshLyricsCache();
         RefreshDownloads();
         RefreshSuggestLess();
         RefreshLastFm();
@@ -1037,8 +1038,31 @@ public sealed partial class SettingsPage : Page
 
     private void OnRelookLyricsClick(object sender, RoutedEventArgs e)
     {
-        LyricsService.Forget();
+        // Both the session's answers and the ones on disk go: otherwise the next look
+        // would read the saved answer and never ask the services.
+        LyricsService.ClearCache();
+        RefreshLyricsCache();
         Notice("The lyrics will be looked up again.");
+    }
+
+    private void OnClearLyricsCacheClick(object sender, RoutedEventArgs e)
+    {
+        LyricsService.ClearCache();
+        RefreshLyricsCache();
+        Notice("The lyrics cache is empty.");
+    }
+
+    /// <summary>How much room the lyrics cache takes, said plainly.</summary>
+    private void RefreshLyricsCache()
+    {
+        var songs = LyricsService.CachedSongs;
+        LyricsCacheText.Text = songs switch
+        {
+            0 => "No lyrics are kept yet. They are saved after a song is looked up, so its words open without asking again.",
+            1 => $"{Size(LyricsService.CacheBytes)} used by 1 song.",
+            _ => $"{Size(LyricsService.CacheBytes)} used by {songs} songs.",
+        };
+        ApplySettingsSearch();
     }
 
     // MARK: display

@@ -57,19 +57,32 @@ public sealed class LyricsClient : IDisposable
     /// <summary>Lyrics already found this session, so reopening the panel or replaying a song is instant.</summary>
     private static readonly ConcurrentDictionary<string, Lyrics> Cache = new(StringComparer.Ordinal);
 
+    /// <summary>The same song asked for twice at once (the player's prefetch and the panel):
+    /// both wait on one look, instead of asking every service twice.</summary>
+    private readonly ConcurrentDictionary<string, Task<Lyrics?>> _loading = new(StringComparer.Ordinal);
+
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
+    private readonly LyricsStore? _store;
 
     /// <param name="http">The session to use; a private one when null.</param>
-    public LyricsClient(HttpClient? http = null)
+    /// <param name="store">Where found lyrics are kept between launches; memory only when null.</param>
+    public LyricsClient(HttpClient? http = null, LyricsStore? store = null)
     {
         _ownsHttp = http is null;
+        _store = store;
         _http = http ?? new HttpClient(new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
             MaxConnectionsPerServer = 6,
         }) { Timeout = TimeSpan.FromSeconds(8) };
     }
+
+    /// <summary>How much room the lyrics cache takes on disk.</summary>
+    public long CacheBytes => _store?.BytesUsed ?? 0;
+
+    /// <summary>How many songs have lyrics kept on disk.</summary>
+    public int CachedSongs => _store?.Count ?? 0;
 
     /// <summary>Lyrics for <paramref name="song"/> from the given services, ranked in the order given.</summary>
     public async Task<Lyrics?> LyricsFor(
@@ -91,25 +104,67 @@ public sealed class LyricsClient : IDisposable
             return cached;
         }
 
-        var found = await Best(song, wanted, cancellation).ConfigureAwait(false);
-        if (found is not null)
-        {
-            Cache[key] = found;
-            if (Cache.Count > 60)
-            {
-                // The oldest answer goes; the cache is a convenience, not a store.
-                foreach (var entry in Cache.Take(Cache.Count - 60))
-                {
-                    Cache.TryRemove(entry.Key, out _);
-                }
-            }
-        }
-
-        return found;
+        // The client is asked for the same song twice in quick succession (the player
+        // prefetches when the song starts, the panel asks when it opens). Both share
+        // one look, so the services are asked once and the cache is filled once.
+        var loading = _loading.GetOrAdd(key, _ => Load(song, wanted, key));
+        return await loading.WaitAsync(cancellation).ConfigureAwait(false);
     }
 
-    /// <summary>Forget lyrics found this session, so the next look asks the services again.</summary>
-    public static void ClearCache() => Cache.Clear();
+    private async Task<Lyrics?> Load(Song song, IReadOnlyList<LyricsSource> wanted, string key)
+    {
+        try
+        {
+            // A song heard before opens from the disk, before any service is asked.
+            if (_store is not null
+                && await _store.ReadAsync(song.Id, wanted).ConfigureAwait(false) is { } kept)
+            {
+                Remember(key, kept);
+                return kept;
+            }
+
+            var found = await Best(song, wanted, CancellationToken.None).ConfigureAwait(false);
+            if (found is not null)
+            {
+                Remember(key, found);
+                if (_store is not null)
+                {
+                    await _store.WriteAsync(song.Id, wanted, found).ConfigureAwait(false);
+                }
+            }
+
+            return found;
+        }
+        finally
+        {
+            _loading.TryRemove(key, out _);
+        }
+    }
+
+    /// <summary>Keeps the answer for the rest of the session, letting the oldest go past a limit.</summary>
+    private static void Remember(string key, Lyrics lyrics)
+    {
+        Cache[key] = lyrics;
+        if (Cache.Count > 60)
+        {
+            // The cache is a convenience, not a store.
+            foreach (var entry in Cache.Take(Cache.Count - 60))
+            {
+                Cache.TryRemove(entry.Key, out _);
+            }
+        }
+    }
+
+    /// <summary>Forget lyrics found this session, so the next look asks the services again.
+    /// The disk keeps what it had: that is what makes a song heard days ago open instantly.</summary>
+    public static void ForgetSession() => Cache.Clear();
+
+    /// <summary>Empty both the session's lyrics and the ones kept on disk.</summary>
+    public void ClearCache()
+    {
+        Cache.Clear();
+        _store?.Clear();
+    }
 
     // MARK: Choosing
 

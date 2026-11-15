@@ -499,6 +499,14 @@ internal sealed class LyricsPanel : IDisposable
             }
 
             _userScrolled = value;
+            if (value)
+            {
+                // The listener has taken the panel: let go of the glide at once, rather
+                // than fighting their scroll for the rest of its half second.
+                _tween.Stop();
+                _needsGlide = false;
+            }
+
             ScrolledAwayChanged?.Invoke(value);
         }
     }
@@ -2574,18 +2582,21 @@ internal sealed class LyricsPanel : IDisposable
         _tween.Stop();
         _tweenStart = start;
         _tweenTarget = target;
-        _tweenElapsed = 0;
+        _tweenClock.Restart();
         _tween.Start();
     }
 
     private double _tweenStart;
     private double _tweenTarget;
-    private int _tweenElapsed;
+
+    /// <summary>How long the glide has actually been running. The timer's ticks are not
+    /// exactly 16 ms under load; counting assumed ticks made a half-second glide last
+    /// several seconds, and that was the panel holding the listener's scroll.</summary>
+    private readonly System.Diagnostics.Stopwatch _tweenClock = new();
 
     private void OnTweenTick(object? sender, object args)
     {
-        _tweenElapsed += 16;
-        var k = Math.Min(1.0, _tweenElapsed / (double)GlideMilliseconds);
+        var k = Math.Min(1.0, _tweenClock.Elapsed.TotalMilliseconds / GlideMilliseconds);
         var eased = EaseOut(k);
         _scroll.ChangeView(null, _tweenStart + (_tweenTarget - _tweenStart) * eased, null, true);
         if (k >= 1)
