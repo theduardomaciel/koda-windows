@@ -254,6 +254,10 @@ internal sealed class LyricsPanel : IDisposable
         public double PaintedY { get; set; } = double.NaN;
         public double PaintedGlow { get; set; } = -1;
         public double PaintedBlur { get; set; } = -1;
+        /// <summary>True once this letter's glow has actually been visible.</summary>
+        public bool GlowShown { get; set; }
+        /// <summary>True once the glow ended and its surfaces were freed.</summary>
+        public bool GlowDone { get; set; }
     }
 
     /// <summary>One line in the panel: its words, its backing vocals and the line itself.</summary>
@@ -519,6 +523,13 @@ internal sealed class LyricsPanel : IDisposable
         if (next < _position - 0.15 || next > _position + 0.6)
         {
             _needsFullPaint = true;
+        }
+
+        // A backward jump is a seek/replay. The glows for the target line must be
+        // rebuilt, including letters whose glow had already ended and been freed.
+        if (next < _position - 0.15)
+        {
+            ReleaseGlows();
         }
 
         _position = next;
@@ -1421,13 +1432,15 @@ internal sealed class LyricsPanel : IDisposable
         if (!ReferenceEquals(row, _current))
         {
             _current = row;
-            ScheduleGlows(index);
             if (!_userScrolled)
             {
                 GlideTo(row);
             }
         }
 
+        // Also runs after a seek: the window was invalidated so the target line's
+        // freed glows are rebuilt even when the line index did not change.
+        ScheduleGlows(index);
         Paint(index);
     }
 
@@ -2003,18 +2016,29 @@ internal sealed class LyricsPanel : IDisposable
                     shadow.BlurRadius = blur;
                     letter.PaintedBlur = blur;
                 }
+
+                letter.GlowShown = true;
             }
         }
-        else if (letter.Shadow is { } idleShadow
-            && (letter.PaintedGlow != 0 || letter.PaintedBlur != (float)(_glowBlurFixed ? 12 : 0)))
+        else
         {
-            // Keep the sprite and its alpha mask for the life of the letter. Disposing
-            // and recreating them at every held syllable caused periodic GPU/GC hitches;
-            // hiding the shadow is free.
-            idleShadow.Opacity = 0;
-            idleShadow.BlurRadius = _glowBlurFixed ? 12 : 0;
-            letter.PaintedGlow = 0;
-            letter.PaintedBlur = _glowBlurFixed ? 12 : 0;
+            var idleBlur = _glowBlurFixed ? 12f : 0f;
+            if (letter.Shadow is { } idleShadow
+                && (letter.PaintedGlow != 0 || letter.PaintedBlur != idleBlur))
+            {
+                idleShadow.Opacity = 0;
+                idleShadow.BlurRadius = idleBlur;
+                letter.PaintedGlow = 0;
+                letter.PaintedBlur = idleBlur;
+            }
+
+            // The halo is invisible now (opacity 0). Free the sprite and its mask
+            // here instead of holding them until the line leaves the ±1 window.
+            if (letter.GlowShown && letter.PaintedGlow == 0)
+            {
+                ReleaseGlow(letter);
+                letter.GlowDone = true;
+            }
         }
     }
 
@@ -2070,6 +2094,7 @@ internal sealed class LyricsPanel : IDisposable
         letter.GlowBrush = glowBrush;
         letter.PaintedGlow = 0;
         letter.PaintedBlur = _glowBlurFixed ? 12 : 0;
+        letter.GlowDone = false;
         AddLiveGlow(letter);
     }
 
@@ -2125,6 +2150,7 @@ internal sealed class LyricsPanel : IDisposable
         // The framework may return this same brush again for the same element. Keep it
         // alive for the GC; the disposed shadow owns the compositor reference.
         letter.Mask = null;
+        letter.GlowShown = false;
         letter.PaintedGlow = -1;
         letter.PaintedBlur = -1;
     }
@@ -2144,6 +2170,7 @@ internal sealed class LyricsPanel : IDisposable
                 {
                     letter.GlowWanted = false;
                     ReleaseGlow(letter);
+                    letter.GlowDone = false;
                 }
             }
 
@@ -2153,6 +2180,7 @@ internal sealed class LyricsPanel : IDisposable
                 {
                     letter.GlowWanted = false;
                     ReleaseGlow(letter);
+                    letter.GlowDone = false;
                 }
             }
         }
@@ -2192,6 +2220,7 @@ internal sealed class LyricsPanel : IDisposable
             letter.GlowWanted = false;
             _glowWarmupSet.Remove(letter);
             ReleaseGlow(letter);
+            letter.GlowDone = false;
             _liveGlowSet.Remove(letter);
             _liveGlows.RemoveAt(i);
         }
@@ -2205,7 +2234,7 @@ internal sealed class LyricsPanel : IDisposable
                 {
                     letter.GlowWanted = true;
                     AddLiveGlow(letter);
-                    if (letter.GlowVisual is null && _glowWarmupSet.Add(letter))
+                    if (letter.GlowVisual is null && !letter.GlowDone && _glowWarmupSet.Add(letter))
                     {
                         _glowWarmup.Enqueue(letter);
                     }
@@ -2218,7 +2247,7 @@ internal sealed class LyricsPanel : IDisposable
                 {
                     letter.GlowWanted = true;
                     AddLiveGlow(letter);
-                    if (letter.GlowVisual is null && _glowWarmupSet.Add(letter))
+                    if (letter.GlowVisual is null && !letter.GlowDone && _glowWarmupSet.Add(letter))
                     {
                         _glowWarmup.Enqueue(letter);
                     }
@@ -2235,7 +2264,8 @@ internal sealed class LyricsPanel : IDisposable
         {
             var letter = _glowWarmup.Dequeue();
             _glowWarmupSet.Remove(letter);
-            if (!letter.GlowWanted || letter.GlowVisual is not null || letter.GlowHost is null)
+            if (!letter.GlowWanted || letter.GlowVisual is not null || letter.GlowHost is null
+                || letter.GlowDone)
             {
                 continue;
             }
