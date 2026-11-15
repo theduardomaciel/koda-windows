@@ -90,6 +90,15 @@ public sealed partial class MainWindow : Window
     /// to its icons; above it both open up again.</summary>
     private const double NarrowWindowWidth = 860;
 
+    /// <summary>Below this width the account chip drops the name and keeps only the avatar.
+    /// Measured in DIPs on the title bar itself.</summary>
+    private const double ProfileNameMinWidth = 980;
+
+    /// <summary>The visual nudge that balances the search against the full profile chip.
+    /// It ramps in with the extra room the full profile layout provides, so narrowing the
+    /// window closes the gap instead of pushing the search into the chip.</summary>
+    private const double TitleSearchNudge = 128;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -300,7 +309,11 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        TitleProfileName.Visibility = width < 980 ? Visibility.Collapsed : Visibility.Visible;
+        var fullProfile = width >= ProfileNameMinWidth;
+        TitleProfileName.Visibility = fullProfile ? Visibility.Visible : Visibility.Collapsed;
+        // The content column gains a pixel on each side for every two the window gains,
+        // so spend at most half of that on the nudge and keep the rest as the chip's gap.
+        TitleSearchOffset.X = Math.Clamp((width - ProfileNameMinWidth) / 2, 0, TitleSearchNudge);
         TitleSearch.Width = width >= 1040 ? 420 : width >= NarrowWindowWidth ? 340 : 240;
         CollapseSidebarForWidth(width);
         DispatcherQueue.TryEnqueue(
@@ -1325,10 +1338,14 @@ public sealed partial class MainWindow : Window
     {
         var roster = Koda.Services.Profiles.Roster;
         var active = roster.Active;
-        TitleProfilePicture.DisplayName = active.ListeningName;
-        TitleProfilePicture.ProfilePicture = active.ListeningPhoto is { } photo && Uri.TryCreate(photo, UriKind.Absolute, out var url)
+        var photo = active.ListeningPhoto is { } photoUrl && Uri.TryCreate(photoUrl, UriKind.Absolute, out var url)
             ? new BitmapImage(url) { DecodePixelWidth = 52 }
             : null;
+
+        TitleProfilePicture.ProfilePicture = photo;
+        // PersonPicture draws its initials under the photo. Leave them blank when there is
+        // a photo, or they show through as the TitleBar dims the chip in an inactive window.
+        TitleProfilePicture.DisplayName = photo is null ? active.ListeningName : "";
         TitleProfileName.Text = active.ListeningName;
 
         var label = $"{active.ListeningName}, {active.ListeningSubtitle}. Switch account or channel";

@@ -41,7 +41,14 @@
                     QueryIcon="Find"
                     TextChanged="OnSearchTextChanged"
                     QuerySubmitted="OnSearchSubmitted"
-                    AutomationProperties.Name="Search YouTube Music" />
+                    AutomationProperties.Name="Search YouTube Music">
+                    <!-- The built-in TitleBar centers Content in the space left after the
+                         account chip, min drag strip and caption inset. Nudge the field
+                         right so it reads closer to the window's center. -->
+                    <AutoSuggestBox.RenderTransform>
+                        <TranslateTransform x:Name="TitleSearchOffset" />
+                    </AutoSuggestBox.RenderTransform>
+                </AutoSuggestBox>
             </TitleBar.Content>
             <TitleBar.RightHeader>
                 <Button
