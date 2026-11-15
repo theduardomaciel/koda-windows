@@ -122,6 +122,7 @@ internal sealed class LyricsPanel : IDisposable
     private bool _visible;
     private bool _playing;
     private bool _needsGlide;
+    private bool _needsFullPaint;
     private double _position;
     private double _panelWidth;
     private double _panelHeight;
@@ -193,49 +194,55 @@ internal sealed class LyricsPanel : IDisposable
         };
 
         // The words are laid out in rows that fit the panel, so a line breaks where it should.
-        _scroll.SizeChanged += (_, args) =>
+        _scroll.SizeChanged += (_, _) => RefreshLayout();
+    }
+
+    /// <summary>Re-reads the panel's size and reflows. Called when the window moved to
+    /// another display or zoom, where the ScrollViewer's own SizeChanged can be missed.</summary>
+    public void RefreshLayout()
+    {
+        var width = _scroll.ActualWidth;
+        var height = _scroll.ActualHeight;
+        if (width < 1)
         {
-            if (args.NewSize.Width < 1)
-            {
-                return; // collapsed: keep the size the panel had when it was on screen
-            }
+            return; // collapsed: keep the size the panel had when it was on screen
+        }
 
-            var widthChanged = Math.Abs(args.NewSize.Width - _panelWidth) >= 1;
-            var heightChanged = Math.Abs(args.NewSize.Height - _panelHeight) >= 1;
-            if (!widthChanged && !heightChanged)
-            {
-                return;
-            }
+        var widthChanged = Math.Abs(width - _panelWidth) >= 1;
+        var heightChanged = Math.Abs(height - _panelHeight) >= 1;
+        if (!widthChanged && !heightChanged)
+        {
+            return;
+        }
 
-            _panelWidth = args.NewSize.Width;
-            _panelHeight = args.NewSize.Height;
-            UpdateSpacers();
+        _panelWidth = width;
+        _panelHeight = height;
+        UpdateSpacers();
 
-            var oldSize = _fontSize;
-            UpdateScale();
-            var resized = Math.Abs(_fontSize - oldSize) >= 0.25;
-            if (resized)
-            {
-                Reshape();
-            }
+        var oldSize = _fontSize;
+        UpdateScale();
+        var resized = Math.Abs(_fontSize - oldSize) >= 0.25;
+        if (resized)
+        {
+            Reshape();
+        }
 
-            if (resized || widthChanged)
-            {
-                Reflow();
-            }
+        if (resized || widthChanged)
+        {
+            Reflow();
+        }
 
-            // The panel now knows how tall it is: put the line being sung where it belongs.
-            if (_current is not null && !_userScrolled)
-            {
-                GlideTo(_current);
-            }
+        // The panel now knows how tall it is: put the line being sung where it belongs.
+        if (_current is not null && !_userScrolled)
+        {
+            GlideTo(_current);
+        }
 
-            // Apply the new size to the words already on screen, even while paused.
-            if (resized)
-            {
-                Paint();
-            }
-        };
+        // Apply the new size to the words already on screen, even while paused.
+        if (resized)
+        {
+            Paint();
+        }
     }
 
     /// <summary>A line's right-click menu asked to share it: the lines, and the one it was opened on.</summary>
@@ -283,7 +290,16 @@ internal sealed class LyricsPanel : IDisposable
     public double Offset
     {
         get => _offset;
-        set => _offset = value;
+        set
+        {
+            if (Math.Abs(_offset - value) < 0.0001)
+            {
+                return;
+            }
+
+            _offset = value;
+            _needsFullPaint = true;
+        }
     }
 
     /// <summary>Whether the listener has scrolled away; the panel stops following then.</summary>
@@ -316,7 +332,18 @@ internal sealed class LyricsPanel : IDisposable
     }
 
     /// <summary>The song's place in time, with the listener's correction and the lead.</summary>
-    public void SetPosition(double positionSeconds) => _position = positionSeconds + Lead - _offset;
+    public void SetPosition(double positionSeconds)
+    {
+        var next = positionSeconds + Lead - _offset;
+        // A jump means a seek or a replay: the lines behind and ahead must be repainted,
+        // or the line that was partly sung keeps its half-filled words.
+        if (next < _position - 0.15 || next > _position + 0.6)
+        {
+            _needsFullPaint = true;
+        }
+
+        _position = next;
+    }
 
     /// <summary>The appearance settings, read once per fill so a song never changes look
     /// halfway through.</summary>
@@ -508,6 +535,10 @@ internal sealed class LyricsPanel : IDisposable
         // up to the reading position.
         _lines.Children.Add(_spacer);
 
+        // A song opened part way through needs its earlier lines painted as complete and
+        // its later lines left unsung, not everything starting grey.
+        _needsFullPaint = true;
+
         Reflow();
     }
 
@@ -555,8 +586,8 @@ internal sealed class LyricsPanel : IDisposable
             EndPoint = new Windows.Foundation.Point(1, 0),
             GradientStops =
             {
-                new GradientStop { Color = SungColor, Offset = 0 },
-                new GradientStop { Color = SungColor, Offset = 0 },
+                new GradientStop { Color = UnsungColor, Offset = 0 },
+                new GradientStop { Color = UnsungColor, Offset = 0 },
                 new GradientStop { Color = UnsungColor, Offset = 0.0001 },
             },
         };
@@ -853,6 +884,12 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         var time = _position;
+        if (_needsFullPaint)
+        {
+            _needsFullPaint = false;
+            RepaintWords(time);
+        }
+
         PaintInterlude(time);
 
         var index = Lyrics.IndexOf(time, _lyricLines) ?? -1;
@@ -903,6 +940,25 @@ internal sealed class LyricsPanel : IDisposable
     {
         var end = row.Line.End ?? (row.WordItems.Count > 0 ? row.WordItems[^1].Data.End : row.Line.Time);
         return time >= row.Line.Time && time <= end + 0.05;
+    }
+
+    /// <summary>Repaints every word after a seek, so lines ahead are unsung and the lines
+    /// already behind are complete, instead of keeping the old line's partial fill.</summary>
+    private void RepaintWords(double time)
+    {
+        foreach (var row in _rows)
+        {
+            var started = time >= row.Line.Time;
+            foreach (var word in row.WordItems)
+            {
+                Paint(word, time, _motion, started);
+            }
+
+            foreach (var word in row.BackgroundItems)
+            {
+                Paint(word, time, _motion, started);
+            }
+        }
     }
 
     /// <summary>
@@ -990,13 +1046,15 @@ internal sealed class LyricsPanel : IDisposable
     }
 
     /// <summary>One word: how much of it is sung, how far it has risen, how much it glows.</summary>
-    private void Paint(Word word, double time, bool motion)
+    private void Paint(Word word, double time, bool motion, bool lineStarted = true)
     {
         var data = word.Data;
         var classic = _renderer == LyricsRenderer.Classic;
         var expressive = _renderer == LyricsRenderer.Expressive;
         // Classic lights the whole line; the other looks fill each word as it is sung.
-        var fill = classic ? 1 : Math.Clamp((time - data.Start) / Math.Max(0.001, data.End - data.Start), 0, 1);
+        var fill = classic
+            ? (lineStarted ? 1 : 0)
+            : Math.Clamp((time - data.Start) / Math.Max(0.001, data.End - data.Start), 0, 1);
         var rise = motion && _renderer == LyricsRenderer.Sweep ? Math.Clamp((time - data.Start) / RiseSeconds, 0, 1) : 0;
         var eased = 1 - Math.Pow(1 - rise, 3); // quick at first, settling gently
         var sustainStrength = motion && !classic ? Math.Clamp((data.End - data.Start - SustainStart) / SustainStart, 0, 1) : 0;
@@ -1007,11 +1065,35 @@ internal sealed class LyricsPanel : IDisposable
         var front = fill * (1 + feather);
         if (Math.Abs(fill - word.PaintedFill) >= 0.0005)
         {
-            // The colours are set once when the word is made; only the front moves.
+            // An unsung word is wholly grey, including a glyph that overhangs its box on
+            // the left (a "j"); otherwise the clamped first stop leaves a white sliver.
+            // A fully sung word is wholly white, and only the moving front is a gradient.
             word.PaintedFill = fill;
             var stops = word.Fill.GradientStops;
-            stops[1].Offset = Math.Max(0, front - feather);
-            stops[2].Offset = Math.Min(1, Math.Max(front, 0.0001));
+            if (fill <= 0)
+            {
+                stops[0].Color = UnsungColor;
+                stops[1].Color = UnsungColor;
+                stops[2].Color = UnsungColor;
+                stops[1].Offset = 0;
+                stops[2].Offset = 1;
+            }
+            else if (fill >= 1)
+            {
+                stops[0].Color = SungColor;
+                stops[1].Color = SungColor;
+                stops[2].Color = SungColor;
+                stops[1].Offset = 1;
+                stops[2].Offset = 1;
+            }
+            else
+            {
+                stops[0].Color = SungColor;
+                stops[1].Color = SungColor;
+                stops[2].Color = UnsungColor;
+                stops[1].Offset = Math.Max(0, front - feather);
+                stops[2].Offset = Math.Min(1, Math.Max(front, 0.0001));
+            }
         }
 
         // The word rises as it is sung: a ripple through the line.

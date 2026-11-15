@@ -159,6 +159,13 @@ public sealed partial class NowPlayingPage : Page
         App.Library.Changed += OnLibraryChanged;
         App.Settings.Changed += OnSettingsChanged;
         EnergySaver.Changed += OnEnergySaverChanged;
+        // A display scale change (another monitor, a DPI change) does not always reach the
+        // panel's own SizeChanged; the root's change does.
+        if (XamlRoot is { } root)
+        {
+            root.Changed -= OnXamlRootChanged;
+            root.Changed += OnXamlRootChanged;
+        }
         Volume.Value = App.Volume;
         ApplySkipSettings();
         UpdateSleepPill();
@@ -185,6 +192,10 @@ public sealed partial class NowPlayingPage : Page
         App.Library.Changed -= OnLibraryChanged;
         App.Settings.Changed -= OnSettingsChanged;
         EnergySaver.Changed -= OnEnergySaverChanged;
+        if (XamlRoot is { } root)
+        {
+            root.Changed -= OnXamlRootChanged;
+        }
         _lyrics?.Pause();
         Drift.Stop();
     }
@@ -196,6 +207,14 @@ public sealed partial class NowPlayingPage : Page
     private void OnSettingsChanged(Settings settings) => DispatcherQueue.TryEnqueue(ApplySkipSettings);
     private void OnSleepChanged() => DispatcherQueue.TryEnqueue(UpdateSleepPill);
     private void OnEnergySaverChanged() => DispatcherQueue.TryEnqueue(RenderPlayState);
+    private void OnXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) =>
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            // Closing and reopening Now Playing used to be the only way to reflow the
+            // words after a monitor or scale change; force that layout here instead.
+            Root.UpdateLayout();
+            _lyrics?.RefreshLayout();
+        });
 
     // MARK: the song
 
@@ -851,6 +870,14 @@ public sealed partial class NowPlayingPage : Page
             _wide = wide;
             ApplyLayout();
         }
+
+        // The page's own layout changed with the window or display scale; let the panel
+        // re-read its size after this pass, in case its own size event did not arrive.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            Root.UpdateLayout();
+            _lyrics?.RefreshLayout();
+        });
     }
 
     /// <summary>Wide: the player left, the queue panel beside it. Narrow: one column, the queue

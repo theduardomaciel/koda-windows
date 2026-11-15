@@ -212,6 +212,14 @@ public sealed partial class MainWindow : Window
         _zoomTimer.Tick += (_, _) => ZoomBadge.Visibility = Visibility.Collapsed;
 
         ZoomHost.SizeChanged += (_, _) => ApplyZoom();
+        Root.Loaded += (_, _) =>
+        {
+            if (Root.XamlRoot is { } root)
+            {
+                root.Changed -= OnRootChanged;
+                root.Changed += OnRootChanged;
+            }
+        };
         RestoreZoom();
 
         AddShortcuts();
@@ -297,6 +305,15 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnTitleBarSizeChanged(object sender, SizeChangedEventArgs args) => ApplyTitleBarChrome();
+
+    /// <summary>A display scale change can leave the zoomed content at its old DIP size,
+    /// which clips every page. Lay the root out at the new size, then re-apply the zoom.</summary>
+    private void OnRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) =>
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            Root.UpdateLayout();
+            ApplyZoom();
+        });
 
     /// <summary>The bar's own responsive step: the account name and the search field give way
     /// as the window narrows, before anything overlaps. The TitleBar control owns the caption
