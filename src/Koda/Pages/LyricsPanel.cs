@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Koda.Controls;
 using Koda.Core;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -153,8 +154,8 @@ internal sealed class LyricsPanel : IDisposable
         public required LyricLine Line { get; init; }
         /// <summary>The element that holds the line, for finding its place in the panel.</summary>
         public FrameworkElement Host { get; set; } = null!;
-        public required StackPanel Words { get; init; }
-        public required StackPanel Background { get; init; }
+        public required Panel Words { get; init; }
+        public required WordWrapPanel Background { get; init; }
         public List<Word> WordItems { get; } = [];
         public List<Word> BackgroundItems { get; } = [];
         /// <summary>The three dots of the gap that follows this line, when the gap is long.</summary>
@@ -195,54 +196,65 @@ internal sealed class LyricsPanel : IDisposable
 
         // The words are laid out in rows that fit the panel, so a line breaks where it should.
         _scroll.SizeChanged += (_, _) => RefreshLayout();
+        // The pane collapse, a monitor move and a zoom change can all leave the scroll
+        // viewer at a different size without a SizeChanged reaching us; every layout pass
+        // checks, and does nothing when the size is the same.
+        _scroll.LayoutUpdated += (_, _) => RefreshLayout();
     }
 
     /// <summary>Re-reads the panel's size and reflows. Called when the window moved to
     /// another display or zoom, where the ScrollViewer's own SizeChanged can be missed.</summary>
     public void RefreshLayout()
     {
+        if (SyncSize())
+        {
+            Paint();
+        }
+    }
+
+    /// <summary>Reads the width and height the lyrics are actually given, not the last size
+    /// an event reported, and reflows when they changed. A sidebar, a monitor or a zoom
+    /// change can move the panel without any of those events reaching us. Returns whether
+    /// it re-measured.</summary>
+    private bool SyncSize()
+    {
         var width = _scroll.ActualWidth;
         var height = _scroll.ActualHeight;
         if (width < 1)
         {
-            return; // collapsed: keep the size the panel had when it was on screen
+            return false; // collapsed: keep the size the panel had when it was on screen
         }
 
-        var widthChanged = Math.Abs(width - _panelWidth) >= 1;
-        var heightChanged = Math.Abs(height - _panelHeight) >= 1;
+        var widthChanged = Math.Abs(width - _panelWidth) >= 0.5;
+        var heightChanged = Math.Abs(height - _panelHeight) >= 0.5;
         if (!widthChanged && !heightChanged)
         {
-            return;
+            return false;
         }
 
         _panelWidth = width;
         _panelHeight = height;
+        ApplyTextWidth();
         UpdateSpacers();
 
         var oldSize = _fontSize;
         UpdateScale();
-        var resized = Math.Abs(_fontSize - oldSize) >= 0.25;
-        if (resized)
+        if (Math.Abs(_fontSize - oldSize) >= 0.25)
         {
             Reshape();
         }
 
-        if (resized || widthChanged)
+        // Measure the new wrap/size before aiming the scroll at the line being sung.
+        _scroll.UpdateLayout();
+
+        // A display, pane or zoom change is a fresh frame: put the sung line back on the
+        // reading anchor at once, even if the listener had scrolled away before the change.
+        if (_current is not null)
         {
-            Reflow();
+            JumpTo(_current);
         }
 
-        // The panel now knows how tall it is: put the line being sung where it belongs.
-        if (_current is not null && !_userScrolled)
-        {
-            GlideTo(_current);
-        }
-
-        // Apply the new size to the words already on screen, even while paused.
-        if (resized)
-        {
-            Paint();
-        }
+        return true;
     }
 
     /// <summary>A line's right-click menu asked to share it: the lines, and the one it was opened on.</summary>
@@ -414,7 +426,7 @@ internal sealed class LyricsPanel : IDisposable
             };
             Shape(plain, size);
             _lines.Children.Add(plain);
-            Reflow();
+            UpdateSpacers();
             return;
         }
 
@@ -433,8 +445,10 @@ internal sealed class LyricsPanel : IDisposable
             var row = new Row
             {
                 Line = line,
-                Words = new StackPanel { Spacing = 4 },
-                Background = new StackPanel { Spacing = 2, Opacity = _idleFar * 0.7 },
+                Words = line.Words.Count == 0
+                    ? new StackPanel { Margin = new Thickness(0, 0, 24, 0) }
+                    : new WordWrapPanel { RowSpacing = 4 },
+                Background = new WordWrapPanel { RowSpacing = 2, Opacity = _idleFar * 0.7 },
             };
 
             var halfGap = _lineGap / 2;
@@ -478,6 +492,7 @@ internal sealed class LyricsPanel : IDisposable
             }
             else
             {
+                var wrap = (WordWrapPanel)row.Words;
                 for (var wordIndex = 0; wordIndex < line.Words.Count; wordIndex++)
                 {
                     var item = MakeWord(
@@ -485,6 +500,7 @@ internal sealed class LyricsPanel : IDisposable
                         fontSize,
                         joinsPrevious: JoinsPrevious(line, wordIndex));
                     row.WordItems.Add(item);
+                    wrap.Add(item.Element, item.JoinsPrevious);
                 }
             }
 
@@ -509,6 +525,7 @@ internal sealed class LyricsPanel : IDisposable
                 var spoken = text == word.Text ? word : word with { Text = text };
                 var item = MakeWord(spoken, fontSize * 0.7, soft: true);
                 row.BackgroundItems.Add(item);
+                row.Background.Add(item.Element, joinsPrevious: false);
             }
 
             if (row.BackgroundItems.Count > 0)
@@ -539,7 +556,8 @@ internal sealed class LyricsPanel : IDisposable
         // its later lines left unsung, not everything starting grey.
         _needsFullPaint = true;
 
-        Reflow();
+        ApplyTextWidth();
+        UpdateSpacers();
     }
 
     /// <summary>Three dots that fill in turn through an instrumental gap; they grow with
@@ -633,35 +651,6 @@ internal sealed class LyricsPanel : IDisposable
             line.Text.Contains(joined, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// The words of a line are set left to right and wrapped like text, so a line breaks
-    /// the same way whether it is being sung or resting.
-    /// </summary>
-    private void Reflow()
-    {
-        UpdateSpacers();
-
-        var width = _panelWidth - 24;
-        if (width <= 0)
-        {
-            return;
-        }
-
-        foreach (var row in _rows)
-        {
-            // A line-timed row holds its line text directly; only word rows are laid out.
-            if (row.WordItems.Count > 0)
-            {
-                LayOut(row.Words, row.WordItems, width);
-            }
-
-            if (row.BackgroundItems.Count > 0)
-            {
-                LayOut(row.Background, row.BackgroundItems, width);
-            }
-        }
-    }
-
     /// <summary>Re-shapes the words already on the panel when the fitted text size changes
     /// (a narrower window, a DPI change or UI zoom), keeping the same elements.</summary>
     private void Reshape()
@@ -703,8 +692,35 @@ internal sealed class LyricsPanel : IDisposable
     {
         Shape(word.Element, size, soft);
         word.Element.Margin = new Thickness(0, 0, word.Data.SpaceAfter ? size * WordSpacing : 0, 0);
-        word.Element.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
         word.PaintedRise = -1; // the lift distance changed with the size
+    }
+
+    /// <summary>Gives every word panel the width to wrap against, and the line-timed text
+    /// the width to wrap inside. Called from the width the scroll viewer actually has.</summary>
+    private void ApplyTextWidth()
+    {
+        if (_panelWidth <= 0)
+        {
+            return;
+        }
+
+        var textWidth = Math.Max(0, _panelWidth - 24);
+        foreach (var row in _rows)
+        {
+            if (row.Words is WordWrapPanel wrap)
+            {
+                wrap.WrapWidth = _panelWidth;
+            }
+            else
+            {
+                foreach (var text in row.Words.Children.OfType<TextBlock>())
+                {
+                    text.MaxWidth = textWidth;
+                }
+            }
+
+            row.Background.WrapWidth = _panelWidth;
+        }
     }
 
     /// <summary>The room above and below the words: the first and last lines can reach the
@@ -713,53 +729,6 @@ internal sealed class LyricsPanel : IDisposable
     {
         _topSpacer.Height = Math.Max(0, _scroll.ViewportHeight * ReadingAnchor);
         _spacer.Height = Math.Max(0, _scroll.ViewportHeight);
-    }
-
-    private void LayOut(StackPanel panel, List<Word> words, double width)
-    {
-        // Each word still belongs to the line it was laid out on last time; clearing the panel
-        // drops those lines but not the words from them, and a XAML element cannot be added to
-        // a second parent (0x800F1000, which crashed the app on a resize).
-        foreach (var old in panel.Children.OfType<StackPanel>())
-        {
-            old.Children.Clear();
-        }
-
-        panel.Children.Clear();
-        StackPanel? line = null;
-        var used = 0.0;
-        for (var index = 0; index < words.Count;)
-        {
-            // A word the provider split into syllables is one unit: a line may not break
-            // inside it. The cap keeps a language without spaces from making the line one
-            // unbreakable run.
-            var start = index;
-            var unitWidth = 0.0;
-            var parts = 0;
-            do
-            {
-                // DesiredSize already carries the word's trailing-space margin; adding the
-                // margin again made a line break one word early, leaving a short ragged line.
-                unitWidth += words[index].Element.DesiredSize.Width;
-                index++;
-                parts++;
-            }
-            while (index < words.Count && words[index].JoinsPrevious && parts < 4);
-
-            if (line is null || used + unitWidth > width)
-            {
-                line = new StackPanel { Orientation = Orientation.Horizontal };
-                panel.Children.Add(line);
-                used = 0;
-            }
-
-            for (var part = start; part < index; part++)
-            {
-                line.Children.Add(words[part].Element);
-            }
-
-            used += unitWidth;
-        }
     }
 
     /// <summary>Puts the panel on screen with a short fade, and starts it following the song.</summary>
@@ -779,15 +748,16 @@ internal sealed class LyricsPanel : IDisposable
         if (Math.Abs(_fontSize - previousSize) >= 0.25)
         {
             Reshape();
-            Reflow();
         }
+
+        _scroll.UpdateLayout();
 
         // The panel has just come into view: light the line being sung and place it now
         // that the panel knows its height (before that, there was nothing to measure against).
         Follow();
         if (_current is not null)
         {
-            GlideTo(_current);
+            JumpTo(_current);
         }
 
         // The fade is the app's own pattern: a storyboard on the element's Opacity.
@@ -877,6 +847,10 @@ internal sealed class LyricsPanel : IDisposable
     /// </summary>
     private void Paint()
     {
+        // The lyrics always fit the room they are actually given, even if the size events
+        // for a pane/display/zoom change never arrived.
+        SyncSize();
+
         if (_needsGlide && _current is not null && _scroll.ViewportHeight > 1)
         {
             _needsGlide = false;
@@ -902,17 +876,23 @@ internal sealed class LyricsPanel : IDisposable
             row.Opacity = sung ? 1 : distance <= 1 ? _idleNear : _idleFar;
 
             // The rows step back with a fade alone: scaling them by a hair made a new line
-            // snap when the fill took over the transform.
+            // snap when the fill took over the transform. While paused the fade would only
+            // creep (there is no frame timer), so the row takes its target at once.
             if (Math.Abs(row.Words.Opacity - row.Opacity) >= 0.001)
             {
-                row.Words.Opacity = Approach(row.Words.Opacity, row.Opacity);
+                row.Words.Opacity = _playing ? Approach(row.Words.Opacity, row.Opacity) : row.Opacity;
             }
 
-            if (row.BackgroundItems.Count > 0 &&
-                Math.Abs(row.Background.Opacity - row.Opacity * 0.7) >= 0.001)
+            if (row.BackgroundItems.Count > 0)
             {
                 // Backing vocals step back with their line, at 70% of its weight.
-                row.Background.Opacity = Approach(row.Background.Opacity, row.Opacity * 0.7);
+                var target = row.Opacity * 0.7;
+                if (Math.Abs(row.Background.Opacity - target) >= 0.001)
+                {
+                    row.Background.Opacity = _playing
+                        ? Approach(row.Background.Opacity, target)
+                        : target;
+                }
             }
 
             if (!sung)
@@ -1124,6 +1104,32 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         return current + step;
+    }
+
+    /// <summary>Places the line being sung at the reading anchor at once, for a fresh layout
+    /// or a paused panel where a glide would be wasted or leave it off the anchor.</summary>
+    private void JumpTo(Row row)
+    {
+        if (_scroll.ViewportHeight <= 1)
+        {
+            _needsGlide = true;
+            return;
+        }
+
+        double target;
+        try
+        {
+            var offset = row.Host.TransformToVisual(_lines)
+                .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+            target = Math.Max(0, offset - _scroll.ViewportHeight * ReadingAnchor);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        _tween.Stop();
+        _scroll.ChangeView(null, target, null, true);
     }
 
     /// <summary>The glide to the line being sung: a spring, never a jump.</summary>

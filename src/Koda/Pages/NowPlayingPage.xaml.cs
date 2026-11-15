@@ -74,6 +74,9 @@ public sealed partial class NowPlayingPage : Page
         UpNext.ItemsSource = _upcoming;
         UpNext.ContextRequested += OnUpNextContext;
         Loaded += (_, _) => EnsureLyricsMask();
+        // A pane collapse or a display change can resize the page without the panel's own
+        // size event arriving; every page layout pass asks the panel to check its size.
+        Root.LayoutUpdated += (_, _) => _lyrics?.RefreshLayout();
 
         var escape = new KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
         escape.Invoked += (_, args) =>
@@ -208,13 +211,30 @@ public sealed partial class NowPlayingPage : Page
     private void OnSleepChanged() => DispatcherQueue.TryEnqueue(UpdateSleepPill);
     private void OnEnergySaverChanged() => DispatcherQueue.TryEnqueue(RenderPlayState);
     private void OnXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) =>
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryEnqueue(RelayoutPage);
+
+    /// <summary>Re-measures the page at the room its frame has now, then tells the lyrics
+    /// panel to read its new size. A page laid out before a pane or display change keeps its
+    /// old width otherwise, and reopening it was the only way to make it measure again.</summary>
+    private void RelayoutPage()
+    {
+        // Measure against the frame, not this page's previous ActualWidth: the frame is the
+        // remaining room after the sidebar, and the page can be wider than it before a
+        // re-measure.
+        var width = Frame?.ActualWidth ?? ActualWidth;
+        var height = Frame?.ActualHeight ?? ActualHeight;
+        if (width > 1 && height > 1)
         {
-            // Closing and reopening Now Playing used to be the only way to reflow the
-            // words after a monitor or scale change; force that layout here instead.
-            Root.UpdateLayout();
-            _lyrics?.RefreshLayout();
-        });
+            Measure(new Windows.Foundation.Size(width, height));
+            Arrange(new Windows.Foundation.Rect(0, 0, width, height));
+        }
+
+        UpdateLayout();
+        _lyrics?.RefreshLayout();
+    }
+
+    /// <summary>Lets the shell ask for that re-measure after the sidebar changes width.</summary>
+    public void Relayout() => RelayoutPage();
 
     // MARK: the song
 
@@ -873,11 +893,7 @@ public sealed partial class NowPlayingPage : Page
 
         // The page's own layout changed with the window or display scale; let the panel
         // re-read its size after this pass, in case its own size event did not arrive.
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            Root.UpdateLayout();
-            _lyrics?.RefreshLayout();
-        });
+        DispatcherQueue.TryEnqueue(RelayoutPage);
     }
 
     /// <summary>Wide: the player left, the queue panel beside it. Narrow: one column, the queue

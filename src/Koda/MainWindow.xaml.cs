@@ -227,6 +227,10 @@ public sealed partial class MainWindow : Window
         ApplySidebar();
 
         ContentFrame.Navigated += OnContentNavigated;
+        // The pane's width is part of the content's room: after it opens or closes, measure
+        // the page again. Without this a page laid out at the old width stays cropped.
+        Nav.PaneOpened += (_, _) => RelayoutContent();
+        Nav.PaneClosed += (_, _) => RelayoutContent();
         Nav.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) =>
         {
             // Opening the pane while the window is narrow is the listener's choice;
@@ -305,6 +309,25 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnTitleBarSizeChanged(object sender, SizeChangedEventArgs args) => ApplyTitleBarChrome();
+
+    /// <summary>The sidebar opening or closing changes the room the page has; measure the
+    /// page and its lyrics again at that room, rather than leaving them at the old width.</summary>
+    private void RelayoutContent()
+    {
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            ZoomContent.InvalidateMeasure();
+            ZoomContent.InvalidateArrange();
+            Root.InvalidateMeasure();
+            Root.InvalidateArrange();
+            Root.UpdateLayout();
+            ContentFrame.UpdateLayout();
+            if (ContentFrame.Content is NowPlayingPage page)
+            {
+                page.Relayout();
+            }
+        });
+    }
 
     /// <summary>A display scale change can leave the zoomed content at its old DIP size,
     /// which clips every page. Lay the root out at the new size, then re-apply the zoom.</summary>
