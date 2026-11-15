@@ -220,6 +220,34 @@ internal sealed class LyricsPanel : IDisposable
     {
         var width = _scroll.ActualWidth;
         var height = _scroll.ActualHeight;
+
+        // The scroll viewer can still report the width of an old slot after a pane/display
+        // change, and its content is then clipped by the window. The width that matters is
+        // the room from the panel's left edge to the window's right edge.
+        if (_scroll.XamlRoot is { } root)
+        {
+            try
+            {
+                var origin = _scroll.TransformToVisual(null)
+                    .TransformPoint(new Windows.Foundation.Point(0, 0));
+                var visible = root.Size.Width - origin.X - 8;
+                if (visible > 0)
+                {
+                    width = Math.Min(width, visible);
+                }
+
+                var visibleHeight = root.Size.Height - origin.Y - 8;
+                if (visibleHeight > 0)
+                {
+                    height = Math.Min(height, visibleHeight);
+                }
+            }
+            catch (Exception)
+            {
+                // not in the tree yet
+            }
+        }
+
         if (width < 1)
         {
             return false; // collapsed: keep the size the panel had when it was on screen
