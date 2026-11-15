@@ -197,10 +197,10 @@ public sealed class Settings
                 break;
             case LyricsPreset.Expressive:
                 LyricsRenderer = LyricsRenderer.Expressive;
-                LyricsLineSpacing = 1.12;
-                LyricsIdleOpacity = 0.15;
-                LyricsSoftness = 0.60;
-                LyricsGlowIntensity = 1.5;
+                LyricsLineSpacing = 0.90;
+                LyricsIdleOpacity = 0.76;
+                LyricsSoftness = 0.20;
+                LyricsGlowIntensity = 1.0;
                 LyricsFont = "Segoe UI Variable Display";
                 LyricsMotion = true;
                 break;
@@ -464,6 +464,14 @@ public sealed class Settings
             if (settings is null)
             {
                 return new Settings();
+            }
+
+            // The Expressive look changed from a softer Koda to the Spicy motion. A saved
+            // preset name is a request for the named look, so refresh it; a Custom mix is
+            // left exactly as the listener saved it.
+            if (settings.LyricsPreset == LyricsPreset.Expressive)
+            {
+                settings.ApplyLyricsPreset(LyricsPreset.Expressive);
             }
 
             // Services added in a later version join at the end of a saved order.

@@ -160,9 +160,10 @@ public class SettingsTests
         settings.ApplyLyricsPreset(LyricsPreset.Expressive);
 
         Assert.Equal(LyricsRenderer.Expressive, settings.LyricsRenderer);
-        Assert.Equal(1.12, settings.LyricsLineSpacing, 2);
-        Assert.Equal(0.60, settings.LyricsSoftness, 2);
-        Assert.True(settings.LyricsGlowIntensity > 0);
+        Assert.Equal(0.90, settings.LyricsLineSpacing, 2);
+        Assert.Equal(0.20, settings.LyricsSoftness, 2);
+        Assert.Equal(0.76, settings.LyricsIdleOpacity, 2);
+        Assert.Equal(1.0, settings.LyricsGlowIntensity, 2);
         Assert.Equal("Segoe UI Variable Display", settings.LyricsFont);
 
         settings.ApplyLyricsPreset(LyricsPreset.Minimal);
