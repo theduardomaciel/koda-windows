@@ -552,17 +552,28 @@ internal sealed class LyricsPanel : IDisposable
             // simultaneous lines read as one block in the middle of the panel.
             var side = SideOf(line);
             var rightAligned = side == HorizontalAlignment.Right;
+            // Leave room for a word's glow, bounce and hover box at the panel edges.
+            // The glow can reach 16px; 0.5em at the default size is 18px, and the right
+            // keeps at least the scrollbar's 24px.
+            var sidePad = Math.Max(18, fontSize * 0.5);
+            var endPad = Math.Max(24, sidePad);
             var row = new Row
             {
                 Line = line,
                 Words = line.Words.Count == 0
-                    ? new StackPanel { Margin = new Thickness(0, 0, 24, 0) }
-                    : new WordWrapPanel { RowSpacing = 4, AlignRight = rightAligned },
+                    ? new StackPanel()
+                    : new WordWrapPanel
+                    {
+                        RowSpacing = 4,
+                        AlignRight = rightAligned,
+                        Inset = sidePad + endPad,
+                    },
                 Background = new WordWrapPanel
                 {
                     RowSpacing = 2,
                     Opacity = _idleFar * 0.7,
                     AlignRight = rightAligned,
+                    Inset = sidePad + endPad,
                 },
             };
 
@@ -570,7 +581,7 @@ internal sealed class LyricsPanel : IDisposable
             var content = new StackPanel { Spacing = 6 };
             var host = new Grid
             {
-                Margin = new Thickness(0, halfGap, 0, halfGap),
+                Margin = new Thickness(sidePad, halfGap, endPad, halfGap),
                 // A transparent background makes the whole line box hit-testable, so the
                 // hover box appears wherever the pointer is over the line, not only on a glyph.
                 Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)),
@@ -982,7 +993,16 @@ internal sealed class LyricsPanel : IDisposable
     {
         foreach (var row in _rows)
         {
-            row.Host.Margin = new Thickness(0, _lineGap / 2, 0, _lineGap / 2);
+            var sidePad = Math.Max(18, _fontSize * 0.5);
+            var endPad = Math.Max(24, sidePad);
+            row.Host.Margin = new Thickness(sidePad, _lineGap / 2, endPad, _lineGap / 2);
+            if (row.Words is WordWrapPanel words)
+            {
+                words.Inset = sidePad + endPad;
+            }
+
+            row.Background.Inset = sidePad + endPad;
+
             if (row.HoverBox is { } hoverBox)
             {
                 hoverBox.Margin = new Thickness(
@@ -1004,6 +1024,7 @@ internal sealed class LyricsPanel : IDisposable
                 foreach (var text in row.Words.Children.OfType<TextBlock>())
                 {
                     Shape(text, _fontSize);
+                    text.MaxWidth = Math.Max(0, _panelWidth - sidePad - endPad);
                 }
             }
 
@@ -1080,7 +1101,9 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
-        var textWidth = Math.Max(0, _panelWidth - 24);
+        var sidePad = Math.Max(18, _fontSize * 0.5);
+        var endPad = Math.Max(24, sidePad);
+        var textWidth = Math.Max(0, _panelWidth - sidePad - endPad);
         foreach (var row in _rows)
         {
             if (row.Words is WordWrapPanel wrap)
