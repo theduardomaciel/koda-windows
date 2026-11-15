@@ -572,6 +572,7 @@ internal sealed class LyricsPanel : IDisposable
             if (next is not null && line.End is { } lineEnd && next.Time - lineEnd >= InterludeSeconds)
             {
                 row.DotsHost = MakeDots(row.Dots, fontSize);
+                row.DotsHost.HorizontalAlignment = side;
                 _lines.Children.Add(row.DotsHost);
             }
         }
@@ -595,7 +596,8 @@ internal sealed class LyricsPanel : IDisposable
         var host = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Visibility = Visibility.Collapsed,
+            Opacity = 0,
+            IsHitTestVisible = false,
         };
         var diameter = DotsDiameter(fontSize);
         for (var dot = 0; dot < 3; dot++)
@@ -609,7 +611,7 @@ internal sealed class LyricsPanel : IDisposable
         return host;
     }
 
-    private static double DotsDiameter(double fontSize) => Math.Max(4, Math.Round(fontSize * 0.18));
+    private static double DotsDiameter(double fontSize) => Math.Max(6, Math.Round(fontSize * 0.32));
 
     private static void SizeDots(StackPanel host, List<Ellipse> dots, double fontSize)
     {
@@ -1011,15 +1013,15 @@ internal sealed class LyricsPanel : IDisposable
                 continue;
             }
 
-            if (row.DotsHost.Visibility != Visibility.Collapsed)
+            if (row.DotsHost.Opacity != 0)
             {
-                row.DotsHost.Visibility = Visibility.Collapsed;
+                row.DotsHost.Opacity = 0;
             }
         }
 
         if (active?.DotsHost is { } host)
         {
-            host.Visibility = Visibility.Visible;
+            host.Opacity = 1;
             FillDots(active.Dots, progress);
         }
         else if (current is { } index && index < _rows.Count)
@@ -1030,12 +1032,7 @@ internal sealed class LyricsPanel : IDisposable
 
         if (_leadingDots is not null)
         {
-            var show = leading ? Visibility.Visible : Visibility.Collapsed;
-            if (_leadingDots.Visibility != show)
-            {
-                _leadingDots.Visibility = show;
-            }
-
+            _leadingDots.Opacity = leading ? 1 : 0;
             if (leading)
             {
                 FillDots(_leadingDotItems, progress);
