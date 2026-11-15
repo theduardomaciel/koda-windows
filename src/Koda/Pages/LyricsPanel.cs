@@ -254,8 +254,6 @@ internal sealed class LyricsPanel : IDisposable
         public double PaintedY { get; set; } = double.NaN;
         public double PaintedGlow { get; set; } = -1;
         public double PaintedBlur { get; set; } = -1;
-        /// <summary>How many more frames to re-take the static mask while the twin settles.</summary>
-        public int MaskRefreshTries { get; set; }
     }
 
     /// <summary>One line in the panel: its words, its backing vocals and the line itself.</summary>
@@ -1982,14 +1980,6 @@ internal sealed class LyricsPanel : IDisposable
             if (letter.Shadow is not null)
             {
                 RefreshGlowMask(letter);
-                if (letter.MaskRefreshTries > 0)
-                {
-                    letter.MaskRefreshTries--;
-                    if (letter.MaskRefreshTries > 0)
-                    {
-                        letter.NeedsMaskRefresh = true;
-                    }
-                }
             }
         }
 
@@ -1997,8 +1987,7 @@ internal sealed class LyricsPanel : IDisposable
         if (glow > 0.01)
         {
             EnsureGlow(letter);
-            if (letter.Shadow is { } shadow
-                && !(_glowStaticMask && shadow.Mask is null))
+            if (letter.Shadow is { } shadow)
             {
                 var opacity = (float)Math.Clamp(glow, 0, 1);
                 var blur = _glowBlurFixed ? 12f : (float)(4 + 12 * opacity);
@@ -2037,13 +2026,6 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
-        // The mask twin is inside the panel's entrance fade. A mask taken while the
-        // panel is still transparent comes out empty, so wait until it is fully shown.
-        if (_glowStaticMask && _lines.Opacity < 0.99)
-        {
-            return;
-        }
-
         var width = letter.Text.ActualWidth;
         var height = letter.Text.ActualHeight;
         if (width < 0.5 || height < 0.5)
@@ -2060,19 +2042,19 @@ internal sealed class LyricsPanel : IDisposable
         shadow.BlurRadius = _glowBlurFixed ? 12 : 0;
         if (!_glowNoMask)
         {
-            if (_glowStaticMask)
+            var source = _glowStaticMask && letter.MaskText is { } maskText
+                ? maskText
+                : letter.Text;
+            var mask = source.GetAlphaMask();
+            shadow.Mask = mask;
+            // GetAlphaMask can hand back the same brush instance for the same element.
+            // Disposing it here would leave the next shadow with a closed mask.
+            if (!ReferenceEquals(letter.Mask, mask))
             {
-                // Take the mask on the next frames, after the twin has rendered.
-                letter.NeedsMaskRefresh = true;
-                letter.MaskRefreshTries = 4;
-            }
-            else
-            {
-                var mask = letter.Text.GetAlphaMask();
-                shadow.Mask = mask;
                 letter.Mask?.Dispose();
-                letter.Mask = mask;
             }
+
+            letter.Mask = mask;
         }
 
         var glowBrush = compositor.CreateColorBrush(Color.FromArgb(0, 0, 0, 0));
@@ -2114,6 +2096,13 @@ internal sealed class LyricsPanel : IDisposable
             ? maskText
             : letter.Text;
         var mask = source.GetAlphaMask();
+        if (ReferenceEquals(letter.Mask, mask))
+        {
+            // Already attached and still alive; disposing and reattaching it was
+            // what made the glow vanish and the next seek throw ObjectDisposedException.
+            return;
+        }
+
         letter.Shadow.Mask = mask;
         letter.Mask?.Dispose();
         letter.Mask = mask;
@@ -2132,7 +2121,8 @@ internal sealed class LyricsPanel : IDisposable
         letter.GlowBrush = null;
         letter.Shadow?.Dispose();
         letter.Shadow = null;
-        letter.Mask?.Dispose();
+        // The framework may return this same brush again for the same element. Keep it
+        // alive for the GC; the disposed shadow owns the compositor reference.
         letter.Mask = null;
         letter.PaintedGlow = -1;
         letter.PaintedBlur = -1;
