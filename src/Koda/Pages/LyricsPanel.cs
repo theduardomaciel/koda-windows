@@ -954,7 +954,13 @@ internal sealed class LyricsPanel : IDisposable
         var diameter = DotsDiameter(fontSize);
         for (var dot = 0; dot < 3; dot++)
         {
-            var ellipse = new Ellipse { Width = diameter, Height = diameter, Fill = Brush(0x4D) };
+            var ellipse = new Ellipse
+            {
+                Width = diameter,
+                Height = diameter,
+                Fill = Brush(0xFF),
+                Opacity = 0x4D / 255.0,
+            };
             host.Children.Add(ellipse);
             dots.Add(ellipse);
         }
@@ -1775,15 +1781,13 @@ internal sealed class LyricsPanel : IDisposable
         for (var dot = 0; dot < dots.Count; dot++)
         {
             var fill = Math.Clamp(progress * dots.Count - dot, 0, 1);
-            var alpha = (byte)(0x4D + (0xFF - 0x4D) * fill);
-            var color = Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF);
-            if (dots[dot].Fill is SolidColorBrush brush)
+            var opacity = (0x4D + (0xFF - 0x4D) * fill) / 255.0;
+            // Keep the dot's brush constant and move only its opacity, in visible
+            // steps. Rewriting the SolidColorBrush.Color every frame made the intro
+            // re-rasterize three brushes continuously while it waited for the first line.
+            if (Math.Abs(dots[dot].Opacity - opacity) >= 0.01)
             {
-                brush.Color = color;
-            }
-            else
-            {
-                dots[dot].Fill = new SolidColorBrush(color);
+                dots[dot].Opacity = opacity;
             }
         }
     }
