@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Koda.Controls;
 using Koda.Core;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -193,10 +194,13 @@ internal sealed class LyricsPanel : IDisposable
         public required TextBlock Text { get; init; }
         public required LinearGradientBrush Fill { get; init; }
         public required CompositeTransform Transform { get; init; }
-        public TextBlock? GlowInner { get; init; }
-        public TextBlock? GlowOuter { get; init; }
-        public CompositeTransform? GlowInnerTransform { get; init; }
-        public CompositeTransform? GlowOuterTransform { get; init; }
+        /// <summary>The empty layer behind the sharp letter that hosts the DropShadow sprite.</summary>
+        public Grid? GlowHost { get; init; }
+        /// <summary>The wave transform mirrored onto the glow host.</summary>
+        public CompositeTransform? GlowTransform { get; init; }
+        public DropShadow? Shadow { get; set; }
+        public SpriteVisual? GlowVisual { get; set; }
+        public bool NeedsMaskRefresh { get; set; }
         public int Index { get; init; }
         public int Count { get; init; }
         public double PaintedLit { get; set; } = double.NaN;
@@ -489,6 +493,7 @@ internal sealed class LyricsPanel : IDisposable
         _tween.Stop();
         _frame.Stop();
         UserScrolled = false;
+        ReleaseGlows();
         _lines.Children.Clear();
         _rows.Clear();
         _lyricLines.Clear();
@@ -884,8 +889,8 @@ internal sealed class LyricsPanel : IDisposable
         };
     }
 
-    /// <summary>One letter of a held syllable, with its two soft halo layers. The halos are
-    /// scaled copies rather than a real Gaussian shadow: WinUI has no text-shadow effect.</summary>
+    /// <summary>One letter of a held syllable. An empty layer behind the letter hosts a
+    /// Composition DropShadow masked by the glyph alpha, which is a real Gaussian glow.</summary>
     private Letter MakeLetter(string text, double fontSize, bool soft, int index, int count)
     {
         var fill = NewFill();
@@ -901,58 +906,47 @@ internal sealed class LyricsPanel : IDisposable
         Shape(textBlock, fontSize, soft);
 
         var host = new Grid();
-        TextBlock? glowInner = null;
-        TextBlock? glowOuter = null;
-        CompositeTransform? innerTransform = null;
-        CompositeTransform? outerTransform = null;
+        Grid? glowHost = null;
+        CompositeTransform? glowTransform = null;
 
         if (_glow)
         {
-            outerTransform = new CompositeTransform();
-            glowOuter = new TextBlock
+            // The glow host is the first child, so its sprite draws behind the sharp
+            // letter. SetElementChildVisual adds the sprite on top of this empty layer,
+            // not on top of the text in the sibling layer.
+            glowTransform = new CompositeTransform();
+            glowHost = new Grid
             {
-                Text = text,
-                Foreground = new SolidColorBrush(SungColor),
-                Opacity = 0,
                 IsHitTestVisible = false,
-                RenderTransform = outerTransform,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                RenderTransform = glowTransform,
                 RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
-                TextWrapping = TextWrapping.NoWrap,
             };
-            Shape(glowOuter, fontSize, soft);
-            host.Children.Add(glowOuter);
-
-            innerTransform = new CompositeTransform();
-            glowInner = new TextBlock
-            {
-                Text = text,
-                Foreground = new SolidColorBrush(SungColor),
-                Opacity = 0,
-                IsHitTestVisible = false,
-                RenderTransform = innerTransform,
-                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
-                TextWrapping = TextWrapping.NoWrap,
-            };
-            Shape(glowInner, fontSize, soft);
-            host.Children.Add(glowInner);
+            host.Children.Add(glowHost);
         }
 
         host.Children.Add(textBlock);
         host.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
 
-        return new Letter
+        var letter = new Letter
         {
             Element = host,
             Text = textBlock,
             Fill = fill,
             Transform = transform,
-            GlowInner = glowInner,
-            GlowOuter = glowOuter,
-            GlowInnerTransform = innerTransform,
-            GlowOuterTransform = outerTransform,
+            GlowHost = glowHost,
+            GlowTransform = glowTransform,
             Index = index,
             Count = count,
         };
+
+        if (glowHost is not null)
+        {
+            textBlock.SizeChanged += (_, _) => RefreshGlowMask(letter);
+        }
+
+        return letter;
     }
 
     private static LinearGradientBrush NewFill() => new()
@@ -1032,17 +1026,8 @@ internal sealed class LyricsPanel : IDisposable
             foreach (var letter in word.Letters)
             {
                 Shape(letter.Text, size, soft);
-                if (letter.GlowInner is { } inner)
-                {
-                    Shape(inner, size, soft);
-                }
-
-                if (letter.GlowOuter is { } outer)
-                {
-                    Shape(outer, size, soft);
-                }
-
                 letter.PaintedLit = double.NaN;
+                letter.NeedsMaskRefresh = true;
             }
         }
         else if (word.Text is { } text)
@@ -1725,13 +1710,18 @@ internal sealed class LyricsPanel : IDisposable
         }
     }
 
-    private static void SetLetterMotion(Letter letter, LetterMotion motion, double fontSize, double glowStrength)
+    private void SetLetterMotion(Letter letter, LetterMotion motion, double fontSize, double glowStrength)
     {
         if (Math.Abs(motion.Scale - letter.PaintedScale) >= 0.0005)
         {
             letter.PaintedScale = motion.Scale;
             letter.Transform.ScaleX = motion.Scale;
             letter.Transform.ScaleY = motion.Scale;
+            if (letter.GlowTransform is { } glowTransform)
+            {
+                glowTransform.ScaleX = motion.Scale;
+                glowTransform.ScaleY = motion.Scale;
+            }
         }
 
         var x = motion.X * fontSize;
@@ -1739,14 +1729,9 @@ internal sealed class LyricsPanel : IDisposable
         {
             letter.PaintedX = x;
             letter.Transform.TranslateX = x;
-            if (letter.GlowInnerTransform is { } inner)
+            if (letter.GlowTransform is { } glowTransform)
             {
-                inner.TranslateX = x;
-            }
-
-            if (letter.GlowOuterTransform is { } outer)
-            {
-                outer.TranslateX = x;
+                glowTransform.TranslateX = x;
             }
         }
 
@@ -1755,44 +1740,112 @@ internal sealed class LyricsPanel : IDisposable
         {
             letter.PaintedY = y;
             letter.Transform.TranslateY = y;
-            if (letter.GlowInnerTransform is { } inner)
+            if (letter.GlowTransform is { } glowTransform)
             {
-                inner.TranslateY = y;
-            }
-
-            if (letter.GlowOuterTransform is { } outer)
-            {
-                outer.TranslateY = y;
+                glowTransform.TranslateY = y;
             }
         }
 
-        if (letter.GlowInner is null || letter.GlowOuter is null)
+        if (letter.NeedsMaskRefresh)
         {
-            return;
+            letter.NeedsMaskRefresh = false;
+            RefreshGlowMask(letter);
         }
 
         var glow = motion.Glow * glowStrength;
-        if (Math.Abs(glow - letter.PaintedGlow) < 0.005)
+        if (glow > 0.01)
+        {
+            EnsureGlow(letter);
+            if (letter.Shadow is { } shadow)
+            {
+                shadow.Opacity = (float)Math.Clamp(glow, 0, 1);
+                shadow.BlurRadius = (float)(4 + 12 * Math.Clamp(glow, 0, 1));
+            }
+        }
+        else if (letter.Shadow is not null)
+        {
+            ReleaseGlow(letter);
+        }
+    }
+
+    /// <summary>Lazily gives a letter its Gaussian glow. The sprite lives in an empty
+    /// layer before the text, so the shadow is drawn behind the sharp glyph.</summary>
+    private void EnsureGlow(Letter letter)
+    {
+        if (!_glow || letter.GlowHost is null || letter.GlowVisual is not null)
         {
             return;
         }
 
-        letter.PaintedGlow = glow;
-        letter.GlowInner.Opacity = Math.Clamp(glow * 0.45, 0, 1);
-        letter.GlowOuter.Opacity = Math.Clamp(glow * 0.22, 0, 1);
-
-        var innerScale = motion.Scale * (1 + 0.08 * glow);
-        var outerScale = motion.Scale * (1 + 0.20 * glow);
-        if (letter.GlowInnerTransform is { } innerGlow)
+        var width = letter.Text.ActualWidth;
+        var height = letter.Text.ActualHeight;
+        if (width < 0.5 || height < 0.5)
         {
-            innerGlow.ScaleX = innerScale;
-            innerGlow.ScaleY = innerScale;
+            return; // the first paint can run before the letter has a size
         }
 
-        if (letter.GlowOuterTransform is { } outerGlow)
+        var visual = ElementCompositionPreview.GetElementVisual(letter.GlowHost);
+        var compositor = visual.Compositor;
+        var shadow = compositor.CreateDropShadow();
+        shadow.Color = SungColor;
+        shadow.Offset = Vector3.Zero;
+        shadow.Opacity = 0;
+        shadow.BlurRadius = 0;
+        shadow.Mask = letter.Text.GetAlphaMask();
+
+        var sprite = compositor.CreateSpriteVisual();
+        sprite.Brush = compositor.CreateColorBrush(Color.FromArgb(0, 0, 0, 0));
+        sprite.Shadow = shadow;
+        sprite.Size = new Vector2((float)width, (float)height);
+
+        ElementCompositionPreview.SetElementChildVisual(letter.GlowHost, sprite);
+        letter.Shadow = shadow;
+        letter.GlowVisual = sprite;
+    }
+
+    private static void RefreshGlowMask(Letter letter)
+    {
+        if (letter.Shadow is null || letter.GlowVisual is null)
         {
-            outerGlow.ScaleX = outerScale;
-            outerGlow.ScaleY = outerScale;
+            return;
+        }
+
+        var width = letter.Text.ActualWidth;
+        var height = letter.Text.ActualHeight;
+        if (width < 0.5 || height < 0.5)
+        {
+            return;
+        }
+
+        letter.GlowVisual.Size = new Vector2((float)width, (float)height);
+        letter.Shadow.Mask = letter.Text.GetAlphaMask();
+    }
+
+    private static void ReleaseGlow(Letter letter)
+    {
+        if (letter.GlowHost is { } host)
+        {
+            ElementCompositionPreview.SetElementChildVisual(host, null);
+        }
+
+        letter.GlowVisual?.Dispose();
+        letter.GlowVisual = null;
+        letter.Shadow?.Dispose();
+        letter.Shadow = null;
+        letter.PaintedGlow = -1;
+    }
+
+    private void ReleaseGlows()
+    {
+        foreach (var row in _rows)
+        {
+            foreach (var word in row.WordItems.Concat(row.BackgroundItems))
+            {
+                foreach (var letter in word.Letters)
+                {
+                    ReleaseGlow(letter);
+                }
+            }
         }
     }
 
@@ -1917,6 +1970,7 @@ internal sealed class LyricsPanel : IDisposable
 
     public void Dispose()
     {
+        ReleaseGlows();
         _tween.Stop();
         _frame.Stop();
     }

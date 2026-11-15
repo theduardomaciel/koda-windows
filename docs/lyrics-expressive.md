@@ -52,7 +52,7 @@ Each letter:
 - starts at `slot * (i + 1) / 1.2 + duration / 6 - waveDuration * 0.46`;
 - peaks at `scale ≈ 1.121`, lifts vertically, and spreads outward by
   `0.03em × (i - centre)`;
-- glows through two halo layers while its wave is at its peak;
+- glows through a Composition `DropShadow` while its wave is at its peak;
 - springs back to normal with the scale spring after the syllable ends.
 
 The wave table is copied from the CSS (every 4% from 4% to 92%), so the motion
@@ -87,15 +87,91 @@ matches the source.
 
 ## What is approximated
 
-WinUI 3 has no XAML text-shadow and no `UIElement.Effect`; the referenced
-packages do not include a Gaussian blur effect. The native implementation
-therefore does this:
+- **Glow** — no longer approximated. The Expressive letter glow uses a
+  Composition `DropShadow` with the letter's alpha mask, a transparent sprite
+  behind the text, and `BlurRadius`/`Opacity` driven from the same
+  `LyricsMotion.Letter` wave factor. This is a true Gaussian glow.
+- **Line blur** — still omitted. The CSS uses `1.1px` per distance level; WinUI
+  would need a Win2D or custom text-rendering path. Opacity still separates the
+  active, sung and upcoming lines.
 
-- **Glow** — two scaled copies of each letter sit behind the sharp letter at low
-  opacity. This reads as a halo, but it is not a real Gaussian shadow.
-- **Line blur** — omitted. The CSS uses `1.1px` per distance level; WinUI would
-  need a custom text-rendering path to reproduce it. Opacity still separates
-  the active, sung and upcoming lines.
+## Composition DropShadow glow
+
+### API checks
+
+On the Windows App SDK 2.3.9 surface this project references:
+
+- `TextBlock.GetAlphaMask()` exists and returns a `CompositionBrush`.
+- `DropShadow.Mask`, `BlurRadius`, `Opacity`, `Color` and `Offset` exist, and
+  `BlurRadius`/`Opacity` are marked animatable.
+- `SpriteVisual.Shadow` exists.
+- `ElementCompositionPreview.SetElementChildVisual` adds the sprite as the last
+  child of the host's visual tree.
+
+### Host choice
+
+`SetElementChildVisual` draws **on top of the host element's content**, not
+behind the text. The implementation therefore puts an empty `Grid` before the
+sharp `TextBlock` in the letter's `Grid`:
+
+```text
+Grid (letter)
+  Grid (empty glow host)   <- sprite + DropShadow live here
+  TextBlock (sharp glyph)
+```
+
+The sprite is a child of the empty layer; the sharp glyph is a sibling drawn
+after it, so the glow never washes over the sharp text. `Offset` stays at
+`Vector3.Zero`. This was chosen over hosting the sprite on the text itself
+because the text-host version draws the shadow over the glyph.
+
+### Lifecycle
+
+- The shadow and sprite are created lazily only when the letter's wave glow is
+  above `0.01`.
+- The alpha mask comes from `letter.Text.GetAlphaMask()`.
+- The mask and sprite size are refreshed on `TextBlock.SizeChanged` and after
+  `ReshapeWord` (font, size, DPI or theme change).
+- The sprite is released when the wave glow returns to `0`; the empty glow host
+  remains so the letter's layout does not change.
+- `LyricsGlowIntensity` is still the multiplier; zero creates no glow host or
+  shadow at all.
+
+### Driving the glow
+
+The existing wave is a pure function of the song clock, not a storyboard.
+`SetLetterMotion` therefore sets the shadow's `Opacity` and `BlurRadius` from
+the same `LetterMotion.Glow` value each frame:
+
+```csharp
+shadow.Opacity = (float)Math.Clamp(glow, 0, 1);
+shadow.BlurRadius = (float)(4 + 12 * Math.Clamp(glow, 0, 1));
+```
+
+There are no composition animations to start, stop or seek.
+
+### Measured cost
+
+Capture: City Walls, ten-second segment, the old halo baseline and the new
+DropShadow path playing from the same 2:11 seek, x64 Debug, `winapp perf`
+process-resource samples. The tool does not record GPU counters and composition
+scopes are app-side elapsed API time, not displayed FPS.
+
+| Mode | Process CPU | Composition calls | Private bytes (max) | Working set (max) |
+|---|---:|---:|---:|---:|
+| Halo | 5,578 ms / 9.4 s | 20,105 | 306 MB | 424 MB |
+| DropShadow | 4,172 ms / 9.4 s | 9,230 | 312 MB | 439 MB |
+
+The DropShadow path used about **25% less process CPU** and **54% fewer
+composition calls**. Memory was not better in this run (about 6 MB more
+private memory and 15 MB more working set); the one-second sampling is coarse
+and this needs a longer run to call. GPU attribution and presented-FPS numbers
+are not available from this capture.
+
+The visual check showed a soft Gaussian bloom around the held "are" at 1:28
+with no rectangular box and no glow over the sharp text. A halo recording at
+the identical clock time was not captured, so the before/after comparison still
+needs a controlled replay of the same segment.
 
 ## Alternative: true blur and glow with Win2D
 
@@ -187,11 +263,10 @@ This gives exact CSS fidelity, but it also means:
 
 ### Recommendation
 
-Keep the current XAML implementation as the default. The word bounce, syllable
-seams, letter wave, highlight, line dimming, hover box and dots are native and
-account for most of the look. Only add the Win2D path if a true soft glow and
-per-line blur are required, and make it an opt-in fidelity mode so the native
-path stays the fallback.
+`DropShadow` is now the Expressive letter glow: it is a real Gaussian, removes
+the layered copies, and measured cheaper on CPU and composition calls. Keep the
+alpha-mask refresh and lazy lifecycle in place. Only per-line blur still
+requires Win2D.
 
 ## Known limits
 
@@ -199,8 +274,13 @@ path stays the fallback.
   Latin/Greek/Cyrillic glyphs, with no combining marks, emoji, Arabic, Indic,
   CJK or Thai.
 - Word-level bounce still applies to complex scripts.
-- Text glow is a halo of scaled copies, not a Gaussian blur.
-- Per-line `filter: blur()` is not implemented.
+- The Gaussian `DropShadow` glow covers the letter views. Word-level glow was
+  not part of the previous halo implementation either, so it is still a
+  follow-up.
+- Per-line `filter: blur()` is not implemented and still needs Win2D or a
+  custom text pipeline.
+- The performance sample is one ten-second run. GPU attribution and presented
+  FPS were not captured.
 - The old `Expressive` preset values are refreshed when the saved preset is
   still Expressive; a `Custom` mix is left alone.
 
@@ -211,3 +291,5 @@ path stays the fallback.
 - Play a rich-synced song with held syllables; check word bounce, syllable
   seams, letter wave, pause/resume, forward and backward seek, hover, backing
   vocals, narrow windows, `LyricsMotion` off and `LyricsGlowIntensity` 0.
+- Check the Gaussian glow follows the glyphs, survives pause/seek, and
+  disappears with `LyricsGlowIntensity` 0.
