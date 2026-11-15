@@ -31,7 +31,7 @@
                 <Grid x:Name="Top" ColumnSpacing="28" RowSpacing="28" SizeChanged="OnTopSizeChanged" Margin="26,0,26,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="MixColumn" Width="380" />
-                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="PicksColumn" Width="*" />
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />

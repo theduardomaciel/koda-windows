@@ -418,6 +418,8 @@ public sealed partial class HomePage : Page
         var wide = width >= 340 + gap + 280;
         var mix = wide ? Math.Clamp(width * 0.4, 340, 380) : width;
         MixColumn.Width = wide ? new GridLength(mix) : new GridLength(1, GridUnitType.Star);
+        PicksColumn.Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        Top.ColumnSpacing = wide ? gap : 0;
         Grid.SetColumn(PicksPanel, wide ? 1 : 0);
         Grid.SetRow(PicksPanel, wide ? 0 : 1);
         MixCard.MaxWidth = double.PositiveInfinity;
