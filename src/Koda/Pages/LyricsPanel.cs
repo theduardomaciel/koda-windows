@@ -80,6 +80,10 @@ internal sealed class LyricsPanel : IDisposable
 
     /// <summary>Spicy's colors: 85% white once sung, 50% white while waiting.</summary>
     private static readonly Color ExpressiveSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
+
+    /// <summary>The static mask twin's fill: fully opaque white, the reference alpha for
+    /// the mask; the shadow's own opacity still scales the visible glow.</summary>
+    private static readonly Color MaskTwinColor = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
     private static readonly Color ExpressiveUnsung = Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF);
     private static readonly Color ExpressiveHoverSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
     private static readonly Color ExpressiveHoverUnsung = Color.FromArgb(0xBF, 0xFF, 0xFF, 0xFF);
@@ -131,6 +135,20 @@ internal sealed class LyricsPanel : IDisposable
     private double _glowIntensity = 1;
     private bool _motion = true;
     private LyricsRenderer _renderer = LyricsRenderer.Sweep;
+    private string _glowTest = "";
+    private bool _glowBlurFixed;
+    private bool _glowTransformFixed;
+    private bool _glowNoMask;
+    private bool _glowStaticMask;
+    private double _maskTwinOpacity = 0.01;
+    private string _maskHide = "";
+    private int _paintedLetters;
+    private readonly bool _frameLog = Environment.GetEnvironmentVariable("KODA_LYRICS_FRAME_LOG") == "1";
+    private readonly bool _liveLog = Environment.GetEnvironmentVariable("KODA_LYRICS_LIVE_LOG") == "1";
+    private readonly System.Diagnostics.Stopwatch _frameClock = System.Diagnostics.Stopwatch.StartNew();
+    private long _lastFrameLogMs;
+    private long _lastLiveLogMs;
+    private long _lastLivePrivateBytes;
 
     private readonly ScrollViewer _scroll;
     private readonly StackPanel _lines;
@@ -141,6 +159,17 @@ internal sealed class LyricsPanel : IDisposable
 
     private readonly List<Row> _rows = [];
     private readonly List<LyricLine> _lyricLines = [];
+    private readonly Queue<Letter> _glowWarmup = new();
+    private readonly HashSet<Letter> _glowWarmupSet = [];
+    private readonly List<Letter> _liveGlows = [];
+    private readonly HashSet<Letter> _liveGlowSet = [];
+    private int _glowWindowIndex = -2;
+    private CubicBezierEasingFunction? _hoverEase;
+    private ScalarKeyFrameAnimation? _hoverOpacityIn;
+    private ScalarKeyFrameAnimation? _hoverOpacityOut;
+    private Vector3KeyFrameAnimation? _hoverScaleIn;
+    private Vector3KeyFrameAnimation? _hoverScaleOut;
+    private readonly bool _gcProbe = Environment.GetEnvironmentVariable("KODA_LYRICS_GC_PROBE") == "1";
     private StackPanel? _leadingDots;
     private List<Ellipse> _leadingDotItems = [];
     private Row? _current;
@@ -152,8 +181,10 @@ internal sealed class LyricsPanel : IDisposable
     private bool _needsGlide;
     private bool _needsFullPaint;
     private double _position;
+    private double _freezeAt = double.NaN;
     private double _panelWidth;
     private double _panelHeight;
+    private bool _interludeActive;
 
     /// <summary>One word in the panel: the element that draws it and the timings behind it.
     /// A held syllable is drawn as a row of <see cref="Letter"/>s instead of one text block.</summary>
@@ -198,6 +229,8 @@ internal sealed class LyricsPanel : IDisposable
     {
         public required FrameworkElement Element { get; init; }
         public required TextBlock Text { get; init; }
+        /// <summary>Test only: the never-changing twin the alpha mask is taken from.</summary>
+        public TextBlock? MaskText { get; set; }
         public required LinearGradientBrush Fill { get; init; }
         public required CompositeTransform Transform { get; init; }
         /// <summary>The empty layer behind the sharp letter that hosts the DropShadow sprite.</summary>
@@ -206,7 +239,11 @@ internal sealed class LyricsPanel : IDisposable
         public CompositeTransform? GlowTransform { get; init; }
         public DropShadow? Shadow { get; set; }
         public SpriteVisual? GlowVisual { get; set; }
+        public CompositionBrush? Mask { get; set; }
+        public CompositionBrush? GlowBrush { get; set; }
         public bool NeedsMaskRefresh { get; set; }
+        public bool GlowWanted { get; set; }
+        public int RowIndex { get; set; }
         public int Index { get; init; }
         public int Count { get; init; }
         public double PaintedLit { get; set; } = double.NaN;
@@ -216,6 +253,9 @@ internal sealed class LyricsPanel : IDisposable
         public double PaintedX { get; set; } = double.NaN;
         public double PaintedY { get; set; } = double.NaN;
         public double PaintedGlow { get; set; } = -1;
+        public double PaintedBlur { get; set; } = -1;
+        /// <summary>How many more frames to re-take the static mask while the twin settles.</summary>
+        public int MaskRefreshTries { get; set; }
     }
 
     /// <summary>One line in the panel: its words, its backing vocals and the line itself.</summary>
@@ -258,14 +298,29 @@ internal sealed class LyricsPanel : IDisposable
         _frame.Interval = TimeSpan.FromMilliseconds(16);
         _frame.Tick += (_, _) =>
         {
+            if (_frameLog)
+            {
+                LogFrameGap();
+            }
+
+            if (_gcProbe)
+            {
+                CheckGcProbe();
+            }
+
             if (PositionSource is { } source)
             {
-                SetPosition(source());
+                SetPosition(double.IsNaN(_freezeAt) ? source() : _freezeAt);
             }
 
             // Following the song here, not on the app's twice-a-second tick: the line
             // being sung changes the moment the song reaches it.
             Follow();
+
+            if (_liveLog)
+            {
+                LogLiveSet();
+            }
         };
 
         // The words are laid out in rows that fit the panel, so a line breaks where it should.
@@ -280,7 +335,10 @@ internal sealed class LyricsPanel : IDisposable
     /// another display or zoom, where the ScrollViewer's own SizeChanged can be missed.</summary>
     public void RefreshLayout()
     {
-        if (SyncSize())
+        // A layout pass is the moment the ScrollViewer can report a stale slot after a
+        // pane, display or zoom change, so this is the one place that pays for the
+        // TransformToVisual probe.
+        if (SyncSize(probe: true))
         {
             Paint();
         }
@@ -290,10 +348,19 @@ internal sealed class LyricsPanel : IDisposable
     /// an event reported, and reflows when they changed. A sidebar, a monitor or a zoom
     /// change can move the panel without any of those events reaching us. Returns whether
     /// it re-measured.</summary>
-    private bool SyncSize()
+    private bool SyncSize(bool probe = false)
     {
         var width = _scroll.ActualWidth;
         var height = _scroll.ActualHeight;
+
+        // The fast path runs every frame from Paint. Do not allocate a GeneralTransform
+        // there; the layout pass above probes the real slot when it may have moved.
+        if (!probe
+            && Math.Abs(width - _panelWidth) < 0.5
+            && Math.Abs(height - _panelHeight) < 0.5)
+        {
+            return false;
+        }
 
         // The scroll viewer can still report the width of an old slot after a pane/display
         // change, and its content is then clipped by the window. The width that matters is
@@ -473,8 +540,33 @@ internal sealed class LyricsPanel : IDisposable
         _idleFar = settings.LyricsIdleOpacity;
         _idleNear = Math.Min(1, _idleFar + 0.12);
         _glowIntensity = settings.LyricsGlowIntensity;
-        _glow = _glowIntensity > 0;
-        _motion = settings.LyricsMotion;
+        _glowTest = Environment.GetEnvironmentVariable("KODA_GLOW_TEST") ?? "staticmask";
+        _glowBlurFixed = _glowTest is "blurfixed" or "opacityonly";
+        _glowTransformFixed = _glowTest is "transformfixed" or "opacityonly";
+        _glowNoMask = _glowTest == "nomask";
+        _glowStaticMask = _glowTest == "staticmask";
+        var freeze = Environment.GetEnvironmentVariable("KODA_LYRICS_FREEZE_AT");
+        _freezeAt = double.TryParse(
+            freeze,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var fixedAt)
+            ? fixedAt
+            : double.NaN;
+        var twinOpacity = Environment.GetEnvironmentVariable("KODA_MASK_TWIN_OPACITY");
+        _maskTwinOpacity = double.TryParse(
+            twinOpacity,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var parsedOpacity)
+            ? Math.Clamp(parsedOpacity, 0, 1)
+            : 0.01;
+        _maskHide = Environment.GetEnvironmentVariable("KODA_MASK_HIDE") ?? "";
+        _glow = _glowIntensity > 0
+            && _glowTest != "noglowhost"
+            && Environment.GetEnvironmentVariable("KODA_LYRICS_GLOW_OFF") != "1";
+        _motion = settings.LyricsMotion
+            && Environment.GetEnvironmentVariable("KODA_LYRICS_MOTION_OFF") != "1";
         _renderer = settings.LyricsRenderer;
         UpdateScale();
     }
@@ -677,6 +769,22 @@ internal sealed class LyricsPanel : IDisposable
             {
                 ShapeSyllables(row.BackgroundItems);
                 content.Children.Add(row.Background);
+            }
+
+            foreach (var word in row.WordItems)
+            {
+                foreach (var letter in word.Letters)
+                {
+                    letter.RowIndex = index;
+                }
+            }
+
+            foreach (var word in row.BackgroundItems)
+            {
+                foreach (var letter in word.Letters)
+                {
+                    letter.RowIndex = index;
+                }
             }
 
             _lines.Children.Add(host);
@@ -925,6 +1033,7 @@ internal sealed class LyricsPanel : IDisposable
         var host = new Grid();
         Grid? glowHost = null;
         CompositeTransform? glowTransform = null;
+        TextBlock? maskText = null;
 
         if (_glow)
         {
@@ -941,6 +1050,59 @@ internal sealed class LyricsPanel : IDisposable
                 RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
             };
             host.Children.Add(glowHost);
+
+            if (_glowStaticMask)
+            {
+                // Test only: a twin whose fill is a fixed solid, so the mask source is
+                // never invalidated by the sharp letter's per-frame gradient. It is
+                // nearly transparent but still rendered, which GetAlphaMask needs.
+                maskText = new TextBlock
+                {
+                    Text = text,
+                    Foreground = new SolidColorBrush(MaskTwinColor),
+                    IsHitTestVisible = false,
+                    Opacity = _maskHide.Length > 0 ? 1 : _maskTwinOpacity,
+                    TextWrapping = TextWrapping.NoWrap,
+                };
+                Shape(maskText, fontSize, soft);
+
+                if (_maskHide.Length > 0)
+                {
+                    var wrapper = new Grid
+                    {
+                        IsHitTestVisible = false,
+                    };
+                    wrapper.Children.Add(maskText);
+
+                    switch (_maskHide)
+                    {
+                        case "wrapper":
+                            wrapper.Opacity = 0.01;
+                            break;
+                        case "visual":
+                            ElementCompositionPreview.GetElementVisual(wrapper).Opacity = 0f;
+                            break;
+                        case "visual01":
+                            ElementCompositionPreview.GetElementVisual(wrapper).Opacity = 0.01f;
+                            break;
+                        case "clip":
+                            wrapper.Clip = new RectangleGeometry
+                            {
+                                Rect = new Windows.Foundation.Rect(0, 0, 0, 0),
+                            };
+                            break;
+                        case "offscreen":
+                            wrapper.RenderTransform = new TranslateTransform { X = -10000 };
+                            break;
+                    }
+
+                    glowHost.Children.Add(wrapper);
+                }
+                else
+                {
+                    glowHost.Children.Add(maskText);
+                }
+            }
         }
 
         host.Children.Add(textBlock);
@@ -950,6 +1112,7 @@ internal sealed class LyricsPanel : IDisposable
         {
             Element = host,
             Text = textBlock,
+            MaskText = maskText,
             Fill = fill,
             Transform = transform,
             GlowHost = glowHost,
@@ -1049,6 +1212,11 @@ internal sealed class LyricsPanel : IDisposable
             foreach (var letter in word.Letters)
             {
                 Shape(letter.Text, size, soft);
+                if (letter.MaskText is { } maskText)
+                {
+                    Shape(maskText, size, soft);
+                }
+
                 letter.PaintedLit = double.NaN;
                 letter.NeedsMaskRefresh = true;
             }
@@ -1076,22 +1244,42 @@ internal sealed class LyricsPanel : IDisposable
 
         row.Hovered = on;
         var visual = ElementCompositionPreview.GetElementVisual(box);
-        var compositor = visual.Compositor;
-        var ease = compositor.CreateCubicBezierEasingFunction(
+        EnsureHoverAnimations(visual.Compositor);
+
+        visual.StartAnimation("Opacity", on ? _hoverOpacityIn! : _hoverOpacityOut!);
+        visual.StartAnimation("Scale", on ? _hoverScaleIn! : _hoverScaleOut!);
+
+        Paint();
+    }
+
+    /// <summary>The hover animations are identical on every line. Build them once and
+    /// reuse them instead of allocating two animations for each pointer movement.</summary>
+    private void EnsureHoverAnimations(Compositor compositor)
+    {
+        if (_hoverEase is not null)
+        {
+            return;
+        }
+
+        _hoverEase = compositor.CreateCubicBezierEasingFunction(
             new Vector2(0.22f, 1f),
             new Vector2(0.36f, 1f));
 
-        var opacity = compositor.CreateScalarKeyFrameAnimation();
-        opacity.InsertKeyFrame(1, on ? 1f : 0f, ease);
-        opacity.Duration = TimeSpan.FromMilliseconds(250);
-        visual.StartAnimation("Opacity", opacity);
+        _hoverOpacityIn = compositor.CreateScalarKeyFrameAnimation();
+        _hoverOpacityIn.InsertKeyFrame(1, 1f, _hoverEase);
+        _hoverOpacityIn.Duration = TimeSpan.FromMilliseconds(250);
 
-        var scale = compositor.CreateVector3KeyFrameAnimation();
-        scale.InsertKeyFrame(1, on ? Vector3.One : new Vector3(0.94f, 0.94f, 1f), ease);
-        scale.Duration = TimeSpan.FromMilliseconds(on ? 400 : 300);
-        visual.StartAnimation("Scale", scale);
+        _hoverOpacityOut = compositor.CreateScalarKeyFrameAnimation();
+        _hoverOpacityOut.InsertKeyFrame(1, 0f, _hoverEase);
+        _hoverOpacityOut.Duration = TimeSpan.FromMilliseconds(250);
 
-        Paint();
+        _hoverScaleIn = compositor.CreateVector3KeyFrameAnimation();
+        _hoverScaleIn.InsertKeyFrame(1, Vector3.One, _hoverEase);
+        _hoverScaleIn.Duration = TimeSpan.FromMilliseconds(400);
+
+        _hoverScaleOut = compositor.CreateVector3KeyFrameAnimation();
+        _hoverScaleOut.InsertKeyFrame(1, new Vector3(0.94f, 0.94f, 1f), _hoverEase);
+        _hoverScaleOut.Duration = TimeSpan.FromMilliseconds(300);
     }
 
     /// <summary>Gives every word panel the width to wrap against, and the line-timed text
@@ -1234,24 +1422,29 @@ internal sealed class LyricsPanel : IDisposable
         if (!ReferenceEquals(row, _current))
         {
             _current = row;
+            ScheduleGlows(index);
             if (!_userScrolled)
             {
                 GlideTo(row);
             }
         }
 
-        Paint();
+        Paint(index);
     }
 
     /// <summary>
     /// The words of the line being sung, redrawn every frame: the mask runs across the
     /// word, the word rises as it starts, a note held long swells and glows.
     /// </summary>
-    private void Paint()
+    private void Paint(int? knownIndex = null)
     {
         // The lyrics always fit the room they are actually given, even if the size events
         // for a pane/display/zoom change never arrived.
         SyncSize();
+
+        // Spread shadow setup for the next line over the frames while the current line
+        // is singing, so a long note never pays for its mask on the frame it starts.
+        WarmQueuedGlows();
 
         if (_needsGlide && _current is not null && _scroll.ViewportHeight > 1)
         {
@@ -1260,15 +1453,16 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         var time = _position;
+        _paintedLetters = 0;
         if (_needsFullPaint)
         {
             _needsFullPaint = false;
             RepaintWords(time);
         }
 
-        PaintInterlude(time);
+        var index = knownIndex ?? (Lyrics.IndexOf(time, _lyricLines) ?? -1);
+        PaintInterlude(time, index >= 0 ? index : null);
 
-        var index = Lyrics.IndexOf(time, _lyricLines) ?? -1;
         var motion = _motion;
         var expressive = _renderer == LyricsRenderer.Expressive;
         var singing = index >= 0 && index < _rows.Count && time <= LineEnd(_rows[index]) + 0.05;
@@ -1378,13 +1572,12 @@ internal sealed class LyricsPanel : IDisposable
     /// while the gap lasts. Only one gap is ever on screen, as on the Mac. The gap is
     /// measured from the line's end; measuring from its start put dots after every line.
     /// </summary>
-    private void PaintInterlude(double time)
+    private void PaintInterlude(double time, int? current)
     {
         Row? active = null;
         var leading = false;
         var progress = 0.0;
 
-        var current = Lyrics.IndexOf(time, _lyricLines);
         if (current is null)
         {
             if (_lyricLines.Count > 0 && _lyricLines[0].Time >= InterludeSeconds && time >= 0)
@@ -1449,6 +1642,8 @@ internal sealed class LyricsPanel : IDisposable
                 FillDots(_leadingDotItems, progress);
             }
         }
+
+        _interludeActive = active is not null || leading;
     }
 
     /// <summary>The Spicy dots breathe while their gap plays: 0.92 to 1.08 on a 2.4s cycle.</summary>
@@ -1475,7 +1670,15 @@ internal sealed class LyricsPanel : IDisposable
         {
             var fill = Math.Clamp(progress * dots.Count - dot, 0, 1);
             var alpha = (byte)(0x4D + (0xFF - 0x4D) * fill);
-            dots[dot].Fill = Brush(alpha);
+            var color = Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF);
+            if (dots[dot].Fill is SolidColorBrush brush)
+            {
+                brush.Color = color;
+            }
+            else
+            {
+                dots[dot].Fill = new SolidColorBrush(color);
+            }
         }
     }
 
@@ -1591,6 +1794,7 @@ internal sealed class LyricsPanel : IDisposable
 
         if (word.Letters.Count > 0)
         {
+            _paintedLetters += word.Letters.Count;
             var strength = _glow ? Math.Clamp(_glowIntensity, 0, 2) : 0;
             foreach (var letter in word.Letters)
             {
@@ -1743,7 +1947,7 @@ internal sealed class LyricsPanel : IDisposable
             letter.PaintedScale = motion.Scale;
             letter.Transform.ScaleX = motion.Scale;
             letter.Transform.ScaleY = motion.Scale;
-            if (letter.GlowTransform is { } glowTransform)
+            if (!_glowTransformFixed && letter.GlowTransform is { } glowTransform)
             {
                 glowTransform.ScaleX = motion.Scale;
                 glowTransform.ScaleY = motion.Scale;
@@ -1755,7 +1959,7 @@ internal sealed class LyricsPanel : IDisposable
         {
             letter.PaintedX = x;
             letter.Transform.TranslateX = x;
-            if (letter.GlowTransform is { } glowTransform)
+            if (!_glowTransformFixed && letter.GlowTransform is { } glowTransform)
             {
                 glowTransform.TranslateX = x;
             }
@@ -1766,7 +1970,7 @@ internal sealed class LyricsPanel : IDisposable
         {
             letter.PaintedY = y;
             letter.Transform.TranslateY = y;
-            if (letter.GlowTransform is { } glowTransform)
+            if (!_glowTransformFixed && letter.GlowTransform is { } glowTransform)
             {
                 glowTransform.TranslateY = y;
             }
@@ -1775,22 +1979,52 @@ internal sealed class LyricsPanel : IDisposable
         if (letter.NeedsMaskRefresh)
         {
             letter.NeedsMaskRefresh = false;
-            RefreshGlowMask(letter);
+            if (letter.Shadow is not null)
+            {
+                RefreshGlowMask(letter);
+                if (letter.MaskRefreshTries > 0)
+                {
+                    letter.MaskRefreshTries--;
+                    if (letter.MaskRefreshTries > 0)
+                    {
+                        letter.NeedsMaskRefresh = true;
+                    }
+                }
+            }
         }
 
         var glow = motion.Glow * glowStrength;
         if (glow > 0.01)
         {
             EnsureGlow(letter);
-            if (letter.Shadow is { } shadow)
+            if (letter.Shadow is { } shadow
+                && !(_glowStaticMask && shadow.Mask is null))
             {
-                shadow.Opacity = (float)Math.Clamp(glow, 0, 1);
-                shadow.BlurRadius = (float)(4 + 12 * Math.Clamp(glow, 0, 1));
+                var opacity = (float)Math.Clamp(glow, 0, 1);
+                var blur = _glowBlurFixed ? 12f : (float)(4 + 12 * opacity);
+                if (Math.Abs(opacity - letter.PaintedGlow) >= 0.01)
+                {
+                    shadow.Opacity = opacity;
+                    letter.PaintedGlow = opacity;
+                }
+
+                if (Math.Abs(blur - letter.PaintedBlur) >= 0.25)
+                {
+                    shadow.BlurRadius = blur;
+                    letter.PaintedBlur = blur;
+                }
             }
         }
-        else if (letter.Shadow is not null)
+        else if (letter.Shadow is { } idleShadow
+            && (letter.PaintedGlow != 0 || letter.PaintedBlur != (float)(_glowBlurFixed ? 12 : 0)))
         {
-            ReleaseGlow(letter);
+            // Keep the sprite and its alpha mask for the life of the letter. Disposing
+            // and recreating them at every held syllable caused periodic GPU/GC hitches;
+            // hiding the shadow is free.
+            idleShadow.Opacity = 0;
+            idleShadow.BlurRadius = _glowBlurFixed ? 12 : 0;
+            letter.PaintedGlow = 0;
+            letter.PaintedBlur = _glowBlurFixed ? 12 : 0;
         }
     }
 
@@ -1799,6 +2033,13 @@ internal sealed class LyricsPanel : IDisposable
     private void EnsureGlow(Letter letter)
     {
         if (!_glow || letter.GlowHost is null || letter.GlowVisual is not null)
+        {
+            return;
+        }
+
+        // The mask twin is inside the panel's entrance fade. A mask taken while the
+        // panel is still transparent comes out empty, so wait until it is fully shown.
+        if (_glowStaticMask && _lines.Opacity < 0.99)
         {
             return;
         }
@@ -1816,20 +2057,40 @@ internal sealed class LyricsPanel : IDisposable
         shadow.Color = SungColor;
         shadow.Offset = Vector3.Zero;
         shadow.Opacity = 0;
-        shadow.BlurRadius = 0;
-        shadow.Mask = letter.Text.GetAlphaMask();
+        shadow.BlurRadius = _glowBlurFixed ? 12 : 0;
+        if (!_glowNoMask)
+        {
+            if (_glowStaticMask)
+            {
+                // Take the mask on the next frames, after the twin has rendered.
+                letter.NeedsMaskRefresh = true;
+                letter.MaskRefreshTries = 4;
+            }
+            else
+            {
+                var mask = letter.Text.GetAlphaMask();
+                shadow.Mask = mask;
+                letter.Mask?.Dispose();
+                letter.Mask = mask;
+            }
+        }
 
+        var glowBrush = compositor.CreateColorBrush(Color.FromArgb(0, 0, 0, 0));
         var sprite = compositor.CreateSpriteVisual();
-        sprite.Brush = compositor.CreateColorBrush(Color.FromArgb(0, 0, 0, 0));
+        sprite.Brush = glowBrush;
         sprite.Shadow = shadow;
         sprite.Size = new Vector2((float)width, (float)height);
 
         ElementCompositionPreview.SetElementChildVisual(letter.GlowHost, sprite);
         letter.Shadow = shadow;
         letter.GlowVisual = sprite;
+        letter.GlowBrush = glowBrush;
+        letter.PaintedGlow = 0;
+        letter.PaintedBlur = _glowBlurFixed ? 12 : 0;
+        AddLiveGlow(letter);
     }
 
-    private static void RefreshGlowMask(Letter letter)
+    private void RefreshGlowMask(Letter letter)
     {
         if (letter.Shadow is null || letter.GlowVisual is null)
         {
@@ -1844,7 +2105,18 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         letter.GlowVisual.Size = new Vector2((float)width, (float)height);
-        letter.Shadow.Mask = letter.Text.GetAlphaMask();
+        if (_glowNoMask)
+        {
+            return;
+        }
+
+        var source = _glowStaticMask && letter.MaskText is { } maskText
+            ? maskText
+            : letter.Text;
+        var mask = source.GetAlphaMask();
+        letter.Shadow.Mask = mask;
+        letter.Mask?.Dispose();
+        letter.Mask = mask;
     }
 
     private static void ReleaseGlow(Letter letter)
@@ -1856,22 +2128,254 @@ internal sealed class LyricsPanel : IDisposable
 
         letter.GlowVisual?.Dispose();
         letter.GlowVisual = null;
+        letter.GlowBrush?.Dispose();
+        letter.GlowBrush = null;
         letter.Shadow?.Dispose();
         letter.Shadow = null;
+        letter.Mask?.Dispose();
+        letter.Mask = null;
         letter.PaintedGlow = -1;
+        letter.PaintedBlur = -1;
     }
 
     private void ReleaseGlows()
     {
+        _glowWarmup.Clear();
+        _glowWarmupSet.Clear();
+        _liveGlows.Clear();
+        _liveGlowSet.Clear();
+        _glowWindowIndex = -2;
         foreach (var row in _rows)
         {
-            foreach (var word in row.WordItems.Concat(row.BackgroundItems))
+            foreach (var word in row.WordItems)
             {
                 foreach (var letter in word.Letters)
                 {
+                    letter.GlowWanted = false;
                     ReleaseGlow(letter);
                 }
             }
+
+            foreach (var word in row.BackgroundItems)
+            {
+                foreach (var letter in word.Letters)
+                {
+                    letter.GlowWanted = false;
+                    ReleaseGlow(letter);
+                }
+            }
+        }
+    }
+
+    private void AddLiveGlow(Letter letter)
+    {
+        if (_liveGlowSet.Add(letter))
+        {
+            _liveGlows.Add(letter);
+        }
+    }
+
+    /// <summary>Keeps the shadow sprites only around the line being sung: the current
+    /// line and the next one. Creating them for the whole song in one go costs hundreds
+    /// of megabytes of alpha masks; keeping none makes each long note pay for a new one.
+    /// Only the small live list is scanned when the line changes.</summary>
+    private void ScheduleGlows(int index)
+    {
+        if (!_glow || index == _glowWindowIndex)
+        {
+            return;
+        }
+
+        _glowWindowIndex = index;
+        var start = Math.Max(0, index - 1);
+        var end = Math.Min(_rows.Count - 1, index + 1);
+
+        for (var i = _liveGlows.Count - 1; i >= 0; i--)
+        {
+            var letter = _liveGlows[i];
+            if (letter.RowIndex >= start && letter.RowIndex <= end)
+            {
+                continue;
+            }
+
+            letter.GlowWanted = false;
+            _glowWarmupSet.Remove(letter);
+            ReleaseGlow(letter);
+            _liveGlowSet.Remove(letter);
+            _liveGlows.RemoveAt(i);
+        }
+
+        for (var rowIndex = start; rowIndex <= end; rowIndex++)
+        {
+            var row = _rows[rowIndex];
+            foreach (var word in row.WordItems)
+            {
+                foreach (var letter in word.Letters)
+                {
+                    letter.GlowWanted = true;
+                    AddLiveGlow(letter);
+                    if (letter.GlowVisual is null && _glowWarmupSet.Add(letter))
+                    {
+                        _glowWarmup.Enqueue(letter);
+                    }
+                }
+            }
+
+            foreach (var word in row.BackgroundItems)
+            {
+                foreach (var letter in word.Letters)
+                {
+                    letter.GlowWanted = true;
+                    AddLiveGlow(letter);
+                    if (letter.GlowVisual is null && _glowWarmupSet.Add(letter))
+                    {
+                        _glowWarmup.Enqueue(letter);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Builds at most one shadow mask per frame, so a line's glow is ready before
+    /// it is sung without a composition setup spike on the frame a note starts.</summary>
+    private void WarmQueuedGlows()
+    {
+        while (_glowWarmup.Count > 0)
+        {
+            var letter = _glowWarmup.Dequeue();
+            _glowWarmupSet.Remove(letter);
+            if (!letter.GlowWanted || letter.GlowVisual is not null || letter.GlowHost is null)
+            {
+                continue;
+            }
+
+            if (letter.Text.ActualWidth < 0.5 || letter.Text.ActualHeight < 0.5)
+            {
+                continue;
+            }
+
+            EnsureGlow(letter);
+            return;
+        }
+    }
+
+    /// <summary>Diagnostic only: runs a full GC when a request file exists, then logs
+    /// private bytes before and after. The request file is created by the test script.</summary>
+    private void CheckGcProbe()
+    {
+        var request = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-gc-request");
+        if (!System.IO.File.Exists(request))
+        {
+            return;
+        }
+
+        try
+        {
+            System.IO.File.Delete(request);
+        }
+        catch (Exception)
+        {
+            // try again next frame
+            return;
+        }
+
+        var process = System.Diagnostics.Process.GetCurrentProcess();
+        process.Refresh();
+        var before = process.PrivateMemorySize64;
+        var managedBefore = GC.GetTotalMemory(false);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        process.Refresh();
+        var after = process.PrivateMemorySize64;
+        var managedAfter = GC.GetTotalMemory(true);
+
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-gc.txt"),
+                $"{DateTime.Now:HH:mm:ss.fff} private={before / 1048576.0:F1}MB -> " +
+                $"{after / 1048576.0:F1}MB managed={managedBefore / 1048576.0:F1}MB -> " +
+                $"{managedAfter / 1048576.0:F1}MB gc0={GC.CollectionCount(0)} " +
+                $"gc2={GC.CollectionCount(2)}{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // diagnostics must not take the panel down
+        }
+    }
+
+    /// <summary>Diagnostic only: once a second, logs the live glow count, the letters
+    /// painted this frame, and private-byte growth.</summary>
+    private void LogLiveSet()
+    {
+        var now = _frameClock.ElapsedMilliseconds;
+        if (now - _lastLiveLogMs < 1000)
+        {
+            return;
+        }
+
+        var elapsed = Math.Max(1, now - _lastLiveLogMs) / 1000.0;
+        var process = System.Diagnostics.Process.GetCurrentProcess();
+        process.Refresh();
+        var privateBytes = process.PrivateMemorySize64;
+        var growth = _lastLivePrivateBytes == 0
+            ? 0
+            : (privateBytes - _lastLivePrivateBytes) / 1048576.0 / elapsed;
+        var live = 0;
+        foreach (var letter in _liveGlows)
+        {
+            if (letter.GlowVisual is not null)
+            {
+                live++;
+            }
+        }
+
+        _lastLiveLogMs = now;
+        _lastLivePrivateBytes = privateBytes;
+
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-live.txt"),
+                $"{DateTime.Now:HH:mm:ss.fff} test={_glowTest} live={live} painted={_paintedLetters} " +
+                $"private={privateBytes / 1048576.0:F1}MB growth={growth:F1}MB/s{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // diagnostics must not take the panel down
+        }
+    }
+
+    /// <summary>Diagnostic only: appends frame gaps over 40 ms with GC counts so a glow-on
+    /// and glow-off run can be compared on the same song.</summary>
+    private void LogFrameGap()
+    {
+        var now = _frameClock.ElapsedMilliseconds;
+        var previous = _lastFrameLogMs;
+        _lastFrameLogMs = now;
+        if (previous == 0)
+        {
+            return;
+        }
+
+        var gap = now - previous;
+        if (gap < 40)
+        {
+            return;
+        }
+
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-frames.txt"),
+                $"{DateTime.Now:HH:mm:ss.fff} gap={gap}ms pos={_position:F2} " +
+                $"glide={_tween.IsRunning} dots={_interludeActive} " +
+                $"gc0={GC.CollectionCount(0)} gc2={GC.CollectionCount(2)}{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // Diagnostics must never take the panel down.
         }
     }
 
@@ -1956,7 +2460,7 @@ internal sealed class LyricsPanel : IDisposable
         _tweenElapsed += 16;
         var k = Math.Min(1.0, _tweenElapsed / (double)GlideMilliseconds);
         var eased = EaseOut(k);
-        _scroll.ChangeView(null, _tweenStart + (_tweenTarget - _tweenStart) * eased, null);
+        _scroll.ChangeView(null, _tweenStart + (_tweenTarget - _tweenStart) * eased, null, true);
         if (k >= 1)
         {
             _tween.Stop();
@@ -1997,6 +2501,11 @@ internal sealed class LyricsPanel : IDisposable
     public void Dispose()
     {
         ReleaseGlows();
+        _hoverOpacityIn?.Dispose();
+        _hoverOpacityOut?.Dispose();
+        _hoverScaleIn?.Dispose();
+        _hoverScaleOut?.Dispose();
+        _hoverEase?.Dispose();
         _tween.Stop();
         _frame.Stop();
     }
