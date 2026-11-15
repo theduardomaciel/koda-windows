@@ -163,6 +163,8 @@ internal sealed class LyricsPanel : IDisposable
     private readonly HashSet<Letter> _glowWarmupSet = [];
     private readonly List<Letter> _liveGlows = [];
     private readonly HashSet<Letter> _liveGlowSet = [];
+    private readonly Dictionary<MaskKey, CompositionBrush> _glyphMasks = [];
+    private readonly Queue<MaskKey> _glyphMaskOrder = new();
     private int _glowWindowIndex = -2;
     private CubicBezierEasingFunction? _hoverEase;
     private ScalarKeyFrameAnimation? _hoverOpacityIn;
@@ -228,8 +230,7 @@ internal sealed class LyricsPanel : IDisposable
 
     /// <summary>One letter of a held syllable: its own fill, wave and glow layers.</summary>
     private sealed class Letter
-    {
-        public required FrameworkElement Element { get; init; }
+    {        public required FrameworkElement Element { get; init; }
         public required TextBlock Text { get; init; }
         /// <summary>Test only: the never-changing twin the alpha mask is taken from.</summary>
         public TextBlock? MaskText { get; set; }
@@ -261,6 +262,16 @@ internal sealed class LyricsPanel : IDisposable
         /// <summary>True once the glow ended and its surfaces were freed.</summary>
         public bool GlowDone { get; set; }
     }
+
+    /// <summary>The identity of a static glyph mask: one brush can feed every letter
+    /// with the same character and shape.</summary>
+    private readonly record struct MaskKey(
+        string Text,
+        string Family,
+        double Size,
+        int Weight,
+        int Spacing,
+        double LineHeight);
 
     /// <summary>One line in the panel: its words, its backing vocals and the line itself.</summary>
     private sealed class Row
@@ -612,6 +623,7 @@ internal sealed class LyricsPanel : IDisposable
         _frame.Stop();
         UserScrolled = false;
         ReleaseGlows();
+        ClearGlyphMasks();
         _repaintFrom = -1;
         _repaintTo = -1;
         _lines.Children.Clear();
@@ -1145,7 +1157,14 @@ internal sealed class LyricsPanel : IDisposable
 
         if (glowHost is not null)
         {
-            textBlock.SizeChanged += (_, _) => RefreshGlowMask(letter);
+            textBlock.SizeChanged += (_, _) =>
+            {
+                letter.NeedsMaskRefresh = true;
+                if (letter.Shadow is not null)
+                {
+                    RefreshGlowMask(letter);
+                }
+            };
         }
 
         return letter;
@@ -1225,6 +1244,9 @@ internal sealed class LyricsPanel : IDisposable
         {
             SizeDots(leading, _leadingDotItems, _fontSize, _lineGap * 0.75);
         }
+
+        // The shaped glyphs changed size or weight: their cached masks no longer match.
+        ClearGlyphMasks();
     }
 
     private void ReshapeWord(Word word, double size, bool soft)
@@ -2060,13 +2082,9 @@ internal sealed class LyricsPanel : IDisposable
             }
         }
 
-        if (letter.NeedsMaskRefresh)
+        if (letter.NeedsMaskRefresh && letter.Shadow is not null)
         {
-            letter.NeedsMaskRefresh = false;
-            if (letter.Shadow is not null)
-            {
-                RefreshGlowMask(letter);
-            }
+            RefreshGlowMask(letter);
         }
 
         var glow = motion.Glow * glowStrength;
@@ -2108,7 +2126,7 @@ internal sealed class LyricsPanel : IDisposable
             // here instead of holding them until the line leaves the ±1 window.
             if (letter.GlowShown && letter.PaintedGlow == 0)
             {
-                ReleaseGlow(letter);
+                ReleaseGlow(letter, keepMask: true);
                 letter.GlowDone = true;
             }
         }
@@ -2142,16 +2160,15 @@ internal sealed class LyricsPanel : IDisposable
             var source = _glowStaticMask && letter.MaskText is { } maskText
                 ? maskText
                 : letter.Text;
-            var mask = source.GetAlphaMask();
-            shadow.Mask = mask;
-            // GetAlphaMask can hand back the same brush instance for the same element.
-            // Disposing it here would leave the next shadow with a closed mask.
-            if (!ReferenceEquals(letter.Mask, mask))
+            if (letter.Mask is null || letter.NeedsMaskRefresh)
             {
-                letter.Mask?.Dispose();
+                // Keep the static mask for the life of the live window. A new glow
+                // after a seek reuses it instead of rasterizing the same glyph again.
+                letter.Mask = MaskFor(source);
+                letter.NeedsMaskRefresh = false;
             }
 
-            letter.Mask = mask;
+            shadow.Mask = letter.Mask;
         }
 
         var glowBrush = compositor.CreateColorBrush(Color.FromArgb(0, 0, 0, 0));
@@ -2187,26 +2204,66 @@ internal sealed class LyricsPanel : IDisposable
         letter.GlowVisual.Size = new Vector2((float)width, (float)height);
         if (_glowNoMask)
         {
+            letter.NeedsMaskRefresh = false;
             return;
         }
 
         var source = _glowStaticMask && letter.MaskText is { } maskText
             ? maskText
             : letter.Text;
-        var mask = source.GetAlphaMask();
-        if (ReferenceEquals(letter.Mask, mask))
+        var mask = MaskFor(source);
+        if (!ReferenceEquals(letter.Mask, mask))
         {
-            // Already attached and still alive; disposing and reattaching it was
-            // what made the glow vanish and the next seek throw ObjectDisposedException.
-            return;
+            letter.Shadow.Mask = mask;
+            // Do not dispose the replaced mask: GetAlphaMask may hand the same brush
+            // back for the same element, and a closed brush was what broke the glow.
+            letter.Mask = mask;
         }
 
-        letter.Shadow.Mask = mask;
-        letter.Mask?.Dispose();
-        letter.Mask = mask;
+        letter.NeedsMaskRefresh = false;
     }
 
-    private static void ReleaseGlow(Letter letter)
+    /// <summary>The static twin's alpha mask, shared by every glyph with the same shape.
+    /// A seek across the song reuses these instead of rasterizing each letter again.</summary>
+    private CompositionBrush MaskFor(TextBlock source)
+    {
+        if (!_glowStaticMask)
+        {
+            return source.GetAlphaMask();
+        }
+
+        var key = new MaskKey(
+            source.Text,
+            source.FontFamily.Source,
+            source.FontSize,
+            source.FontWeight.Weight,
+            source.CharacterSpacing,
+            source.LineHeight);
+        if (!_glyphMasks.TryGetValue(key, out var mask))
+        {
+            // A huge alphabet must not turn the shared set into the new high-water
+            // mark. Old brushes may still be in use by a shadow; the dictionary just
+            // drops its reference and the shadow keeps it alive.
+            if (_glyphMasks.Count >= 128 && _glyphMaskOrder.Count > 0)
+            {
+                _glyphMasks.Remove(_glyphMaskOrder.Dequeue());
+            }
+
+            mask = source.GetAlphaMask();
+            _glyphMasks[key] = mask;
+            _glyphMaskOrder.Enqueue(key);
+        }
+
+        return mask;
+    }
+
+    private void ClearGlyphMasks()
+    {
+        _glyphMasks.Clear();
+        _glyphMaskOrder.Clear();
+    }
+
+    private static void ReleaseGlow(Letter letter, bool keepMask = false)
     {
         if (letter.GlowHost is { } host)
         {
@@ -2219,9 +2276,14 @@ internal sealed class LyricsPanel : IDisposable
         letter.GlowBrush = null;
         letter.Shadow?.Dispose();
         letter.Shadow = null;
-        // The framework may return this same brush again for the same element. Keep it
-        // alive for the GC; the disposed shadow owns the compositor reference.
-        letter.Mask = null;
+        if (!keepMask)
+        {
+            // The letter is leaving the live window. Drop the mask reference and let
+            // the GC release it; disposing here could close a brush the framework
+            // returns again for the same element.
+            letter.Mask = null;
+        }
+
         letter.GlowShown = false;
         letter.PaintedGlow = -1;
         letter.PaintedBlur = -1;
@@ -2617,6 +2679,7 @@ internal sealed class LyricsPanel : IDisposable
     public void Dispose()
     {
         ReleaseGlows();
+        ClearGlyphMasks();
         _hoverOpacityIn?.Dispose();
         _hoverOpacityOut?.Dispose();
         _hoverScaleIn?.Dispose();
