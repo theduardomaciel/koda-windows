@@ -513,6 +513,27 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Parentheses" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="Keep the brackets around backing vocals; off, the words show without them."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ToggleSwitch
+                            x:Name="BackingParenthesesSwitch"
+                            Grid.Column="1"
+                            Style="{StaticResource SettingsToggle}"
+                            AutomationProperties.Name="Backing vocal parentheses"
+                            Toggled="OnBackingParenthesesToggled" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="Duet sides" Style="{ThemeResource BodyStrongTextBlockStyle}" />
                             <TextBlock
                                 Text="The second singer's lines sit on the right."
@@ -556,12 +577,47 @@
                                 x:Name="LyricsSizeSlider"
                                 Width="190"
                                 Minimum="16"
-                                Maximum="44"
+                                Maximum="64"
                                 StepFrequency="1"
                                 AutomationProperties.Name="Lyrics text size"
                                 ValueChanged="OnLyricsSizeChanged" />
                             <TextBlock
                                 x:Name="LyricsSizeValue"
+                                Width="44"
+                                TextAlignment="Right"
+                                VerticalAlignment="Center"
+                                Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                        </StackPanel>
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Space between lines" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="The blank space between lyric lines."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel
+                            Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            VerticalAlignment="Center">
+                            <Slider
+                                x:Name="LyricsGapSlider"
+                                Width="190"
+                                Minimum="0"
+                                Maximum="64"
+                                StepFrequency="1"
+                                AutomationProperties.Name="Space between lyric lines"
+                                ValueChanged="OnLyricsGapChanged" />
+                            <TextBlock
+                                x:Name="LyricsGapValue"
                                 Width="44"
                                 TextAlignment="Right"
                                 VerticalAlignment="Center"
@@ -641,9 +697,9 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="Line spacing" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock Text="Line height" Style="{ThemeResource BodyStrongTextBlockStyle}" />
                             <TextBlock
-                                Text="How airy the lines sit."
+                                Text="How tall each lyric line is."
                                 Style="{ThemeResource CaptionTextBlockStyle}"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 TextWrapping="Wrap" />
@@ -683,7 +739,7 @@
                             x:Name="LyricsIdleSlider"
                             Grid.Column="1"
                             Width="190"
-                            Minimum="0.15"
+                            Minimum="0.05"
                             Maximum="0.8"
                             StepFrequency="0.01"
                             VerticalAlignment="Center"

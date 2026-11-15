@@ -118,7 +118,7 @@ public sealed class Settings
     /// <summary>How the words light: the sweep, the heavier Expressive look, or classic lines.</summary>
     public LyricsRenderer LyricsRenderer { get; set; } = LyricsRenderer.Sweep;
 
-    /// <summary>The space between lines, as a multiplier on the theme's 1.35.</summary>
+    /// <summary>The height of a line, as a multiplier on the theme's 1.35.</summary>
     public double LyricsLineSpacing
     {
         get => _lyricsLineSpacing;
@@ -127,14 +127,24 @@ public sealed class Settings
 
     private double _lyricsLineSpacing = 1.0;
 
+    /// <summary>The blank space between lyric lines, in effective pixels (top and bottom
+    /// together). Separate from the line's own height: this is the gap between lines.</summary>
+    public double LyricsLineGap
+    {
+        get => _lyricsLineGap;
+        set => _lyricsLineGap = Math.Clamp(value, 0, 64);
+    }
+
+    private double _lyricsLineGap = 24;
+
     /// <summary>How strongly the lines other than the one being sung step back.</summary>
     public double LyricsIdleOpacity
     {
         get => _lyricsIdleOpacity;
-        set => _lyricsIdleOpacity = Math.Clamp(value, 0.15, 0.8);
+        set => _lyricsIdleOpacity = Math.Clamp(Math.Round(value, 2), 0.05, 0.8);
     }
 
-    private double _lyricsIdleOpacity = 0.28;
+    private double _lyricsIdleOpacity = 0.15;
 
     /// <summary>How soft the front of the sung highlight is, 0 (a hard edge) to 1.</summary>
     public double LyricsSoftness
@@ -173,7 +183,7 @@ public sealed class Settings
             case LyricsPreset.Koda:
                 LyricsRenderer = LyricsRenderer.Sweep;
                 LyricsLineSpacing = 1.0;
-                LyricsIdleOpacity = 0.28;
+                LyricsIdleOpacity = 0.15;
                 LyricsSoftness = 0.35;
                 LyricsGlow = true;
                 LyricsGlowIntensity = 1.0;
@@ -183,7 +193,7 @@ public sealed class Settings
             case LyricsPreset.Expressive:
                 LyricsRenderer = LyricsRenderer.Expressive;
                 LyricsLineSpacing = 1.12;
-                LyricsIdleOpacity = 0.22;
+                LyricsIdleOpacity = 0.15;
                 LyricsSoftness = 0.60;
                 LyricsGlow = true;
                 LyricsGlowIntensity = 1.5;
@@ -193,7 +203,7 @@ public sealed class Settings
             case LyricsPreset.Minimal:
                 LyricsRenderer = LyricsRenderer.Classic;
                 LyricsLineSpacing = 0.95;
-                LyricsIdleOpacity = 0.15;
+                LyricsIdleOpacity = 0.10;
                 LyricsSoftness = 0.0;
                 LyricsGlow = false;
                 LyricsGlowIntensity = 0.0;
@@ -206,14 +216,14 @@ public sealed class Settings
     }
 
     /// <summary>The size of a sung line, in effective pixels; backing vocals follow at 70%.
-    /// Kept between 16 and 44, the slider's ends.</summary>
+    /// Kept between 16 and 64, the slider's ends.</summary>
     public double LyricsFontSize
     {
         get => _lyricsFontSize;
-        set => _lyricsFontSize = Math.Clamp(value, 16, 44);
+        set => _lyricsFontSize = Math.Clamp(value, 16, 64);
     }
 
-    private double _lyricsFontSize = 36;
+    private double _lyricsFontSize = 44;
 
     /// <summary>The old three-step size, read once from an earlier settings file and never
     /// written: Small and Large keep their place either side of the default.</summary>
@@ -231,6 +241,10 @@ public sealed class Settings
 
     /// <summary>Backing vocals are shown smaller, under their line.</summary>
     public bool ShowsBackingVocals { get; set; } = true;
+
+    /// <summary>Keep the parentheses around backing vocals; off, the words show without
+    /// their brackets.</summary>
+    public bool ShowsBackingParentheses { get; set; } = true;
 
     /// <summary>The second singer of a duet on the right; off, every line sits on the left.</summary>
     public bool DuetSides { get; set; } = true;

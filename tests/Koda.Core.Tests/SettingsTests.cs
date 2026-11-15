@@ -190,7 +190,7 @@ public class SettingsTests
     [Theory]
     [InlineData(10, 16)]
     [InlineData(28, 28)]
-    [InlineData(90, 44)]
+    [InlineData(90, 64)]
     public void TheLyricsSizeStaysBetweenItsSliderEnds(double asked, double kept) =>
         Assert.Equal(kept, new Settings { LyricsFontSize = asked }.LyricsFontSize);
 
@@ -207,7 +207,9 @@ public class SettingsTests
         Assert.True(settings.Crossfades);
         Assert.Equal(5, settings.CrossfadeSeconds);
         Assert.False(settings.SharesOnDiscord);
-        Assert.Equal(36, settings.LyricsFontSize);
+        Assert.Equal(44, settings.LyricsFontSize);
+        Assert.Equal(0.15, settings.LyricsIdleOpacity);
+        Assert.Equal(24, settings.LyricsLineGap);
     }
 
     [Theory]

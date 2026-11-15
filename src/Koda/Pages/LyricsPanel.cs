@@ -76,6 +76,9 @@ internal sealed class LyricsPanel : IDisposable
     private double _lineHeightFactor = LineHeightFactor;
     private double _feather = Feather;
     private double _risePixels = 2.5;
+    private double _fontSize = 44;
+    private double _lineGap = 24;
+    private bool _showsParentheses = true;
     private double _idleNear = 0.5;
     private double _idleFar = 0.36;
     private bool _glow = true;
@@ -85,6 +88,7 @@ internal sealed class LyricsPanel : IDisposable
 
     private readonly ScrollViewer _scroll;
     private readonly StackPanel _lines;
+    private readonly Border _topSpacer = new();
     private readonly Border _spacer = new();
     private readonly DispatcherQueueTimer _tween;
     private readonly DispatcherQueueTimer _frame;
@@ -169,6 +173,14 @@ internal sealed class LyricsPanel : IDisposable
         {
             if (Math.Abs(args.NewSize.Width - _panelWidth) < 1)
             {
+                // Only the height changed: the words keep their lines, but the room above
+                // and below moves the reading position, so the spacers are refreshed.
+                UpdateSpacers();
+                if (_current is not null)
+                {
+                    GlideTo(_current);
+                }
+
                 return;
             }
 
@@ -272,6 +284,9 @@ internal sealed class LyricsPanel : IDisposable
         _lineHeightFactor = LineHeightFactor * settings.LyricsLineSpacing;
         _feather = 0.08 + 0.55 * settings.LyricsSoftness;
         _risePixels = Math.Max(1.5, settings.LyricsFontSize * RiseRatio);
+        _fontSize = settings.LyricsFontSize;
+        _lineGap = settings.LyricsLineGap;
+        _showsParentheses = settings.ShowsBackingParentheses;
         _idleFar = settings.LyricsIdleOpacity;
         _idleNear = Math.Min(1, _idleFar + 0.12);
         _glow = settings.LyricsGlow;
@@ -300,10 +315,14 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
+        // The room above the first line: the first words can sit at the reading position,
+        // clear of the fade at the top of the panel.
+        _lines.Children.Add(_topSpacer);
+
         if (!lyrics.IsSynced)
         {
             // Untimed lyrics are shown as they came: one block, no timing.
-            var size = Koda.Core.Settings.Current.LyricsFontSize;
+            var size = _fontSize;
             var plain = new TextBlock
             {
                 Text = lyrics.Plain,
@@ -312,6 +331,7 @@ internal sealed class LyricsPanel : IDisposable
             };
             Shape(plain, size);
             _lines.Children.Add(plain);
+            Reflow();
             return;
         }
 
@@ -319,7 +339,7 @@ internal sealed class LyricsPanel : IDisposable
         if (lyrics.Lines.Count > 0 && lyrics.Lines[0].Time >= InterludeSeconds)
         {
             _leadingDotItems = [];
-            _leadingDots = MakeDots(_leadingDotItems);
+            _leadingDots = MakeDots(_leadingDotItems, _fontSize);
             _lines.Children.Add(_leadingDots);
         }
 
@@ -327,15 +347,16 @@ internal sealed class LyricsPanel : IDisposable
         {
             var line = lyrics.Lines[index];
             var settings = Koda.Core.Settings.Current;
-            var fontSize = settings.LyricsFontSize;
+            var fontSize = _fontSize;
             var row = new Row
             {
                 Line = line,
                 Words = new StackPanel { Spacing = 4 },
-                Background = new StackPanel { Spacing = 2, Opacity = 0.7 },
+                Background = new StackPanel { Spacing = 2, Opacity = _idleFar * 0.7 },
             };
 
-            var host = new StackPanel { Margin = new Thickness(0, 8, 0, 8), Spacing = 6 };
+            var halfGap = _lineGap / 2;
+            var host = new StackPanel { Margin = new Thickness(0, halfGap, 0, halfGap), Spacing = 6 };
             // A duet sings from the right when Duet Sides is on. Everyone else sits on the
             // left, including a group singing together: centering those lines made a duet's
             // simultaneous lines read as one block in the middle of the panel.
@@ -392,8 +413,19 @@ internal sealed class LyricsPanel : IDisposable
                     break; // the listener turned the backing vocals off
                 }
 
+                var text = word.Text;
+                if (!_showsParentheses)
+                {
+                    text = text.Replace("(", string.Empty).Replace(")", string.Empty).Trim();
+                    if (text.Length == 0)
+                    {
+                        continue; // a bracket on its own is not a word
+                    }
+                }
+
                 // Backing vocals are drawn at 70% of the sung line, a little lighter.
-                var item = MakeWord(word, fontSize * 0.7, soft: true);
+                var spoken = text == word.Text ? word : word with { Text = text };
+                var item = MakeWord(spoken, fontSize * 0.7, soft: true);
                 row.BackgroundItems.Add(item);
             }
 
@@ -412,7 +444,7 @@ internal sealed class LyricsPanel : IDisposable
             var next = index + 1 < lyrics.Lines.Count ? lyrics.Lines[index + 1] : null;
             if (next is not null && line.End is { } lineEnd && next.Time - lineEnd >= InterludeSeconds)
             {
-                row.DotsHost = MakeDots(row.Dots);
+                row.DotsHost = MakeDots(row.Dots, fontSize);
                 _lines.Children.Add(row.DotsHost);
             }
         }
@@ -424,19 +456,21 @@ internal sealed class LyricsPanel : IDisposable
         Reflow();
     }
 
-    /// <summary>Three dots that fill in turn through an instrumental gap.</summary>
-    private static StackPanel MakeDots(List<Ellipse> dots)
+    /// <summary>Three dots that fill in turn through an instrumental gap; they grow with
+    /// the words so the pause reads at any size.</summary>
+    private static StackPanel MakeDots(List<Ellipse> dots, double fontSize)
     {
+        var diameter = Math.Max(4, Math.Round(fontSize * 0.18));
         var host = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 6,
-            Margin = new Thickness(0, 4, 0, 4),
+            Spacing = diameter,
+            Margin = new Thickness(0, diameter * 0.6, 0, diameter * 0.6),
             Visibility = Visibility.Collapsed,
         };
         for (var dot = 0; dot < 3; dot++)
         {
-            var ellipse = new Ellipse { Width = 6, Height = 6, Fill = Brush(0x4D) };
+            var ellipse = new Ellipse { Width = diameter, Height = diameter, Fill = Brush(0x4D) };
             host.Children.Add(ellipse);
             dots.Add(ellipse);
         }
@@ -490,6 +524,8 @@ internal sealed class LyricsPanel : IDisposable
     /// </summary>
     private void Reflow()
     {
+        UpdateSpacers();
+
         var width = _panelWidth - 24;
         if (width <= 0)
         {
@@ -509,10 +545,13 @@ internal sealed class LyricsPanel : IDisposable
                 LayOut(row.Background, row.BackgroundItems, width);
             }
         }
+    }
 
-        // Room below the last line, so the final lines of a song can still be scrolled up
-        // to the reading position. Without it the scroll stops at the end and the line being
-        // sung drifts down out of the top third, which is exactly where it should not be.
+    /// <summary>The room above and below the words: the first and last lines can reach the
+    /// reading position, and the fade at the top never swallows the opening lines.</summary>
+    private void UpdateSpacers()
+    {
+        _topSpacer.Height = Math.Max(0, _scroll.ViewportHeight * ReadingAnchor);
         _spacer.Height = Math.Max(0, _scroll.ViewportHeight);
     }
 
@@ -529,18 +568,34 @@ internal sealed class LyricsPanel : IDisposable
         panel.Children.Clear();
         StackPanel? line = null;
         var used = 0.0;
-        foreach (var word in words)
+        for (var index = 0; index < words.Count;)
         {
-            var w = word.Element.DesiredSize.Width + word.Element.Margin.Right;
-            if (line is null || used + w > width)
+            // A word the provider split into syllables (no space between its parts) is one
+            // unit: a line may not break inside it, so the whole word moves to the next line.
+            var start = index;
+            var unitWidth = 0.0;
+            do
+            {
+                // DesiredSize already carries the word's trailing-space margin; adding the
+                // margin again made a line break one word early, leaving a short ragged line.
+                unitWidth += words[index].Element.DesiredSize.Width;
+                index++;
+            }
+            while (index < words.Count && !words[index - 1].Data.SpaceAfter);
+
+            if (line is null || used + unitWidth > width)
             {
                 line = new StackPanel { Orientation = Orientation.Horizontal };
                 panel.Children.Add(line);
                 used = 0;
             }
 
-            line.Children.Add(word.Element);
-            used += w;
+            for (var part = start; part < index; part++)
+            {
+                line.Children.Add(words[part].Element);
+            }
+
+            used += unitWidth;
         }
     }
 
@@ -636,13 +691,6 @@ internal sealed class LyricsPanel : IDisposable
         if (!ReferenceEquals(row, _current))
         {
             _current = row;
-            foreach (var other in _rows)
-            {
-                var distance = Math.Abs(_rows.IndexOf(other) - index);
-                other.Opacity = other == row ? 1 : distance <= 1 ? _idleNear : _idleFar;
-                other.Scale = other == row ? 1 : 0.99;
-            }
-
             if (!_userScrolled)
             {
                 GlideTo(row);
@@ -667,10 +715,20 @@ internal sealed class LyricsPanel : IDisposable
         var time = _position;
         PaintInterlude(time);
 
-        foreach (var row in _rows)
+        var index = Lyrics.IndexOf(time, _lyricLines) ?? -1;
+        var sung = new bool[_rows.Count];
+        for (var i = 0; i < _rows.Count; i++)
         {
+            var row = _rows[i];
+            sung[i] = IsSung(row, time);
+            var distance = index >= 0 ? Math.Abs(i - index) : int.MaxValue;
+            row.Opacity = sung[i] ? 1 : distance <= 1 ? _idleNear : _idleFar;
+            row.Scale = sung[i] ? 1 : 0.99;
+
             // The rows step back into place with a spring of their own.
             row.Words.Opacity = Approach(row.Words.Opacity, row.Opacity);
+            // Backing vocals step back with their line, at 70% of its weight.
+            row.Background.Opacity = Approach(row.Background.Opacity, row.Opacity * 0.7);
             if (row.RowTransform is { } transform)
             {
                 // A line-timed row has no words to scale one by one, so its whole line does it.
@@ -685,22 +743,35 @@ internal sealed class LyricsPanel : IDisposable
             }
         }
 
-        var current = _current;
-        if (current is null)
-        {
-            return;
-        }
-
+        // Every line still being sung keeps filling, not only the latest one: a held note
+        // outlasts the line break, and a duet sings two lines at the same time.
         var motion = _motion;
-        foreach (var word in current.WordItems)
+        for (var i = 0; i < _rows.Count; i++)
         {
-            Paint(word, time, motion);
-        }
+            if (!sung[i])
+            {
+                continue;
+            }
 
-        foreach (var word in current.BackgroundItems)
-        {
-            Paint(word, time, motion);
+            var row = _rows[i];
+            foreach (var word in row.WordItems)
+            {
+                Paint(word, time, motion);
+            }
+
+            foreach (var word in row.BackgroundItems)
+            {
+                Paint(word, time, motion);
+            }
         }
+    }
+
+    /// <summary>Whether a line's own time still covers the song's position: a line that
+    /// started keeps filling until its end, even after a later line has started.</summary>
+    private static bool IsSung(Row row, double time)
+    {
+        var end = row.Line.End ?? (row.WordItems.Count > 0 ? row.WordItems[^1].Data.End : row.Line.Time);
+        return time >= row.Line.Time && time <= end + 0.05;
     }
 
     /// <summary>

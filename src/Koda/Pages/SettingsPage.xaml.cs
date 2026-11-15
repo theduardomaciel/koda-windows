@@ -145,6 +145,8 @@ public sealed partial class SettingsPage : Page
         LyricsFontBox.SelectedItem = settings.LyricsFont;
         LyricsSpacingSlider.Value = settings.LyricsLineSpacing;
         LyricsSpacingValue.Text = $"{settings.LyricsLineSpacing:F2}×";
+        LyricsGapSlider.Value = settings.LyricsLineGap;
+        LyricsGapValue.Text = $"{settings.LyricsLineGap:F0}";
         LyricsIdleSlider.Value = settings.LyricsIdleOpacity;
         LyricsSoftnessSlider.Value = settings.LyricsSoftness;
         LyricsGlowSwitch.IsOn = settings.LyricsGlow;
@@ -154,6 +156,8 @@ public sealed partial class SettingsPage : Page
 
         WordMotionSwitch.IsOn = settings.LyricsMotion;
         BackingVocalsSwitch.IsOn = settings.ShowsBackingVocals;
+        BackingParenthesesSwitch.IsOn = settings.ShowsBackingParentheses;
+        BackingParenthesesSwitch.IsEnabled = settings.ShowsBackingVocals;
         DuetSidesSwitch.IsOn = settings.DuetSides;
         AnimatedBackgroundSwitch.IsOn = settings.AnimatesPlayerBackground;
         KeepHistorySwitch.IsOn = settings.SavesListeningHistory;
@@ -884,6 +888,13 @@ public sealed partial class SettingsPage : Page
     {
         if (!_loaded) return;
         App.Settings.Update(s => s.ShowsBackingVocals = BackingVocalsSwitch.IsOn);
+        BackingParenthesesSwitch.IsEnabled = BackingVocalsSwitch.IsOn;
+    }
+
+    private void OnBackingParenthesesToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded) return;
+        App.Settings.Update(s => s.ShowsBackingParentheses = BackingParenthesesSwitch.IsOn);
     }
 
     private void OnDuetSidesToggled(object sender, RoutedEventArgs e)
@@ -968,7 +979,7 @@ public sealed partial class SettingsPage : Page
 
         App.Settings.Update(s =>
         {
-            s.LyricsIdleOpacity = e.NewValue;
+            s.LyricsIdleOpacity = Math.Round(e.NewValue, 2);
             s.LyricsPreset = LyricsPreset.Custom;
         });
         ShowCustomPreset();
@@ -1041,6 +1052,14 @@ public sealed partial class SettingsPage : Page
         var size = Math.Round(e.NewValue);
         LyricsSizeValue.Text = $"{size:F0}";
         App.Settings.Update(s => s.LyricsFontSize = size);
+    }
+
+    private void OnLyricsGapChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (!_loaded) return;
+        var gap = Math.Round(e.NewValue);
+        LyricsGapValue.Text = $"{gap:F0}";
+        App.Settings.Update(s => s.LyricsLineGap = gap);
     }
 
     private void OnRelookLyricsClick(object sender, RoutedEventArgs e)
