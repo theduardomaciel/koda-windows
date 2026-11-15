@@ -62,21 +62,32 @@ internal sealed class WordWrapPanel : Panel
         var rowHeight = 0.0;
         var widest = 0.0;
 
-        for (var index = 0; index < Children.Count; index++)
+        for (var index = 0; index < Children.Count;)
         {
-            var child = Children[index];
-            child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            var size = child.DesiredSize;
-            var joins = index < _joins.Count && _joins[index];
-            if (x > 0 && !joins && x + size.Width > limit)
+            // A word split into syllables is one unit: the row break must go before the
+            // whole word, or its tail is pushed past the edge and clipped.
+            var start = index;
+            var unitWidth = 0.0;
+            var unitHeight = 0.0;
+            do
+            {
+                var child = Children[index];
+                child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                unitWidth += child.DesiredSize.Width;
+                unitHeight = Math.Max(unitHeight, child.DesiredSize.Height);
+                index++;
+            }
+            while (index < Children.Count && index < _joins.Count && _joins[index]);
+
+            if (x > 0 && x + unitWidth > limit)
             {
                 y += rowHeight + RowSpacing;
                 x = 0;
                 rowHeight = 0;
             }
 
-            x += size.Width;
-            rowHeight = Math.Max(rowHeight, size.Height);
+            x += unitWidth;
+            rowHeight = Math.Max(rowHeight, unitHeight);
             widest = Math.Max(widest, x);
         }
 
@@ -93,21 +104,35 @@ internal sealed class WordWrapPanel : Panel
         var y = 0.0;
         var rowHeight = 0.0;
 
-        for (var index = 0; index < Children.Count; index++)
+        for (var index = 0; index < Children.Count;)
         {
-            var child = Children[index];
-            var size = child.DesiredSize;
-            var joins = index < _joins.Count && _joins[index];
-            if (x > 0 && !joins && x + size.Width > limit)
+            var start = index;
+            var unitWidth = 0.0;
+            var unitHeight = 0.0;
+            do
+            {
+                var size = Children[index].DesiredSize;
+                unitWidth += size.Width;
+                unitHeight = Math.Max(unitHeight, size.Height);
+                index++;
+            }
+            while (index < Children.Count && index < _joins.Count && _joins[index]);
+
+            if (x > 0 && x + unitWidth > limit)
             {
                 y += rowHeight + RowSpacing;
                 x = 0;
                 rowHeight = 0;
             }
 
-            child.Arrange(new Rect(x, y, size.Width, size.Height));
-            x += size.Width;
-            rowHeight = Math.Max(rowHeight, size.Height);
+            for (var part = start; part < index; part++)
+            {
+                var size = Children[part].DesiredSize;
+                Children[part].Arrange(new Rect(x, y, size.Width, size.Height));
+                x += size.Width;
+            }
+
+            rowHeight = Math.Max(rowHeight, unitHeight);
         }
 
         return finalSize;
