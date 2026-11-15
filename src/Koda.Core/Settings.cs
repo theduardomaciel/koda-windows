@@ -134,7 +134,7 @@ public sealed class Settings
         set => _lyricsIdleOpacity = Math.Clamp(value, 0.15, 0.8);
     }
 
-    private double _lyricsIdleOpacity = 0.36;
+    private double _lyricsIdleOpacity = 0.28;
 
     /// <summary>How soft the front of the sung highlight is, 0 (a hard edge) to 1.</summary>
     public double LyricsSoftness
@@ -173,7 +173,7 @@ public sealed class Settings
             case LyricsPreset.Koda:
                 LyricsRenderer = LyricsRenderer.Sweep;
                 LyricsLineSpacing = 1.0;
-                LyricsIdleOpacity = 0.36;
+                LyricsIdleOpacity = 0.28;
                 LyricsSoftness = 0.35;
                 LyricsGlow = true;
                 LyricsGlowIntensity = 1.0;
@@ -183,7 +183,7 @@ public sealed class Settings
             case LyricsPreset.Expressive:
                 LyricsRenderer = LyricsRenderer.Expressive;
                 LyricsLineSpacing = 1.12;
-                LyricsIdleOpacity = 0.30;
+                LyricsIdleOpacity = 0.22;
                 LyricsSoftness = 0.60;
                 LyricsGlow = true;
                 LyricsGlowIntensity = 1.5;
@@ -193,7 +193,7 @@ public sealed class Settings
             case LyricsPreset.Minimal:
                 LyricsRenderer = LyricsRenderer.Classic;
                 LyricsLineSpacing = 0.95;
-                LyricsIdleOpacity = 0.18;
+                LyricsIdleOpacity = 0.15;
                 LyricsSoftness = 0.0;
                 LyricsGlow = false;
                 LyricsGlowIntensity = 0.0;
@@ -206,14 +206,14 @@ public sealed class Settings
     }
 
     /// <summary>The size of a sung line, in effective pixels; backing vocals follow at 70%.
-    /// Kept between 14 and 32, the slider's ends.</summary>
+    /// Kept between 16 and 44, the slider's ends.</summary>
     public double LyricsFontSize
     {
         get => _lyricsFontSize;
-        set => _lyricsFontSize = Math.Clamp(value, 14, 32);
+        set => _lyricsFontSize = Math.Clamp(value, 16, 44);
     }
 
-    private double _lyricsFontSize = 20;
+    private double _lyricsFontSize = 36;
 
     /// <summary>The old three-step size, read once from an earlier settings file and never
     /// written: Small and Large keep their place either side of the default.</summary>

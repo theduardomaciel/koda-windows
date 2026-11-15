@@ -471,41 +471,6 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center" Spacing="2">
-                            <TextBlock Text="Text size" Style="{ThemeResource BodyStrongTextBlockStyle}" />
-                            <TextBlock
-                                Text="The size of the sung lines; backing vocals follow at 70%."
-                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                        <StackPanel
-                            Grid.Column="1"
-                            Orientation="Horizontal"
-                            Spacing="4"
-                            VerticalAlignment="Center">
-                            <Slider
-                                x:Name="LyricsSizeSlider"
-                                Width="190"
-                                Minimum="14"
-                                Maximum="32"
-                                StepFrequency="1"
-                                AutomationProperties.Name="Lyrics text size"
-                                ValueChanged="OnLyricsSizeChanged" />
-                            <TextBlock
-                                x:Name="LyricsSizeValue"
-                                Width="44"
-                                TextAlignment="Right"
-                                VerticalAlignment="Center"
-                                Style="{ThemeResource BodyStrongTextBlockStyle}" />
-                        </StackPanel>
-                    </Grid>
-                    <Border Style="{StaticResource SettingsDivider}" />
-                    <Grid Style="{StaticResource SettingsRow}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="Word motion" Style="{ThemeResource BodyStrongTextBlockStyle}" />
                             <TextBlock
                                 Text="Each word lifts as it's sung, and long notes swell."
@@ -569,6 +534,41 @@
             <TextBlock Text="Lyrics look" Style="{ThemeResource BodyStrongTextBlockStyle}" Margin="0,20,0,8" Tag="section" />
             <Border Style="{StaticResource SettingsCard}">
                 <StackPanel>
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2">
+                            <TextBlock Text="Size" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock
+                                Text="The size of the sung lines; backing vocals follow at 70%."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel
+                            Grid.Column="1"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            VerticalAlignment="Center">
+                            <Slider
+                                x:Name="LyricsSizeSlider"
+                                Width="190"
+                                Minimum="16"
+                                Maximum="44"
+                                StepFrequency="1"
+                                AutomationProperties.Name="Lyrics text size"
+                                ValueChanged="OnLyricsSizeChanged" />
+                            <TextBlock
+                                x:Name="LyricsSizeValue"
+                                Width="44"
+                                TextAlignment="Right"
+                                VerticalAlignment="Center"
+                                Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                        </StackPanel>
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
                     <Grid Style="{StaticResource SettingsRow}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />

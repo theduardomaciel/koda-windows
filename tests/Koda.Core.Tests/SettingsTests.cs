@@ -187,6 +187,13 @@ public class SettingsTests
         Assert.Null(settings.LegacyLyricsSize);
     }
 
+    [Theory]
+    [InlineData(10, 16)]
+    [InlineData(28, 28)]
+    [InlineData(90, 44)]
+    public void TheLyricsSizeStaysBetweenItsSliderEnds(double asked, double kept) =>
+        Assert.Equal(kept, new Settings { LyricsFontSize = asked }.LyricsFontSize);
+
     [Fact]
     public void AFileWithoutTheNewerChoicesTakesTheirDefaults()
     {
@@ -200,7 +207,7 @@ public class SettingsTests
         Assert.True(settings.Crossfades);
         Assert.Equal(5, settings.CrossfadeSeconds);
         Assert.False(settings.SharesOnDiscord);
-        Assert.Equal(20, settings.LyricsFontSize);
+        Assert.Equal(36, settings.LyricsFontSize);
     }
 
     [Theory]

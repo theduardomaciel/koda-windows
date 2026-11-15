@@ -65,6 +65,9 @@ public sealed partial class NowPlayingPage : Page
     /// <summary>The lyrics fade is a composition mask, built once the page has a XamlRoot.</summary>
     private bool _lyricsMasked;
 
+    /// <summary>Whether the follow pill is on screen, so the fade is not restarted every frame.</summary>
+    private bool _followPillShown;
+
     public NowPlayingPage()
     {
         InitializeComponent();
@@ -96,7 +99,12 @@ public sealed partial class NowPlayingPage : Page
         // The lyrics: the panel follows the song, and the listener's own scrolling
         // takes over from it when they scroll away.
         _lyrics = new LyricsPanel(LyricsScroll, LyricsLines, DispatcherQueue);
-        _lyrics.Seek = seconds => Playback.SeekSeconds(seconds);
+        _lyrics.Seek = seconds =>
+        {
+            Playback.SeekSeconds(seconds);
+            // Tapping a line is a request to hear it: a paused song starts again.
+            Playback.Play();
+        };
         _lyrics.Share = (lines, index) =>
         {
             if (Playback.CurrentSong is { } song) _ = LyricsShare.ShowAsync(song, lines, index);
@@ -105,8 +113,23 @@ public sealed partial class NowPlayingPage : Page
         // tick only comes twice a second, and a word that fills in half-second steps
         // reads as a sequence of keyframes rather than a word being sung.
         _lyrics.PositionSource = () => Playback.PositionSeconds;
+        _lyrics.ScrolledAwayChanged = away => ShowFollowPill(away);
         LyricsScroll.PointerPressed += (_, _) => _lyrics.UserScrolled = true;
-        LyricsScroll.PointerWheelChanged += (_, _) => _lyrics.UserScrolled = true;
+        // The ScrollViewer marks the wheel as handled while it scrolls, so a plain handler
+        // never hears it; the panel would keep quiet and never offer the way back.
+        LyricsScroll.AddHandler(
+            UIElement.PointerWheelChangedEvent,
+            new PointerEventHandler((_, _) => _lyrics.UserScrolled = true),
+            handledEventsToo: true);
+        // The follow pill's chevron points at the line being sung; keep it true as the
+        // panel scrolls, including with the wheel or the scrollbar.
+        LyricsScroll.ViewChanged += (_, _) =>
+        {
+            if (_followPillShown)
+            {
+                UpdateFollowArrow();
+            }
+        };
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs args)
@@ -240,6 +263,7 @@ public sealed partial class NowPlayingPage : Page
 
         _lyricsFor = song.Id;
         LyricsEmpty.Visibility = Visibility.Collapsed;
+        LyricsLoading.Visibility = Visibility.Visible;
         _lyrics?.Load(null);
 
         Lyrics? lyrics;
@@ -257,6 +281,7 @@ public sealed partial class NowPlayingPage : Page
             return; // another song took over while the services were answering
         }
 
+        LyricsLoading.Visibility = Visibility.Collapsed;
         _lyrics?.Load(lyrics);
         _lyrics?.Offset = App.Library.LyricsOffset(song.Id);
         if (lyrics is null)
@@ -265,7 +290,12 @@ public sealed partial class NowPlayingPage : Page
             return;
         }
 
-        _lyrics?.PlayEntrance();
+        if (_lyricsOpen)
+        {
+            // The words filled while the panel was on screen; it starts following again now
+            // that it has lines. A panel that is closed fades in when it is opened instead.
+            _lyrics?.PlayEntrance();
+        }
     }
 
     /// <summary>
@@ -326,18 +356,18 @@ public sealed partial class NowPlayingPage : Page
         BlobAFade.Color = Windows.UI.Color.FromArgb(0, palette[0].R, palette[0].G, palette[0].B);
         BlobBColor.Color = palette[1];
         BlobBFade.Color = Windows.UI.Color.FromArgb(0, palette[1].R, palette[1].G, palette[1].B);
-        Fade(BlobA, 0.55);
-        Fade(BlobB, 0.45);
+        Fade(BlobA, 0.38);
+        Fade(BlobB, 0.30);
     }
 
     /// <summary>A plain storyboard fade. [scar] An OpacityTransition on these drifting
     /// rectangles fails the whole page's XAML load (XamlParseException at InitializeComponent).</summary>
-    private static void Fade(UIElement element, double to)
+    private static void Fade(UIElement element, double to, int milliseconds = 800)
     {
         var animation = new Microsoft.UI.Xaml.Media.Animation.DoubleAnimation
         {
             To = to,
-            Duration = TimeSpan.FromMilliseconds(800),
+            Duration = TimeSpan.FromMilliseconds(milliseconds),
         };
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTarget(animation, element);
         Microsoft.UI.Xaml.Media.Animation.Storyboard.SetTargetProperty(animation, "Opacity");
@@ -360,6 +390,9 @@ public sealed partial class NowPlayingPage : Page
     {
         var playing = Playback.IsPlaying;
         var loading = Playback.IsLoading;
+        // The lyrics keep a frame timer only while the song is playing: a paused song
+        // does not need sixty repaints a second.
+        _lyrics?.SetPlaying(playing);
         PlayIcon.Glyph = playing ? "" : "";
         PlayIcon.Visibility = loading ? Visibility.Collapsed : Visibility.Visible;
         LoadingRing.IsActive = loading;
@@ -584,9 +617,92 @@ public sealed partial class NowPlayingPage : Page
             var menu = SongMenu.Build(song, [.. Playback.Queue.Items.Select(i => i.Song)]);
             menu.Items.Insert(0, BuildSleepMenu());
             menu.Items.Insert(1, new MenuFlyoutSeparator());
+            if (BuildLyricsTimingMenu(song) is { } timing)
+            {
+                menu.Items.Insert(2, timing);
+            }
             menu.ShowAt(MoreButton);
         }
     }
+
+    /// <summary>
+    /// The per-song correction for lyrics that run early or late. The Library keeps the
+    /// offset; this is the only place that writes it, a tenth of a second at a time.
+    /// </summary>
+    private MenuFlyoutSubItem? BuildLyricsTimingMenu(Song song)
+    {
+        if (_lyrics is not { } panel || panel.Lines.Count == 0)
+        {
+            return null;
+        }
+
+        var offset = App.Library.LyricsOffset(song.Id);
+        var submenu = new MenuFlyoutSubItem
+        {
+            Text = Math.Abs(offset) < 0.05 ? "Lyrics timing" : $"Lyrics timing ({offset:+0.0;-0.0}s)",
+            Icon = new FontIcon { Glyph = "\uE916" },
+        };
+
+        void Nudge(double delta)
+        {
+            App.Library.SetLyricsOffset(offset + delta, song.Id);
+            panel.Offset = App.Library.LyricsOffset(song.Id);
+            panel.SetPosition(Playback.PositionSeconds);
+            panel.Follow();
+        }
+
+        submenu.Items.Add(NudgeItem("Show 0.1s earlier", -0.1, Nudge));
+        submenu.Items.Add(NudgeItem("Show 0.5s earlier", -0.5, Nudge));
+        submenu.Items.Add(new MenuFlyoutSeparator());
+        submenu.Items.Add(NudgeItem("Show 0.1s later", 0.1, Nudge));
+        submenu.Items.Add(NudgeItem("Show 0.5s later", 0.5, Nudge));
+        submenu.Items.Add(new MenuFlyoutSeparator());
+        var reset = new MenuFlyoutItem { Text = "Reset timing", IsEnabled = offset != 0 };
+        reset.Click += (_, _) =>
+        {
+            App.Library.SetLyricsOffset(0, song.Id);
+            panel.Offset = 0;
+            panel.SetPosition(Playback.PositionSeconds);
+            panel.Follow();
+        };
+        submenu.Items.Add(reset);
+        return submenu;
+    }
+
+    private static MenuFlyoutItem NudgeItem(string text, double delta, Action<double> nudge)
+    {
+        var item = new MenuFlyoutItem { Text = text };
+        item.Click += (_, _) => nudge(delta);
+        return item;
+    }
+
+    /// <summary>The pill that hands the panel back to the song, shown only once the listener
+    /// has scrolled away from the line being sung.</summary>
+    private void ShowFollowPill(bool show)
+    {
+        show &= _lyricsOpen;
+        if (show == _followPillShown)
+        {
+            return;
+        }
+
+        _followPillShown = show;
+        if (show)
+        {
+            UpdateFollowArrow();
+        }
+
+        FollowLyricsButton.IsHitTestVisible = show;
+        FollowLyricsButton.IsTabStop = show;
+        Fade(FollowLyricsButton, show ? 1 : 0, 160);
+    }
+
+    /// <summary>The chevron points at the line being sung: up when it is above the middle
+    /// of the panel, down when it is below.</summary>
+    private void UpdateFollowArrow() =>
+        FollowLyricsChevron.Glyph = _lyrics?.CurrentLineIsAbove != false ? "\uE70E" : "\uE70D";
+
+    private void OnFollowLyricsClick(object sender, RoutedEventArgs e) => _lyrics?.ResumeFollowing();
 
     /// <summary>The top bar's pill opens the same timer choices, without going through More.</summary>
     private void OnSleepPillClick(object sender, RoutedEventArgs e)
@@ -715,7 +831,15 @@ public sealed partial class NowPlayingPage : Page
 
     private void OnRootSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // The blooms are larger than the page so their edges never show as they drift.
+        // The cover and the blooms are larger than the page so their soft edges never show
+        // as they drift. They are clipped to the page, or the art would paint into the
+        // NavigationView's 1px content hairline and read as a bright stripe down the edge.
+        Mesh.Clip = new RectangleGeometry
+        {
+            Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height),
+        };
+
+        // The blooms drift inside that clip.
         var mx = e.NewSize.Width * 0.35;
         var my = e.NewSize.Height * 0.35;
         BlobA.Margin = BlobB.Margin = new Thickness(-mx, -my, -mx, -my);
@@ -743,7 +867,7 @@ public sealed partial class NowPlayingPage : Page
         if (_wide)
         {
             QueuePanel.Visibility = _queueOpen ? Visibility.Visible : Visibility.Collapsed;
-            LyricsView.Visibility = _lyricsOpen ? Visibility.Visible : Visibility.Collapsed;
+            LyricsLayer.Visibility = _lyricsOpen ? Visibility.Visible : Visibility.Collapsed;
             PanelColumn.Width = open ? new GridLength(1.2, GridUnitType.Star) : new GridLength(0);
             Layout.ColumnSpacing = open ? 64 : 0;
             CoverBox.Visibility = Visibility.Visible;
@@ -754,13 +878,18 @@ public sealed partial class NowPlayingPage : Page
         else
         {
             QueuePanel.Visibility = _queueOpen ? Visibility.Visible : Visibility.Collapsed;
-            LyricsView.Visibility = _lyricsOpen ? Visibility.Visible : Visibility.Collapsed;
+            LyricsLayer.Visibility = _lyricsOpen ? Visibility.Visible : Visibility.Collapsed;
             PanelColumn.Width = new GridLength(0);
             Layout.ColumnSpacing = 0;
             CoverBox.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
             CoverRow.Height = open ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
             NarrowQueueRow.Height = open ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
             ShowCompactCover(open);
+        }
+
+        if (!_lyricsOpen)
+        {
+            ShowFollowPill(false);
         }
 
         PlayerPanel.MaxWidth = _wide ? 460 : 560;
@@ -823,23 +952,23 @@ public sealed partial class NowPlayingPage : Page
         }
         else
         {
-            Layout.Children.Remove(LyricsView);
+            Layout.Children.Remove(LyricsLayer);
         }
 
         if (want == PanelPlace.Narrow)
         {
-            LyricsView.Margin = new Thickness(0);
-            NarrowLyricsHost.Content = LyricsView;
+            LyricsLayer.Margin = new Thickness(0);
+            NarrowLyricsHost.Content = LyricsLayer;
         }
         else
         {
             // From the page's top edge to its bottom edge: the panel's own column, with
             // the layout's padding taken back, so the words fade at the real edges.
-            LyricsView.Margin = new Thickness(0, -Layout.Padding.Top, 0, -Layout.Padding.Bottom);
-            Layout.Children.Add(LyricsView);
-            Grid.SetRow(LyricsView, 0);
-            Grid.SetRowSpan(LyricsView, 2);
-            Grid.SetColumn(LyricsView, 1);
+            LyricsLayer.Margin = new Thickness(0, -Layout.Padding.Top, 0, -Layout.Padding.Bottom);
+            Layout.Children.Add(LyricsLayer);
+            Grid.SetRow(LyricsLayer, 0);
+            Grid.SetRowSpan(LyricsLayer, 2);
+            Grid.SetColumn(LyricsLayer, 1);
         }
 
         _lyricsPlace = want;

@@ -31,9 +31,9 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>The audio leads the lyrics: a line lights as it is sung, not after.</summary>
     private const double Lead = 0.15;
 
-    /// <summary>Where the line being sung sits in the panel: inside the top third, so the
+    /// <summary>Where the line being sung sits in the panel: a third of the way down, so the
     /// eye barely travels and the lines that follow are already in view.</summary>
-    private const double ReadingAnchor = 0.25;
+    private const double ReadingAnchor = 0.33;
 
     /// <summary>How long the glide takes.</summary>
     private const int GlideMilliseconds = 550;
@@ -44,8 +44,9 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>How long a word takes to rise, in seconds.</summary>
     private const double RiseSeconds = 0.65;
 
-    /// <summary>How far a word rises, in pixels.</summary>
-    private const double RisePixels = 2.5;
+    /// <summary>How far a word rises, as a part of the text size: it keeps the lift visible
+    /// when the words are large.</summary>
+    private const double RiseRatio = 0.09;
 
     /// <summary>A note held longer than this starts to swell.</summary>
     private const double SustainStart = 0.9;
@@ -74,6 +75,7 @@ internal sealed class LyricsPanel : IDisposable
     private FontFamily _font = LyricFont;
     private double _lineHeightFactor = LineHeightFactor;
     private double _feather = Feather;
+    private double _risePixels = 2.5;
     private double _idleNear = 0.5;
     private double _idleFar = 0.36;
     private bool _glow = true;
@@ -95,6 +97,8 @@ internal sealed class LyricsPanel : IDisposable
     private double _offset;
     private bool _userScrolled;
     private bool _loaded;
+    private bool _visible;
+    private bool _playing;
     private bool _needsGlide;
     private double _position;
     private double _panelWidth;
@@ -188,6 +192,32 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>The line being sung, or the first one before it starts.</summary>
     public int CurrentIndex => Math.Max(0, Lyrics.IndexOf(_position, _lyricLines) ?? 0);
 
+    /// <summary>Whether the line being sung sits above the middle of the panel: the follow
+    /// pill's chevron points at it, so the listener knows which way the words are.</summary>
+    public bool CurrentLineIsAbove
+    {
+        get
+        {
+            if (_current is null || _scroll.ViewportHeight <= 1)
+            {
+                return true;
+            }
+
+            try
+            {
+                var top = _current.Host.TransformToVisual(_scroll)
+                    .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+                // Past the reading anchor means the listener scrolled down, so the line is
+                // above where the panel keeps it; before it, the line is below.
+                return top < _scroll.ViewportHeight * ReadingAnchor - _current.Host.ActualHeight / 2;
+            }
+            catch (Exception)
+            {
+                return true;
+            }
+        }
+    }
+
     /// <summary>Called when a line is tapped: the song jumps to that line.</summary>
     public Action<double>? Seek { get; set; }
 
@@ -205,7 +235,29 @@ internal sealed class LyricsPanel : IDisposable
     public bool UserScrolled
     {
         get => _userScrolled;
-        set => _userScrolled = value;
+        set
+        {
+            if (_userScrolled == value)
+            {
+                return;
+            }
+
+            _userScrolled = value;
+            ScrolledAwayChanged?.Invoke(value);
+        }
+    }
+
+    /// <summary>Told when the listener scrolls away from the line being sung, or back to it.</summary>
+    public Action<bool>? ScrolledAwayChanged { get; set; }
+
+    /// <summary>Hands the panel back to the song: the line being sung glides into place.</summary>
+    public void ResumeFollowing()
+    {
+        UserScrolled = false;
+        if (_current is not null)
+        {
+            GlideTo(_current);
+        }
     }
 
     /// <summary>The song's place in time, with the listener's correction and the lead.</summary>
@@ -219,8 +271,9 @@ internal sealed class LyricsPanel : IDisposable
         _font = string.IsNullOrWhiteSpace(settings.LyricsFont) ? LyricFont : new FontFamily(settings.LyricsFont);
         _lineHeightFactor = LineHeightFactor * settings.LyricsLineSpacing;
         _feather = 0.08 + 0.55 * settings.LyricsSoftness;
+        _risePixels = Math.Max(1.5, settings.LyricsFontSize * RiseRatio);
         _idleFar = settings.LyricsIdleOpacity;
-        _idleNear = Math.Min(1, _idleFar + 0.16);
+        _idleNear = Math.Min(1, _idleFar + 0.12);
         _glow = settings.LyricsGlow;
         _glowIntensity = settings.LyricsGlowIntensity;
         _motion = settings.LyricsMotion;
@@ -232,6 +285,8 @@ internal sealed class LyricsPanel : IDisposable
     {
         ReadLook();
         _tween.Stop();
+        _frame.Stop();
+        UserScrolled = false;
         _lines.Children.Clear();
         _rows.Clear();
         _lyricLines.Clear();
@@ -299,7 +354,7 @@ internal sealed class LyricsPanel : IDisposable
             // A tap on the line jumps the song to it, and hands the panel back to the song.
             host.Tapped += (_, _) =>
             {
-                _userScrolled = false;
+                UserScrolled = false;
                 Seek?.Invoke(line.Time);
             };
 
@@ -492,10 +547,18 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Puts the panel on screen with a short fade, and starts it following the song.</summary>
     public void PlayEntrance()
     {
-        _frame.Start();
+        _visible = true;
+        UserScrolled = false;
+        UpdateFrame();
 
-        // The panel has just come into view: the line being sung is placed now that the
-        // panel knows its height (before that, there was nothing to measure against).
+        // The rows were just filled: let the panel measure them before placing the line.
+        // Without the layout pass the glide aims past the height the panel had before the
+        // words arrived, ChangeView clamps it, and the words stay at the top of the song.
+        _scroll.UpdateLayout();
+
+        // The panel has just come into view: light the line being sung and place it now
+        // that the panel knows its height (before that, there was nothing to measure against).
+        Follow();
         if (_current is not null)
         {
             GlideTo(_current);
@@ -521,7 +584,32 @@ internal sealed class LyricsPanel : IDisposable
     }
 
     /// <summary>The panel is closed: it stops reading the song.</summary>
-    public void Pause() => _frame.Stop();
+    public void Pause()
+    {
+        _visible = false;
+        UpdateFrame();
+    }
+
+    /// <summary>Whether the song is playing. The panel only repaints while it is, so a
+    /// paused song does not keep a 60-frame timer awake.</summary>
+    public void SetPlaying(bool playing)
+    {
+        _playing = playing;
+        UpdateFrame();
+    }
+
+    private void UpdateFrame()
+    {
+        var run = _visible && _playing && _rows.Count > 0;
+        if (run && !_frame.IsRunning)
+        {
+            _frame.Start();
+        }
+        else if (!run && _frame.IsRunning)
+        {
+            _frame.Stop();
+        }
+    }
 
     /// <summary>Follows the song: lights the line being sung and glides to it.</summary>
     public void Follow()
@@ -717,7 +805,7 @@ internal sealed class LyricsPanel : IDisposable
         stops[2].Color = Brush(0x61).Color;
 
         // The word rises as it is sung: a ripple through the line.
-        word.Transform.TranslateY = -RisePixels * eased;
+        word.Transform.TranslateY = -_risePixels * eased;
 
         // A note held long swells, by as much as the look asks for.
         var glow = _glow ? Math.Clamp(_glowIntensity, 0, 2) : 0;
@@ -809,9 +897,8 @@ internal sealed class LyricsPanel : IDisposable
             ? Microsoft.UI.Text.FontWeights.Medium
             : _renderer switch
             {
-                LyricsRenderer.Expressive => Microsoft.UI.Text.FontWeights.Bold,
                 LyricsRenderer.Classic => Microsoft.UI.Text.FontWeights.Normal,
-                _ => Microsoft.UI.Text.FontWeights.SemiBold,
+                _ => Microsoft.UI.Text.FontWeights.Bold,
             };
         block.FontSize = fontSize;
         block.CharacterSpacing = Tracking;

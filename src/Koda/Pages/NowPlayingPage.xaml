@@ -113,9 +113,9 @@
             <Rectangle>
                 <Rectangle.Fill>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                        <GradientStop Color="#59000000" Offset="0" />
-                        <GradientStop Color="#8C000000" Offset="0.45" />
-                        <GradientStop Color="#D9000000" Offset="1" />
+                        <GradientStop Color="#40000000" Offset="0" />
+                        <GradientStop Color="#6E000000" Offset="0.45" />
+                        <GradientStop Color="#B8000000" Offset="1" />
                     </LinearGradientBrush>
                 </Rectangle.Fill>
             </Rectangle>
@@ -250,7 +250,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition x:Name="SkipForwardColumn" Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Button x:Name="SkipBackButton" Grid.Column="0" Style="{StaticResource PlayerGlyphButton}" Width="56" Height="64" CornerRadius="32" HorizontalAlignment="Center" Click="OnSkipBackClick" ToolTipService.ToolTip="Back 10 seconds" AutomationProperties.Name="Back 10 seconds">
+                        <Button x:Name="SkipBackButton" Grid.Column="0" Style="{StaticResource PlayerGlyphButton}" Width="64" Height="64" CornerRadius="32" HorizontalAlignment="Center" Click="OnSkipBackClick" ToolTipService.ToolTip="Back 10 seconds" AutomationProperties.Name="Back 10 seconds">
                             <controls:SkipIcon x:Name="SkipBackIcon" Direction="Back" Seconds="10" Width="22" Height="22" />
                         </Button>
                         <Button Grid.Column="1" Style="{StaticResource PlayerGlyphButton}" Width="64" Height="64" CornerRadius="32" HorizontalAlignment="Center" Click="OnPrevClick" ToolTipService.ToolTip="Previous (Ctrl+Left)" AutomationProperties.Name="Previous">
@@ -265,7 +265,7 @@
                         <Button Grid.Column="3" Style="{StaticResource PlayerGlyphButton}" Width="64" Height="64" CornerRadius="32" HorizontalAlignment="Center" Click="OnNextClick" ToolTipService.ToolTip="Next (Ctrl+Right)" AutomationProperties.Name="Next">
                             <FontIcon Glyph="&#xF8AD;" FontSize="26" />
                         </Button>
-                        <Button x:Name="SkipForwardButton" Grid.Column="4" Style="{StaticResource PlayerGlyphButton}" Width="56" Height="64" CornerRadius="32" HorizontalAlignment="Center" Click="OnSkipForwardClick" ToolTipService.ToolTip="Ahead 10 seconds" AutomationProperties.Name="Ahead 10 seconds">
+                        <Button x:Name="SkipForwardButton" Grid.Column="4" Style="{StaticResource PlayerGlyphButton}" Width="64" Height="64" CornerRadius="32" HorizontalAlignment="Center" Click="OnSkipForwardClick" ToolTipService.ToolTip="Ahead 10 seconds" AutomationProperties.Name="Ahead 10 seconds">
                             <controls:SkipIcon x:Name="SkipForwardIcon" Direction="Forward" Seconds="10" Width="22" Height="22" />
                         </Button>
                     </Grid>
@@ -333,38 +333,75 @@
                  It lives in the layout's panel column, beside the player, and takes the
                  cover's place when the window is narrow. The panel reaches the page's top
                  and bottom edges, and the two fades soften the lines as they enter and
-                 leave, so the words reveal rather than clip. -->
-            <Grid x:Name="LyricsView" Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" MaxWidth="620" Margin="0,-4,0,-40" Visibility="Collapsed">
-                <Grid x:Name="LyricsMaskedContent">
-                    <ScrollViewer
-                        x:Name="LyricsScroll"
-                        VerticalScrollBarVisibility="Auto"
-                        VerticalScrollMode="Auto"
-                        HorizontalScrollMode="Disabled">
-                        <StackPanel x:Name="LyricsLines" />
-                    </ScrollViewer>
-                    <TextBlock
-                        x:Name="LyricsEmpty"
-                        Visibility="Collapsed"
-                        Text="No lyrics for this song."
-                        Style="{ThemeResource CaptionTextBlockStyle}"
-                        Foreground="#B3FFFFFF"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center" />
+                 leave, so the words reveal rather than clip. LyricsLayer is what moves
+                 between the two places; the follow pill sits above the panel's surface. -->
+            <Grid x:Name="LyricsLayer" Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" MaxWidth="620" Margin="0,-4,0,-40" Visibility="Collapsed">
+                <Grid x:Name="LyricsView">
+                    <Grid x:Name="LyricsMaskedContent">
+                        <ScrollViewer
+                            x:Name="LyricsScroll"
+                            VerticalScrollBarVisibility="Auto"
+                            VerticalScrollMode="Auto"
+                            HorizontalScrollMode="Disabled">
+                            <StackPanel x:Name="LyricsLines" />
+                        </ScrollViewer>
+                        <TextBlock
+                            x:Name="LyricsEmpty"
+                            Visibility="Collapsed"
+                            Text="No lyrics for this song."
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="#B3FFFFFF"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center" />
+                        <StackPanel
+                            x:Name="LyricsLoading"
+                            Visibility="Collapsed"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="10">
+                            <ProgressRing Width="20" Height="20" IsActive="True" Foreground="#B3FFFFFF" />
+                            <TextBlock
+                                Text="Finding lyrics…"
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="#B3FFFFFF" />
+                        </StackPanel>
+                    </Grid>
+                    <!-- The fade is an alpha mask, not a black wash: the gradient is only
+                         ever read through its transparent and opaque channels, so the blurred
+                         cover underneath stays exactly as it is. -->
+                    <Border x:Name="LyricsMask" Opacity="0" IsHitTestVisible="False">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="#00FFFFFF" Offset="0" />
+                                <GradientStop Color="#FFFFFFFF" Offset="0.16" />
+                                <GradientStop Color="#FFFFFFFF" Offset="0.84" />
+                                <GradientStop Color="#00FFFFFF" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                    </Border>
                 </Grid>
-                <!-- The fade is an alpha mask, not a black wash: the gradient is only
-                     ever read through its transparent and opaque channels, so the blurred
-                     cover underneath stays exactly as it is. -->
-                <Border x:Name="LyricsMask" Opacity="0" IsHitTestVisible="False">
-                    <Border.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                            <GradientStop Color="#00FFFFFF" Offset="0" />
-                            <GradientStop Color="#FFFFFFFF" Offset="0.16" />
-                            <GradientStop Color="#FFFFFFFF" Offset="0.84" />
-                            <GradientStop Color="#00FFFFFF" Offset="1" />
-                        </LinearGradientBrush>
-                    </Border.Background>
-                </Border>
+
+                <!-- Shown when the listener scrolls away: hands the panel back to the song. -->
+                <Button
+                    x:Name="FollowLyricsButton"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,0,20"
+                    Padding="14,8"
+                    CornerRadius="16"
+                    Background="#40FFFFFF"
+                    BorderThickness="0"
+                    Opacity="0"
+                    IsHitTestVisible="False"
+                    IsTabStop="False"
+                    Click="OnFollowLyricsClick"
+                    ToolTipService.ToolTip="Jump back to the line being sung"
+                    AutomationProperties.Name="Follow the lyrics">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon x:Name="FollowLyricsChevron" Glyph="&#xE70D;" FontSize="12" />
+                        <TextBlock Text="Follow along" FontSize="12" FontWeight="SemiBold" />
+                    </StackPanel>
+                </Button>
             </Grid>
 
             <!-- The queue panel: modes, Up Next with Clear, the list. -->
