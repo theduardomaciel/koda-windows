@@ -559,7 +559,8 @@ internal sealed class LyricsPanel : IDisposable
             out var parsedOpacity)
             ? Math.Clamp(parsedOpacity, 0, 1)
             : 0.01;
-        _maskHide = Environment.GetEnvironmentVariable("KODA_MASK_HIDE") ?? "";
+        _maskHide = Environment.GetEnvironmentVariable("KODA_MASK_HIDE")
+            ?? (_glowStaticMask ? "wrapper" : "");
         _glow = _glowIntensity > 0
             && _glowTest != "noglowhost"
             && Environment.GetEnvironmentVariable("KODA_LYRICS_GLOW_OFF") != "1";
