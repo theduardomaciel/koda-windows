@@ -93,6 +93,12 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>How far the hover box reaches past the text, as a part of the text size.</summary>
     private const double HoverBoxPad = 0.35;
 
+    /// <summary>The hover box corner radius, as a part of the text size. It is clamped so a
+    /// very small or very large lyric size still reads as a rounded box.</summary>
+    private const double HoverBoxRadiusRatio = 0.3;
+    private const double HoverBoxRadiusMin = 8;
+    private const double HoverBoxRadiusMax = 20;
+
     /// <summary>The sung line opacity Spicy uses: a little below the active line.</summary>
     private const double ExpressiveSungLineOpacity = 0.96;
 
@@ -722,7 +728,7 @@ internal sealed class LyricsPanel : IDisposable
         var box = new Border
         {
             Background = new SolidColorBrush(HoverBoxColor),
-            CornerRadius = new CornerRadius(16),
+            CornerRadius = new CornerRadius(HoverBoxRadius(fontSize)),
             Margin = new Thickness(-fontSize * HoverBoxPad, -2, -fontSize * HoverBoxPad, -2),
             Opacity = 0,
             IsHitTestVisible = false,
@@ -748,6 +754,11 @@ internal sealed class LyricsPanel : IDisposable
 
         return box;
     }
+
+    /// <summary>The corner radius follows the lyric size, so the box stays proportional
+    /// when the panel scales the words down or the listener chooses a larger size.</summary>
+    private static double HoverBoxRadius(double fontSize) =>
+        Math.Clamp(fontSize * HoverBoxRadiusRatio, HoverBoxRadiusMin, HoverBoxRadiusMax);
 
     /// <summary>Points the syllables of a split word at their shared seam: the first grows
     /// from its right edge, the last from its left, and the middle stays centred.</summary>
@@ -997,6 +1008,7 @@ internal sealed class LyricsPanel : IDisposable
             {
                 hoverBox.Margin = new Thickness(
                     -_fontSize * HoverBoxPad, -2, -_fontSize * HoverBoxPad, -2);
+                hoverBox.CornerRadius = new CornerRadius(HoverBoxRadius(_fontSize));
             }
 
             foreach (var word in row.WordItems)

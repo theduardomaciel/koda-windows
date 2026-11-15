@@ -335,8 +335,8 @@
                  and bottom edges, and the two fades soften the lines as they enter and
                  leave, so the words reveal rather than clip. LyricsLayer is what moves
                  between the two places; the follow pill sits above the panel's surface.
-                 638 = the old 620 width plus the 18/24 glow pads, so the text keeps its
-                 previous 596px wrap width. -->
+                 The layer carries the 18/24 glow pads, so its text wraps at this
+                 MaxWidth minus 42. -->
             <Grid x:Name="LyricsLayer" Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" MaxWidth="638" Margin="0,-4,0,-40" Visibility="Collapsed">
                 <Grid x:Name="LyricsView">
                     <Grid x:Name="LyricsMaskedContent">
