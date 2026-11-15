@@ -1431,6 +1431,17 @@ internal sealed class LyricsPanel : IDisposable
         if (index < 0)
         {
             // Before the first line (the intro): still paint, so its dots fill.
+            // A seek into the intro should bring the upcoming line into view now,
+            // not wait for its first word to start several seconds later.
+            if (_current is not null
+                && _rows.Count > 0
+                && !ReferenceEquals(_current, _rows[0])
+                && !_userScrolled)
+            {
+                _current = _rows[0];
+                GlideTo(_current);
+            }
+
             Paint();
             return;
         }
