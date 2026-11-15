@@ -337,7 +337,7 @@
                  between the two places; the follow pill sits above the panel's surface.
                  The layer carries the 18/24 glow pads, so its text wraps at this
                  MaxWidth minus 42. -->
-            <Grid x:Name="LyricsLayer" Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" MaxWidth="638" Margin="0,-4,0,-40" Visibility="Collapsed">
+            <Grid x:Name="LyricsLayer" Grid.Row="0" Grid.RowSpan="2" Grid.Column="1" MaxWidth="666" Margin="0,-4,0,-40" Visibility="Collapsed">
                 <Grid x:Name="LyricsView">
                     <Grid x:Name="LyricsMaskedContent">
                         <ScrollViewer
