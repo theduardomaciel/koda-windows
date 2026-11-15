@@ -94,9 +94,9 @@ internal sealed class LyricsPanel : IDisposable
     private double _feather = Feather;
     private double _risePixels = 2.5;
     private double _baseFontSize = 36;
-    private double _baseLineGap = 24;
+    private double _baseLineGap = 32;
     private double _fontSize = 36;
-    private double _lineGap = 24;
+    private double _lineGap = 32;
     private BackingVocalsMode _backingMode = BackingVocalsMode.Shown;
     private double _idleNear = 0.5;
     private double _idleFar = 0.36;
@@ -116,6 +116,7 @@ internal sealed class LyricsPanel : IDisposable
     private readonly List<LyricLine> _lyricLines = [];
     private StackPanel? _leadingDots;
     private List<Ellipse> _leadingDotItems = [];
+    private bool _leadingDotsShown;
     private Row? _current;
     private double _offset;
     private bool _userScrolled;
@@ -160,8 +161,10 @@ internal sealed class LyricsPanel : IDisposable
         public List<Word> BackgroundItems { get; } = [];
         /// <summary>The three dots of the gap that follows this line, when the gap is long.</summary>
         public List<Ellipse> Dots { get; } = [];
-        /// <summary>The dots' container; shown only while that gap is playing.</summary>
+        /// <summary>The dots' container; always in the flow, faint when its gap is not playing.</summary>
         public StackPanel? DotsHost { get; set; }
+        /// <summary>Whether the dots are lit; the fade only starts when this changes.</summary>
+        public bool DotsShown { get; set; }
         /// <summary>How opaque the row is: the one being sung is full, the rest step back.</summary>
         public double Opacity { get; set; } = 0.36;
     }
@@ -430,6 +433,7 @@ internal sealed class LyricsPanel : IDisposable
         _lyricLines.Clear();
         _leadingDots = null;
         _leadingDotItems = [];
+        _leadingDotsShown = false;
         _current = null;
         _loaded = lyrics is { IsSynced: true };
 
@@ -462,7 +466,7 @@ internal sealed class LyricsPanel : IDisposable
         if (lyrics.Lines.Count > 0 && lyrics.Lines[0].Time >= InterludeSeconds)
         {
             _leadingDotItems = [];
-            _leadingDots = MakeDots(_leadingDotItems, _fontSize);
+            _leadingDots = MakeDots(_leadingDotItems, _fontSize, _lineGap * 0.75);
             _lines.Children.Add(_leadingDots);
         }
 
@@ -571,7 +575,7 @@ internal sealed class LyricsPanel : IDisposable
             var next = index + 1 < lyrics.Lines.Count ? lyrics.Lines[index + 1] : null;
             if (next is not null && line.End is { } lineEnd && next.Time - lineEnd >= InterludeSeconds)
             {
-                row.DotsHost = MakeDots(row.Dots, fontSize);
+                row.DotsHost = MakeDots(row.Dots, fontSize, _lineGap * 0.75);
                 row.DotsHost.HorizontalAlignment = side;
                 _lines.Children.Add(row.DotsHost);
             }
@@ -590,13 +594,14 @@ internal sealed class LyricsPanel : IDisposable
     }
 
     /// <summary>Three dots that fill in turn through an instrumental gap; they grow with
-    /// the words so the pause reads at any size.</summary>
-    private static StackPanel MakeDots(List<Ellipse> dots, double fontSize)
+    /// the words so the pause reads at any size. They sit in the flow at half opacity even
+    /// when their gap is not playing, so the interlude is already placed.</summary>
+    private static StackPanel MakeDots(List<Ellipse> dots, double fontSize, double verticalMargin)
     {
         var host = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Opacity = 0,
+            Opacity = 0.5,
             IsHitTestVisible = false,
         };
         var diameter = DotsDiameter(fontSize);
@@ -607,17 +612,17 @@ internal sealed class LyricsPanel : IDisposable
             dots.Add(ellipse);
         }
 
-        SizeDots(host, dots, fontSize);
+        SizeDots(host, dots, fontSize, verticalMargin);
         return host;
     }
 
     private static double DotsDiameter(double fontSize) => Math.Max(6, Math.Round(fontSize * 0.32));
 
-    private static void SizeDots(StackPanel host, List<Ellipse> dots, double fontSize)
+    private static void SizeDots(StackPanel host, List<Ellipse> dots, double fontSize, double verticalMargin)
     {
         var diameter = DotsDiameter(fontSize);
         host.Spacing = diameter;
-        host.Margin = new Thickness(0, diameter * 0.6, 0, diameter * 0.6);
+        host.Margin = new Thickness(0, verticalMargin, 0, verticalMargin);
         foreach (var dot in dots)
         {
             dot.Width = diameter;
@@ -708,13 +713,13 @@ internal sealed class LyricsPanel : IDisposable
 
             if (row.DotsHost is { } dots)
             {
-                SizeDots(dots, row.Dots, _fontSize);
+                SizeDots(dots, row.Dots, _fontSize, _lineGap * 0.75);
             }
         }
 
         if (_leadingDots is { } leading)
         {
-            SizeDots(leading, _leadingDotItems, _fontSize);
+            SizeDots(leading, _leadingDotItems, _fontSize, _lineGap * 0.75);
         }
     }
 
@@ -1008,20 +1013,24 @@ internal sealed class LyricsPanel : IDisposable
 
         foreach (var row in _rows)
         {
-            if (row.DotsHost is null || ReferenceEquals(row, active))
+            if (row.DotsHost is null || ReferenceEquals(row, active) || !row.DotsShown)
             {
                 continue;
             }
 
-            if (row.DotsHost.Opacity != 0)
-            {
-                row.DotsHost.Opacity = 0;
-            }
+            row.DotsShown = false;
+            Fade(row.DotsHost, 0.5);
+            FillDots(row.Dots, 0);
         }
 
         if (active?.DotsHost is { } host)
         {
-            host.Opacity = 1;
+            if (!active.DotsShown)
+            {
+                active.DotsShown = true;
+                Fade(host, 1);
+            }
+
             FillDots(active.Dots, progress);
         }
         else if (current is { } index && index < _rows.Count)
@@ -1032,12 +1041,38 @@ internal sealed class LyricsPanel : IDisposable
 
         if (_leadingDots is not null)
         {
-            _leadingDots.Opacity = leading ? 1 : 0;
+            if (_leadingDotsShown != leading)
+            {
+                _leadingDotsShown = leading;
+                Fade(_leadingDots, leading ? 1 : 0.5);
+                if (!leading)
+                {
+                    FillDots(_leadingDotItems, 0);
+                }
+            }
+
             if (leading)
             {
                 FillDots(_leadingDotItems, progress);
             }
         }
+    }
+
+    /// <summary>A short fade for the interlude dots: they sit faint, and lift to full when
+    /// their gap plays.</summary>
+    private static void Fade(UIElement element, double to)
+    {
+        var animation = new DoubleAnimation
+        {
+            To = to,
+            Duration = TimeSpan.FromMilliseconds(220),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(animation, element);
+        Storyboard.SetTargetProperty(animation, "Opacity");
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(animation);
+        storyboard.Begin();
     }
 
     private static void FillDots(IReadOnlyList<Ellipse> dots, double progress)

@@ -207,7 +207,7 @@ public class SettingsTests
         Assert.False(settings.SharesOnDiscord);
         Assert.Equal(36, settings.LyricsFontSize);
         Assert.Equal(0.15, settings.LyricsIdleOpacity);
-        Assert.Equal(24, settings.LyricsLineGap);
+        Assert.Equal(32, settings.LyricsLineGap);
     }
 
     [Theory]

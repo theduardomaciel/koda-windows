@@ -144,7 +144,7 @@ public sealed class Settings
         set => _lyricsLineGap = Math.Clamp(value, 0, 64);
     }
 
-    private double _lyricsLineGap = 24;
+    private double _lyricsLineGap = 32;
 
     /// <summary>How strongly the lines other than the one being sung step back.</summary>
     public double LyricsIdleOpacity
