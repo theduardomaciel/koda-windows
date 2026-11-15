@@ -65,6 +65,14 @@ public enum LyricsRenderer
     Classic,
 }
 
+/// <summary>How backing vocals are drawn: as they came, without their brackets, or not at all.</summary>
+public enum BackingVocalsMode
+{
+    Shown,
+    WithoutParentheses,
+    Hidden,
+}
+
 public sealed class Settings
 {
     private static readonly JsonSerializerOptions Options = new()
@@ -80,6 +88,7 @@ public sealed class Settings
             new JsonStringEnumConverter<LyricsSource>(),
             new JsonStringEnumConverter<LyricsPreset>(),
             new JsonStringEnumConverter<LyricsRenderer>(),
+            new JsonStringEnumConverter<BackingVocalsMode>(),
             new JsonStringEnumConverter<LibrarySort>(),
             new JsonStringEnumConverter<SongSort>(),
         },
@@ -155,9 +164,6 @@ public sealed class Settings
 
     private double _lyricsSoftness = 0.35;
 
-    /// <summary>Whether a held note swells.</summary>
-    public bool LyricsGlow { get; set; } = true;
-
     /// <summary>Show the sidebar hide/show button in the title bar. The pane's own toggle
     /// and Ctrl+B work without it; upstream shipped the button, so it stays optional.</summary>
     public bool ShowsTitleBarSidebarToggle { get; set; }
@@ -185,7 +191,6 @@ public sealed class Settings
                 LyricsLineSpacing = 1.0;
                 LyricsIdleOpacity = 0.15;
                 LyricsSoftness = 0.35;
-                LyricsGlow = true;
                 LyricsGlowIntensity = 1.0;
                 LyricsFont = "Segoe UI Variable Text";
                 LyricsMotion = true;
@@ -195,7 +200,6 @@ public sealed class Settings
                 LyricsLineSpacing = 1.12;
                 LyricsIdleOpacity = 0.15;
                 LyricsSoftness = 0.60;
-                LyricsGlow = true;
                 LyricsGlowIntensity = 1.5;
                 LyricsFont = "Segoe UI Variable Display";
                 LyricsMotion = true;
@@ -205,7 +209,6 @@ public sealed class Settings
                 LyricsLineSpacing = 0.95;
                 LyricsIdleOpacity = 0.10;
                 LyricsSoftness = 0.0;
-                LyricsGlow = false;
                 LyricsGlowIntensity = 0.0;
                 LyricsFont = "Segoe UI";
                 LyricsMotion = false;
@@ -223,7 +226,7 @@ public sealed class Settings
         set => _lyricsFontSize = Math.Clamp(value, 16, 64);
     }
 
-    private double _lyricsFontSize = 44;
+    private double _lyricsFontSize = 36;
 
     /// <summary>The old three-step size, read once from an earlier settings file and never
     /// written: Small and Large keep their place either side of the default.</summary>
@@ -239,15 +242,8 @@ public sealed class Settings
         };
     }
 
-    /// <summary>Backing vocals are shown smaller, under their line.</summary>
-    public bool ShowsBackingVocals { get; set; } = true;
-
-    /// <summary>Keep the parentheses around backing vocals; off, the words show without
-    /// their brackets.</summary>
-    public bool ShowsBackingParentheses { get; set; } = true;
-
-    /// <summary>The second singer of a duet on the right; off, every line sits on the left.</summary>
-    public bool DuetSides { get; set; } = true;
+    /// <summary>How backing vocals are drawn: as they came, without their brackets, or hidden.</summary>
+    public BackingVocalsMode BackingVocals { get; set; } = BackingVocalsMode.Shown;
 
     /// <summary>Off, nothing played is added to history, Quick picks or stats.</summary>
     public bool SavesListeningHistory { get; set; } = true;

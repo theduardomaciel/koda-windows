@@ -67,8 +67,7 @@ public class SettingsTests
             Autoplay = false,
             Volume = 42,
             LyricsMotion = false,
-            ShowsBackingVocals = false,
-            DuetSides = false,
+            BackingVocals = BackingVocalsMode.Hidden,
             SavesListeningHistory = false,
             SavesSearchHistory = false,
             Theme = Theme.Dark,
@@ -89,8 +88,7 @@ public class SettingsTests
         Assert.False(back.Autoplay);
         Assert.Equal(42, back.Volume);
         Assert.False(back.LyricsMotion);
-        Assert.False(back.ShowsBackingVocals);
-        Assert.False(back.DuetSides);
+        Assert.Equal(BackingVocalsMode.Hidden, back.BackingVocals);
         Assert.False(back.SavesListeningHistory);
         Assert.False(back.SavesSearchHistory);
         Assert.Equal(Theme.Dark, back.Theme);
@@ -164,13 +162,13 @@ public class SettingsTests
         Assert.Equal(LyricsRenderer.Expressive, settings.LyricsRenderer);
         Assert.Equal(1.12, settings.LyricsLineSpacing, 2);
         Assert.Equal(0.60, settings.LyricsSoftness, 2);
-        Assert.True(settings.LyricsGlow);
+        Assert.True(settings.LyricsGlowIntensity > 0);
         Assert.Equal("Segoe UI Variable Display", settings.LyricsFont);
 
         settings.ApplyLyricsPreset(LyricsPreset.Minimal);
 
         Assert.Equal(LyricsRenderer.Classic, settings.LyricsRenderer);
-        Assert.False(settings.LyricsGlow);
+        Assert.Equal(0, settings.LyricsGlowIntensity);
         Assert.False(settings.LyricsMotion);
     }
 
@@ -207,7 +205,7 @@ public class SettingsTests
         Assert.True(settings.Crossfades);
         Assert.Equal(5, settings.CrossfadeSeconds);
         Assert.False(settings.SharesOnDiscord);
-        Assert.Equal(44, settings.LyricsFontSize);
+        Assert.Equal(36, settings.LyricsFontSize);
         Assert.Equal(0.15, settings.LyricsIdleOpacity);
         Assert.Equal(24, settings.LyricsLineGap);
     }

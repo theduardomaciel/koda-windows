@@ -120,16 +120,16 @@ public sealed partial class SettingsPage : Page
         LyricsPresetBox.Items.Clear();
         foreach (var preset in Enum.GetValues<LyricsPreset>())
         {
-            LyricsPresetBox.Items.Add(PresetLabel(preset));
+            if (preset != LyricsPreset.Custom)
+            {
+                LyricsPresetBox.Items.Add(PresetLabel(preset));
+            }
         }
 
-        LyricsPresetBox.SelectedIndex = (int)settings.LyricsPreset;
-
-        LyricsStyleBox.Items.Clear();
-        LyricsStyleBox.Items.Add("Sweep");
-        LyricsStyleBox.Items.Add("Expressive");
-        LyricsStyleBox.Items.Add("Classic");
-        LyricsStyleBox.SelectedIndex = (int)settings.LyricsRenderer;
+        // A hands-on look has no name: the box shows its Custom placeholder instead.
+        LyricsPresetBox.SelectedIndex = settings.LyricsPreset == LyricsPreset.Custom
+            ? -1
+            : (int)settings.LyricsPreset;
 
         LyricsFontBox.Items.Clear();
         foreach (var font in LyricsFonts)
@@ -149,16 +149,11 @@ public sealed partial class SettingsPage : Page
         LyricsGapValue.Text = $"{settings.LyricsLineGap:F0}";
         LyricsIdleSlider.Value = settings.LyricsIdleOpacity;
         LyricsSoftnessSlider.Value = settings.LyricsSoftness;
-        LyricsGlowSwitch.IsOn = settings.LyricsGlow;
         LyricsGlowSlider.Value = settings.LyricsGlowIntensity;
-        LyricsGlowSlider.IsEnabled = settings.LyricsGlow;
         LyricsGlowValue.Text = $"{settings.LyricsGlowIntensity:F1}×";
 
         WordMotionSwitch.IsOn = settings.LyricsMotion;
-        BackingVocalsSwitch.IsOn = settings.ShowsBackingVocals;
-        BackingParenthesesSwitch.IsOn = settings.ShowsBackingParentheses;
-        BackingParenthesesSwitch.IsEnabled = settings.ShowsBackingVocals;
-        DuetSidesSwitch.IsOn = settings.DuetSides;
+        BackingVocalsBox.SelectedIndex = (int)settings.BackingVocals;
         AnimatedBackgroundSwitch.IsOn = settings.AnimatesPlayerBackground;
         KeepHistorySwitch.IsOn = settings.SavesListeningHistory;
         KeepSearchHistorySwitch.IsOn = settings.SavesSearchHistory;
@@ -243,6 +238,12 @@ public sealed partial class SettingsPage : Page
         }
 
         var query = SettingsSearch.Text?.Trim() ?? "";
+        // A setting hidden in the advanced fold should still be found.
+        if (query.Length > 0)
+        {
+            AdvancedExpander.IsExpanded = true;
+        }
+
         ClearHighlights(SettingsRoot);
 
         if (query.Length == 0)
@@ -362,6 +363,12 @@ public sealed partial class SettingsPage : Page
         if (node is Border border && border.Child is { } content)
         {
             CollectRows(content, rows);
+            return;
+        }
+
+        if (node is Expander expander && expander.Content is DependencyObject folded)
+        {
+            CollectRows(folded, rows);
         }
     }
 
@@ -403,6 +410,12 @@ public sealed partial class SettingsPage : Page
         if (node is Border border && border.Child is { } content)
         {
             UpdateDividers(content);
+            return;
+        }
+
+        if (node is Expander expander && expander.Content is DependencyObject folded)
+        {
+            UpdateDividers(folded);
         }
     }
 
@@ -884,23 +897,15 @@ public sealed partial class SettingsPage : Page
         ShowCustomPreset();
     }
 
-    private void OnBackingVocalsToggled(object sender, RoutedEventArgs e)
+    private void OnBackingVocalsChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_loaded) return;
-        App.Settings.Update(s => s.ShowsBackingVocals = BackingVocalsSwitch.IsOn);
-        BackingParenthesesSwitch.IsEnabled = BackingVocalsSwitch.IsOn;
-    }
+        if (!_loaded || BackingVocalsBox.SelectedIndex < 0)
+        {
+            return;
+        }
 
-    private void OnBackingParenthesesToggled(object sender, RoutedEventArgs e)
-    {
-        if (!_loaded) return;
-        App.Settings.Update(s => s.ShowsBackingParentheses = BackingParenthesesSwitch.IsOn);
-    }
-
-    private void OnDuetSidesToggled(object sender, RoutedEventArgs e)
-    {
-        if (!_loaded) return;
-        App.Settings.Update(s => s.DuetSides = DuetSidesSwitch.IsOn);
+        var mode = (BackingVocalsMode)BackingVocalsBox.SelectedIndex;
+        App.Settings.Update(s => s.BackingVocals = mode);
     }
 
     private static string PresetLabel(LyricsPreset preset) => preset switch
@@ -920,22 +925,6 @@ public sealed partial class SettingsPage : Page
 
         var preset = (LyricsPreset)LyricsPresetBox.SelectedIndex;
         App.Settings.Update(s => s.ApplyLyricsPreset(preset));
-        Load();
-    }
-
-    private void OnLyricsStyleChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_loaded || LyricsStyleBox.SelectedIndex < 0)
-        {
-            return;
-        }
-
-        var style = (LyricsRenderer)LyricsStyleBox.SelectedIndex;
-        App.Settings.Update(s =>
-        {
-            s.LyricsRenderer = style;
-            s.LyricsPreset = LyricsPreset.Custom;
-        });
         Load();
     }
 
@@ -1000,22 +989,6 @@ public sealed partial class SettingsPage : Page
         ShowCustomPreset();
     }
 
-    private void OnLyricsGlowToggled(object sender, RoutedEventArgs e)
-    {
-        if (!_loaded)
-        {
-            return;
-        }
-
-        App.Settings.Update(s =>
-        {
-            s.LyricsGlow = LyricsGlowSwitch.IsOn;
-            s.LyricsPreset = LyricsPreset.Custom;
-        });
-        LyricsGlowSlider.IsEnabled = LyricsGlowSwitch.IsOn;
-        ShowCustomPreset();
-    }
-
     private void OnLyricsGlowChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
         if (!_loaded)
@@ -1042,7 +1015,7 @@ public sealed partial class SettingsPage : Page
 
         var loaded = _loaded;
         _loaded = false;
-        LyricsPresetBox.SelectedIndex = (int)LyricsPreset.Custom;
+        LyricsPresetBox.SelectedIndex = -1;
         _loaded = loaded;
     }
 
