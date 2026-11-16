@@ -169,6 +169,8 @@ internal sealed class LyricsPanel : IDisposable
     private int _masksDisposed;
     private int _masksDisposedSinceCollection;
     private int _collectionsForced;
+    private int _masksCreated;
+    private int _glowsBuilt;
     private CubicBezierEasingFunction? _hoverEase;
     private ScalarKeyFrameAnimation? _hoverOpacityIn;
     private ScalarKeyFrameAnimation? _hoverOpacityOut;
@@ -2324,6 +2326,7 @@ internal sealed class LyricsPanel : IDisposable
                 // Keep the mask while this letter stays in the live window; a seek
                 // back into the same window can reuse it instead of taking a new one.
                 letter.Mask = MaskSource(letter).GetAlphaMask();
+                _masksCreated++;
                 letter.NeedsMaskRefresh = false;
             }
 
@@ -2343,6 +2346,7 @@ internal sealed class LyricsPanel : IDisposable
         letter.PaintedGlow = 0;
         letter.PaintedBlur = _glowBlurFixed ? 12 : 0;
         letter.GlowDone = false;
+        _glowsBuilt++;
         AddLiveGlow(letter);
     }
 
@@ -2381,6 +2385,7 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         var mask = MaskSource(letter).GetAlphaMask();
+        _masksCreated++;
         if (!ReferenceEquals(letter.Mask, mask))
         {
             letter.Shadow.Mask = mask;
@@ -2698,6 +2703,8 @@ internal sealed class LyricsPanel : IDisposable
             System.IO.File.AppendAllText(
                 System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-live.txt"),
                 $"{DateTime.Now:HH:mm:ss.fff} test={_glowTest} live={live} painted={_paintedLetters} " +
+                $"masks={_masksCreated} disposed={_masksDisposed} built={_glowsBuilt} " +
+                $"forced={_collectionsForced} hold={(GlowHeld ? 1 : 0)} " +
                 $"private={privateBytes / 1048576.0:F1}MB growth={growth:F1}MB/s{Environment.NewLine}");
         }
         catch (Exception)
