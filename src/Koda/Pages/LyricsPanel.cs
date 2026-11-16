@@ -267,6 +267,9 @@ internal sealed class LyricsPanel : IDisposable
         public double PaintedY { get; set; } = double.NaN;
         public double PaintedGlow { get; set; } = -1;
         public double PaintedBlur { get; set; } = -1;
+        /// <summary>When the glow last fell to zero, in frame-clock milliseconds: a brief
+        /// dip must not free the surfaces only to rebuild them a moment later.</summary>
+        public long GlowIdleSince { get; set; } = -1;
         /// <summary>True once this letter's glow has actually been visible.</summary>
         public bool GlowShown { get; set; }
         /// <summary>True once the glow ended and its surfaces were freed.</summary>
@@ -539,6 +542,14 @@ internal sealed class LyricsPanel : IDisposable
     public void SetPosition(double positionSeconds)
     {
         var next = positionSeconds + Lead - _offset;
+        if (_liveLog && next < _position && _position - next < 1.0
+            && _position - next >= 0.001)
+        {
+            // A small backward step may be the position source jittering rather than a
+            // seek. Record it without touching the jump thresholds.
+            LogBackwardStep(_position - next);
+        }
+
         // A jump means a seek or a replay: the lines behind and ahead must be repainted,
         // or the line that was partly sung keeps its half-filled words. Only the span
         // between the old and new lines can change state; repainting the whole song on
@@ -1505,6 +1516,9 @@ internal sealed class LyricsPanel : IDisposable
                 GlideTo(_current);
             }
 
+            // Warm the first window while the intro plays, so the first line's glow is
+            // ready when its words start.
+            ScheduleGlows(0);
             Paint();
             return;
         }
@@ -1920,6 +1934,7 @@ internal sealed class LyricsPanel : IDisposable
         var data = word.Data;
         var duration = Math.Max(0.001, data.End - data.Start);
         var elapsed = time - data.Start;
+        var inWordRange = elapsed >= 0 && elapsed <= duration;
         var progress = Math.Clamp(elapsed / duration, 0, 1);
         var lit = -0.2 + 1.2 * progress;
         var soft = lit + _feather;
@@ -1963,7 +1978,7 @@ internal sealed class LyricsPanel : IDisposable
                     letter.PaintedActive = active;
                 }
 
-                SetLetterMotion(letter, letterMotion, word.FontSize, strength);
+                SetLetterMotion(letter, letterMotion, word.FontSize, strength, data.End, inWordRange);
             }
         }
         else if (word.Fill is { } fill &&
@@ -2088,7 +2103,13 @@ internal sealed class LyricsPanel : IDisposable
         }
     }
 
-    private void SetLetterMotion(Letter letter, LetterMotion motion, double fontSize, double glowStrength)
+    private void SetLetterMotion(
+        Letter letter,
+        LetterMotion motion,
+        double fontSize,
+        double glowStrength,
+        double wordEnd,
+        bool wordInRange)
     {
         if (Math.Abs(motion.Scale - letter.PaintedScale) >= 0.0005)
         {
@@ -2132,7 +2153,8 @@ internal sealed class LyricsPanel : IDisposable
         var glow = motion.Glow * glowStrength;
         if (glow > 0.01)
         {
-            EnsureGlow(letter);
+            letter.GlowIdleSince = -1;
+            EnsureGlow(letter, painting: wordInRange);
             if (letter.Shadow is { } shadow)
             {
                 var opacity = (float)Math.Clamp(glow, 0, 1);
@@ -2154,6 +2176,11 @@ internal sealed class LyricsPanel : IDisposable
         }
         else
         {
+            if (letter.GlowIdleSince < 0)
+            {
+                letter.GlowIdleSince = _frameClock.ElapsedMilliseconds;
+            }
+
             var idleBlur = _glowBlurFixed ? 12f : 0f;
             if (letter.Shadow is { } idleShadow
                 && (letter.PaintedGlow != 0 || letter.PaintedBlur != idleBlur))
@@ -2164,12 +2191,18 @@ internal sealed class LyricsPanel : IDisposable
                 letter.PaintedBlur = idleBlur;
             }
 
-            // The halo is invisible now (opacity 0). Free the sprite and its mask
-            // here instead of holding them until the line leaves the ±1 window.
+            // The halo is invisible now (opacity 0). Free the sprite and its mask here
+            // instead of holding them until the line leaves the ±1 window, but wait out a
+            // brief dip first; past the word's settle tail the glow cannot return, so the
+            // surfaces go at once.
             if (letter.GlowShown && letter.PaintedGlow == 0)
             {
-                ReleaseGlow(letter, keepMask: true);
-                letter.GlowDone = true;
+                var idle = _frameClock.ElapsedMilliseconds - letter.GlowIdleSince;
+                if (idle >= 300 || _position > wordEnd + LyricsMotion.SettleSeconds)
+                {
+                    ReleaseGlow(letter, keepMask: true);
+                    letter.GlowDone = true;
+                }
             }
         }
     }
@@ -2232,8 +2265,10 @@ internal sealed class LyricsPanel : IDisposable
     }
 
     /// <summary>Lazily gives a letter its Gaussian glow. The sprite lives in an empty
-    /// layer before the text, so the shadow is drawn behind the sharp glyph.</summary>
-    private void EnsureGlow(Letter letter)
+    /// layer before the text, so the shadow is drawn behind the sharp glyph.
+    /// <paramref name="painting"/> says the letter is being painted with a live glow in its
+    /// own word range, which may rebuild a glow that ended earlier.</summary>
+    private void EnsureGlow(Letter letter, bool painting = false)
     {
         if (!_glow || letter.GlowHost is null || letter.GlowVisual is not null)
         {
@@ -2242,6 +2277,13 @@ internal sealed class LyricsPanel : IDisposable
 
         // While a seek settles, only the line being sung may build its glow.
         if (GlowHeld && letter.RowIndex != _activeRowIndex)
+        {
+            return;
+        }
+
+        // A glow that already ended stays ended until it is painted again inside its own
+        // word; a queued warmup or a stray repaint must not rebuild it.
+        if (letter.GlowDone && !painting)
         {
             return;
         }
@@ -2392,6 +2434,7 @@ internal sealed class LyricsPanel : IDisposable
         letter.GlowShown = false;
         letter.PaintedGlow = -1;
         letter.PaintedBlur = -1;
+        letter.GlowIdleSince = -1;
     }
 
     private void ReleaseGlows()
@@ -2656,6 +2699,24 @@ internal sealed class LyricsPanel : IDisposable
                 System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-live.txt"),
                 $"{DateTime.Now:HH:mm:ss.fff} test={_glowTest} live={live} painted={_paintedLetters} " +
                 $"private={privateBytes / 1048576.0:F1}MB growth={growth:F1}MB/s{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // diagnostics must not take the panel down
+        }
+    }
+
+    /// <summary>Diagnostic only: records a backward step under a second, so a position
+    /// source that jitters can be told from a real seek. The jump thresholds are left
+    /// exactly as they are.</summary>
+    private void LogBackwardStep(double back)
+    {
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-live.txt"),
+                $"{DateTime.Now:HH:mm:ss.fff} back={back:F3}s from={_position:F3} " +
+                $"to={_position - back:F3}{Environment.NewLine}");
         }
         catch (Exception)
         {
