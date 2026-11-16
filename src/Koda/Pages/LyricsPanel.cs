@@ -2385,10 +2385,18 @@ internal sealed class LyricsPanel : IDisposable
                 SetLineTextRest(row, rest);
 
                 // A rich row that is waiting its turn carries the rest scale on the whole
-                // panel, so the glyphs and the layout spaces shrink together. The row being
-                // sung drops that panel scale and lets each word animate from 0.95.
-                var rowRest = row.Rich && !isActive && i > index ? LyricsMotion.WordRestScale : 1;
-                SetRowRestScale(row, rowRest);
+                // panel, so the glyphs and the layout spaces shrink together. When it becomes
+                // current, grow that panel scale back over the line's activation fade instead
+                // of removing it in one frame; the words themselves stay at 1.0.
+                if (row.Rich)
+                {
+                    var target = !isActive && i > index ? LyricsMotion.WordRestScale : 1.0;
+                    var current = row.RestScale < 0 ? target : row.RestScale;
+                    var next = _playing
+                        ? Approach(current, target, expressive ? 0.1 : 0.18)
+                        : target;
+                    SetRowRestScale(row, next);
+                }
             }
 
             row.Opacity = expressive
@@ -2971,9 +2979,12 @@ internal sealed class LyricsPanel : IDisposable
 
     private static void SetWordMotion(Word word, WordMotion motion)
     {
-        if (Math.Abs(motion.Scale - word.PaintedScale) >= 0.0005)
+        // The resting 0.95 lives on the row panel while it is waiting. A word must not
+        // shrink again on top of that, or the handoff to the active row drops twice.
+        var scale = Math.Max(1, motion.Scale);
+        if (Math.Abs(scale - word.PaintedScale) >= 0.0005)
         {
-            SetWordScale(word, motion.Scale);
+            SetWordScale(word, scale);
         }
 
         SetWordTranslation(word, motion.X * word.FontSize, motion.Y * word.FontSize);
