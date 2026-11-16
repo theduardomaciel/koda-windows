@@ -132,6 +132,140 @@ public static class LyricsFormats
         return finished.Count == 0 ? null : finished;
     }
 
+    /// <summary>The document inside Spicy's <c>Body</c> envelope, or the document itself.</summary>
+    internal static Json SpicyBody(Json root) =>
+        root["Body"].Raw.ValueKind == JsonValueKind.Object ? root["Body"] : root;
+
+    /// <summary>Spicy's credit: the provider always, and the uploader and maker only on a
+    /// community sync. Commercial sources have no one else to credit.</summary>
+    internal static IReadOnlyList<LyricsCredit> SpicyCredits(Json root)
+    {
+        var body = SpicyBody(root);
+        var credits = new List<LyricsCredit>
+        {
+            new("Lyrics from", "Spicy Lyrics", "https://spicylyrics.org/"),
+        };
+
+        if (!string.Equals(body["source"].String, "spicy_lyrics", StringComparison.OrdinalIgnoreCase))
+        {
+            return credits;
+        }
+
+        var uploader = body["UploadAttribution"]["Uploader"];
+        if (uploader["username"].NonEmpty is { } uploaderName)
+        {
+            credits.Add(new("Submitted by", uploaderName, uploader["url"].NonEmpty));
+        }
+
+        var maker = body["UploadAttribution"]["Maker"];
+        if (maker["username"].NonEmpty is { } makerName)
+        {
+            credits.Add(new("Made by", makerName, maker["url"].NonEmpty));
+        }
+
+        return credits;
+    }
+
+    /// <summary>Unison's credit: the song page and the person who submitted the sync.</summary>
+    internal static IReadOnlyList<LyricsCredit> UnisonCredits(Json data)
+    {
+        var videoId = data["videoId"].String;
+        var credits = new List<LyricsCredit>
+        {
+            new("Lyrics from", "Unison",
+                videoId is { Length: > 0 }
+                    ? $"https://unison.betterlyrics.org/song/{videoId}"
+                    : "https://unison.betterlyrics.org/"),
+        };
+
+        var submitter = data["submitter"];
+        if (submitter["displayName"].NonEmpty is { } name)
+        {
+            var url = submitter["keyId"].NonEmpty is { } key
+                ? $"https://unison.betterlyrics.org/curator/{key}"
+                : null;
+            credits.Add(new("Submitted by", name, url));
+        }
+
+        return credits;
+    }
+
+    /// <summary>Spicy Lyrics' JSON: syllable timing under <c>Content[].Lead.Syllables</c>,
+    /// line timing under <c>Content[].Text</c>, or plain <c>Lines</c>. Spicy wraps the
+    /// document in <c>Body</c> on some responses.</summary>
+    internal static Lyrics? ParseSpicy(Json root)
+    {
+        var body = SpicyBody(root);
+        var type = body["Type"].String;
+
+        if (string.Equals(type, "Static", StringComparison.OrdinalIgnoreCase))
+        {
+            var lines = body["Lines"].Array
+                .Select(line => line["Text"].String)
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .Select(text => text!.Trim())
+                .ToList();
+            return lines.Count == 0 ? null : Lyrics.Unsynced(string.Join('\n', lines));
+        }
+
+        var parsed = new List<LyricLine>();
+        foreach (var item in body["Content"].Array)
+        {
+            // Line timing has the text on the item; syllable timing keeps it under Lead.
+            var source = item["Lead"].Raw.ValueKind == JsonValueKind.Object ? item["Lead"] : item;
+            var words = SpicyWords(source);
+            var text = words.Count > 0 ? Joined(words) : source["Text"].String?.Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var background = new List<LyricWord>();
+            foreach (var block in item["Background"].Array)
+            {
+                var blockWords = SpicyWords(block);
+                if (blockWords.Count > 0)
+                {
+                    blockWords[^1] = blockWords[^1] with { SpaceAfter = true };
+                    background.AddRange(blockWords);
+                }
+            }
+
+            var start = source["StartTime"].Double
+                ?? (words.Count > 0 ? words[0].Start : item["StartTime"].Double ?? 0);
+            var end = source["EndTime"].Double
+                ?? (words.Count > 0 ? words[^1].End : item["EndTime"].Double);
+            var voice = item["OppositeAligned"].Bool == true ? LyricVoice.Duet : LyricVoice.Lead;
+            parsed.Add(new LyricLine(0, start, text, words, background, end, voice));
+        }
+
+        return parsed.Count == 0 ? null : Lyrics.Synced(Lyrics.Finish(parsed));
+    }
+
+    /// <summary>One lead or background block. <c>IsPartOfWord</c> looks forward: true means
+    /// the word continues into the next syllable, so no space goes after this one.</summary>
+    private static List<LyricWord> SpicyWords(Json source)
+    {
+        var syllables = source["Syllables"].Array;
+        var words = new List<LyricWord>(syllables.Length);
+        for (var index = 0; index < syllables.Length; index++)
+        {
+            var syllable = syllables[index];
+            var text = syllable["Text"].String?.Trim();
+            if (string.IsNullOrEmpty(text))
+            {
+                continue;
+            }
+
+            var start = syllable["StartTime"].Double ?? 0;
+            var end = syllable["EndTime"].Double ?? start;
+            var spaceAfter = index < syllables.Length - 1 && syllable["IsPartOfWord"].Bool != true;
+            words.Add(new LyricWord(text, start, end, spaceAfter));
+        }
+
+        return words;
+    }
+
     /// <summary>Whatever a provider sent, as lyrics: TTML, LRC (plain or enhanced), or plain text.</summary>
     public static Lyrics? ParseAny(string text)
     {

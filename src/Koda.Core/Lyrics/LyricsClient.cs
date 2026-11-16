@@ -12,6 +12,8 @@ public enum LyricsSource
     BetterLyrics,
     /// <summary>Community-synced lyrics, from word timing down to plain text.</summary>
     Unison,
+    /// <summary>Word or line timing from Spicy Lyrics, using the listener's own key.</summary>
+    SpicyLyrics,
     /// <summary>Apple Music lyrics from BiniLyrics' lrc.red catalogue.</summary>
     BiniLyrics,
     /// <summary>Word-timed QRC from Better Lyrics' QQ provider.</summary>
@@ -54,6 +56,8 @@ public sealed class LyricsClient : IDisposable
     private const string BiniLyricsSearch = "https://lrc.red/search.json";
     private const string BiniLyricsSong = "https://lrc.red/s/";
     private const string UnisonLyricsUrl = "https://unison.betterlyrics.org/lyrics";
+    private const string SpicySearchUrl = "https://api.spicylyrics.org/v1/tracks/search";
+    private const string SpicyLyricsUrl = "https://api.spicylyrics.org/v1/lyrics/";
 
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(9);
 
@@ -247,6 +251,7 @@ public sealed class LyricsClient : IDisposable
         {
             LyricsSource.BetterLyrics => await BetterLyrics(song, BetterLyricsTtml, cancellation).ConfigureAwait(false),
             LyricsSource.Unison => await Unison(song, cancellation).ConfigureAwait(false),
+            LyricsSource.SpicyLyrics => await Spicy(song, cancellation).ConfigureAwait(false),
             LyricsSource.BiniLyrics => await BiniLyrics(song, cancellation).ConfigureAwait(false),
             LyricsSource.BetterLyricsQQ => await BetterLyrics(song, BetterLyricsQq, cancellation).ConfigureAwait(false),
             LyricsSource.YouLyPlus => await YouLyPlus(song, cancellation).ConfigureAwait(false),
@@ -373,6 +378,97 @@ public sealed class LyricsClient : IDisposable
         var data = await Fetch(endpoint, parameters, cancellation).ConfigureAwait(false);
         return data is null ? null : DecodeWrapped(data);
     }
+
+    // MARK: Spicy Lyrics
+
+    /// <summary>Spicy's search finds the track (it is keyed by a streaming id, not a title),
+    /// then one request returns either syllable or line timing. The listener supplies the key.</summary>
+    private async Task<Lyrics?> Spicy(Song song, CancellationToken cancellation)
+    {
+        var key = ForkConfig.SpicyLyricsKey;
+        if (string.IsNullOrWhiteSpace(key) || song.ArtistLine.Length == 0)
+        {
+            return null;
+        }
+
+        var headers = new Dictionary<string, string> { ["Authorization"] = "Bearer " + key.Trim() };
+        var search = new Dictionary<string, string>
+        {
+            ["title"] = song.Title,
+            ["artist"] = song.ArtistLine,
+            ["limit"] = "5",
+        };
+        if (song.Album is { } album && album.Title.Length > 0)
+        {
+            search["album"] = album.Title;
+        }
+
+        if (song.Duration is { } duration && duration > 0)
+        {
+            search["duration"] = ((int)Math.Round(duration)).ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (await Fetch(SpicySearchUrl, search, cancellation, headers: headers).ConfigureAwait(false) is not { } searchData)
+        {
+            return null;
+        }
+
+        Json root;
+        try
+        {
+            root = Json.Parse(Encoding.UTF8.GetString(searchData));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        var results = root["Body"]["results"].Array is { Length: > 0 } body ? body : root["results"].Array;
+        Json? chosen = null;
+        Json? fallback = null;
+        foreach (var result in results)
+        {
+            if (string.Equals(result["tier"].String, "exact", StringComparison.OrdinalIgnoreCase))
+            {
+                chosen = result;
+                break;
+            }
+
+            if (fallback is null && CloseEnough(result, song))
+            {
+                fallback = result;
+            }
+        }
+
+        chosen ??= fallback;
+        if (chosen is not { } track || track["id"].NonEmpty is not { } id)
+        {
+            return null;
+        }
+
+        var url = SpicyLyricsUrl + Uri.EscapeDataString(id);
+        if (await Fetch(url, new Dictionary<string, string>(), cancellation, headers: headers).ConfigureAwait(false) is not { } lyricsData)
+        {
+            return null;
+        }
+
+        try
+        {
+            var lyricsRoot = Json.Parse(Encoding.UTF8.GetString(lyricsData));
+            return LyricsFormats.ParseSpicy(lyricsRoot)?.WithCredits(LyricsFormats.SpicyCredits(lyricsRoot));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>An inexact search result is used only when its length is the same recording.</summary>
+    private static bool CloseEnough(Json result, Song song) =>
+        song.Duration is not { } wanted ||
+        result["duration"].Double is not { } seconds ||
+        seconds <= 0 ||
+        Math.Abs(seconds - wanted) <= 3;
 
     // MARK: BiniLyrics
 
@@ -929,7 +1025,9 @@ public sealed class LyricsClient : IDisposable
             }
 
             var text = root["data"]["lyrics"].NonEmpty;
-            return text is null ? null : LyricsFormats.ParseAny(text);
+            return text is null
+                ? null
+                : LyricsFormats.ParseAny(text)?.WithCredits(LyricsFormats.UnisonCredits(root["data"]));
         }
         catch (Exception)
         {

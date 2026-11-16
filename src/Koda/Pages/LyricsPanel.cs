@@ -8,6 +8,7 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -787,6 +788,11 @@ internal sealed class LyricsPanel : IDisposable
             };
             Shape(plain, size);
             _lines.Children.Add(plain);
+            if (MakeCredits(lyrics) is { } credits)
+            {
+                _lines.Children.Add(credits);
+            }
+
             _rowsBuilt = true;
             UpdateSpacers();
             return;
@@ -972,6 +978,12 @@ internal sealed class LyricsPanel : IDisposable
             }
         }
 
+        // The provider's credit sits with the words, after the last line.
+        if (MakeCredits(lyrics) is { } attribution)
+        {
+            _lines.Children.Add(attribution);
+        }
+
         // The room below the last line, so the final lines of a song can still be scrolled
         // up to the reading position.
         _lines.Children.Add(_spacer);
@@ -988,6 +1000,55 @@ internal sealed class LyricsPanel : IDisposable
             : 0;
         start = Math.Clamp(start, 0, Math.Max(0, _rows.Count - 1));
         EnsureRichWindow(start);
+    }
+
+    /// <summary>The provider and people to credit, as the last thing with the words.
+    /// Spicy's community syncs and Unison require it; other sources have no credit.</summary>
+    private static TextBlock? MakeCredits(Lyrics lyrics)
+    {
+        if (lyrics.Credits.Count == 0)
+        {
+            return null;
+        }
+
+        var block = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = TextAlignment.Center,
+            FontSize = 12,
+            Margin = new Thickness(0, 28, 0, 8),
+            Foreground = new SolidColorBrush(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF)),
+        };
+
+        for (var index = 0; index < lyrics.Credits.Count; index++)
+        {
+            var credit = lyrics.Credits[index];
+            if (index > 0)
+            {
+                block.Inlines.Add(new Run { Text = " · " });
+            }
+
+            if (credit.Role.Length > 0)
+            {
+                block.Inlines.Add(new Run { Text = credit.Role + " " });
+            }
+
+            if (!string.IsNullOrWhiteSpace(credit.Url) &&
+                Uri.TryCreate(credit.Url, UriKind.Absolute, out var uri))
+            {
+                var link = new Hyperlink { NavigateUri = uri };
+                link.Inlines.Add(new Run { Text = credit.Name });
+                block.Inlines.Add(link);
+            }
+            else
+            {
+                block.Inlines.Add(new Run { Text = credit.Name });
+            }
+        }
+
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
+            block, string.Join(". ", lyrics.Credits.Select(credit => $"{credit.Role} {credit.Name}")));
+        return block;
     }
 
     private TextBlock MakeRowPlaceholder(LyricLine line, double fontSize, TextAlignment textSide)

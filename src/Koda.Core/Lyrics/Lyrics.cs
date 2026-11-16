@@ -37,6 +37,12 @@ public sealed record LyricLine(
     public bool IsWordTimed => Words.Count > 0;
 }
 
+/// <summary>Who to credit for the lyrics, and where to link them.</summary>
+/// <param name="Role">"Lyrics from", "Submitted by", "Made by".</param>
+/// <param name="Name">The provider or person as they are shown.</param>
+/// <param name="Url">Where the credit goes; null when there is nowhere to link.</param>
+public sealed record LyricsCredit(string Role, string Name, string? Url);
+
 /// <summary>Lyrics: timed lines, or plain text with no timing at all.</summary>
 public sealed class Lyrics
 {
@@ -45,6 +51,9 @@ public sealed class Lyrics
 
     /// <summary>Untimed text, when the provider had none.</summary>
     public string? Plain { get; }
+
+    /// <summary>The provider and people to credit, where the source asks for it.</summary>
+    public IReadOnlyList<LyricsCredit> Credits { get; private set; } = [];
 
     public bool IsSynced => Lines.Count > 0;
 
@@ -57,6 +66,13 @@ public sealed class Lyrics
     public static Lyrics Synced(IReadOnlyList<LyricLine> lines) => new(lines, null);
 
     public static Lyrics Unsynced(string text) => new([], text);
+
+    /// <summary>Attaches the provider's credit, for the panel to show with the words.</summary>
+    public Lyrics WithCredits(IReadOnlyList<LyricsCredit> credits)
+    {
+        Credits = credits;
+        return this;
+    }
 
     /// <summary>Word timing beats line timing beats none.</summary>
     public int Quality => Plain is not null ? 0 : Lines.Any(l => l.IsWordTimed) ? 2 : 1;

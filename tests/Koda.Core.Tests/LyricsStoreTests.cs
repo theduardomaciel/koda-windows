@@ -71,6 +71,24 @@ public class LyricsStoreTests
     }
 
     [Fact]
+    public async Task CreditsSurviveTheStore()
+    {
+        var store = Store();
+        var sources = new[] { LyricsSource.SpicyLyrics };
+        var lyrics = SampleLyrics().WithCredits([
+            new LyricsCredit("Lyrics from", "Spicy Lyrics", "https://spicylyrics.org/"),
+            new LyricsCredit("Submitted by", "spikerko", "https://spicylyrics.org/uid/1"),
+        ]);
+
+        await store.WriteAsync("song0000007", sources, lyrics);
+        var back = await store.ReadAsync("song0000007", sources);
+
+        Assert.NotNull(back);
+        Assert.Equal(["Spicy Lyrics", "spikerko"], back!.Credits.Select(credit => credit.Name));
+        Assert.All(back.Credits, credit => Assert.NotNull(credit.Url));
+    }
+
+    [Fact]
     public async Task ADifferentSetOfServicesIsAMiss()
     {
         var store = Store();

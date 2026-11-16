@@ -120,6 +120,102 @@ public class LyricsTests
         Assert.Equal(3.0, lines[1].Time, 3);
     }
 
+    [Fact]
+    public void ReadsSpicySyllableTiming()
+    {
+        const string json = """
+            {
+              "Type": "Syllable",
+              "Content": [
+                {
+                  "Type": "Vocal",
+                  "OppositeAligned": false,
+                  "Lead": {
+                    "StartTime": 1.0,
+                    "EndTime": 2.5,
+                    "Syllables": [
+                      { "Text": "Hel", "StartTime": 1.0, "EndTime": 1.3, "IsPartOfWord": true },
+                      { "Text": "lo", "StartTime": 1.3, "EndTime": 1.6, "IsPartOfWord": false },
+                      { "Text": "world", "StartTime": 1.8, "EndTime": 2.5, "IsPartOfWord": false }
+                    ]
+                  },
+                  "Background": [
+                    {
+                      "StartTime": 2.0,
+                      "EndTime": 2.5,
+                      "Syllables": [
+                        { "Text": "oh", "StartTime": 2.0, "EndTime": 2.5, "IsPartOfWord": false }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+
+        var lyrics = LyricsFormats.ParseSpicy(Json.Parse(json));
+
+        Assert.NotNull(lyrics);
+        var line = Assert.Single(lyrics!.Lines);
+        Assert.Equal("Hello world", line.Text);
+        Assert.Equal(3, line.Words.Count);
+        Assert.False(line.Words[0].SpaceAfter);
+        Assert.True(line.Words[1].SpaceAfter);
+        Assert.True(line.IsWordTimed);
+        Assert.Single(line.Background);
+        Assert.Equal(1.0, line.Words[0].Start, 3);
+    }
+
+    [Fact]
+    public void ReadsSpicyLineAndStaticTiming()
+    {
+        var line = LyricsFormats.ParseSpicy(Json.Parse("""
+            { "Body": { "Type": "Line", "Content": [
+              { "Text": "One line", "StartTime": 5, "EndTime": 7, "OppositeAligned": true }
+            ] } }
+            """));
+
+        Assert.NotNull(line);
+        var only = Assert.Single(line!.Lines);
+        Assert.Equal("One line", only.Text);
+        Assert.False(only.IsWordTimed);
+        Assert.Equal(LyricVoice.Duet, only.Voice);
+
+        var plain = LyricsFormats.ParseSpicy(Json.Parse("""
+            { "Type": "Static", "Lines": [ { "Text": "One" }, { "Text": "Two" } ] }
+            """));
+
+        Assert.NotNull(plain);
+        Assert.Equal("One\nTwo", plain!.Plain);
+    }
+
+    [Fact]
+    public void ReadsSpicyAndUnisonAttribution()
+    {
+        var spicy = LyricsFormats.SpicyCredits(Json.Parse("""
+            { "Body": { "source": "spicy_lyrics", "UploadAttribution": {
+              "Uploader": { "username": "spikerko", "url": "https://spicylyrics.org/uid/1" },
+              "Maker": { "username": "gc", "url": "https://spicylyrics.org/uid/2" }
+            } } }
+            """));
+        Assert.Equal(["Spicy Lyrics", "spikerko", "gc"], spicy.Select(credit => credit.Name));
+        Assert.Equal(["Lyrics from", "Submitted by", "Made by"], spicy.Select(credit => credit.Role));
+        Assert.All(spicy, credit => Assert.NotNull(credit.Url));
+
+        var commercial = LyricsFormats.SpicyCredits(Json.Parse("""
+            { "Body": { "source": "apple_music" } }
+            """));
+        Assert.Single(commercial);
+        Assert.Equal("Spicy Lyrics", commercial[0].Name);
+
+        var unison = LyricsFormats.UnisonCredits(Json.Parse("""
+            { "videoId": "Ugr4KKK_SqY", "submitter": { "displayName": "boidu", "keyId": "abc" } }
+            """));
+        Assert.Equal(["Unison", "boidu"], unison.Select(credit => credit.Name));
+        Assert.Equal("https://unison.betterlyrics.org/song/Ugr4KKK_SqY", unison[0].Url);
+        Assert.Equal("https://unison.betterlyrics.org/curator/abc", unison[1].Url);
+    }
+
     /// <summary>Both services return the same Apple-timed lyrics for one song, in different shapes.</summary>
     private static void CheckWordTimed(IReadOnlyList<LyricLine> lines)
     {

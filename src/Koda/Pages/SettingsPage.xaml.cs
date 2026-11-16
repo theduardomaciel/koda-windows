@@ -927,6 +927,7 @@ public sealed partial class SettingsPage : Page
     {
         LyricsSource.BetterLyrics => "Better Lyrics",
         LyricsSource.Unison => "Unison",
+        LyricsSource.SpicyLyrics => "Spicy Lyrics",
         LyricsSource.BiniLyrics => "BiniLyrics",
         LyricsSource.BetterLyricsQQ => "Better Lyrics Portato",
         LyricsSource.YouLyPlus => "YouLyPlus",
@@ -942,6 +943,9 @@ public sealed partial class SettingsPage : Page
     {
         LyricsSource.BetterLyrics => "Syllable-timed when available, otherwise lines.",
         LyricsSource.Unison => "Community-synced, from word timing down to plain text.",
+        LyricsSource.SpicyLyrics => string.IsNullOrEmpty(ForkConfig.SpicyLyricsKey)
+            ? "Word or line timing from Spicy Lyrics. This build has no Spicy key."
+            : "Word or line timing from Spicy Lyrics.",
         LyricsSource.BiniLyrics => "Apple Music lyrics from lrc.red, word or line timed.",
         LyricsSource.BetterLyricsQQ => "Word-timed, through Better Lyrics' QQ provider.",
         LyricsSource.YouLyPlus => "Word-by-word, with duets and backing vocals.",

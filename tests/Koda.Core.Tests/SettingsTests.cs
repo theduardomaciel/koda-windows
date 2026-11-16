@@ -19,7 +19,7 @@ public class SettingsTests
         Assert.True(settings.CloseToTray);
         Assert.True(settings.Autoplay);
         Assert.Equal(100, settings.Volume);
-        Assert.Equal(10, settings.LyricsSources.Count);
+        Assert.Equal(11, settings.LyricsSources.Count);
     }
 
     [Fact]
@@ -136,6 +136,7 @@ public class SettingsTests
 
         Assert.Equal(LyricsSource.BetterLyrics, order[0]);
         Assert.Contains(LyricsSource.Unison, order);
+        Assert.Contains(LyricsSource.SpicyLyrics, order);
         Assert.Contains(LyricsSource.BiniLyrics, order);
         Assert.Contains(LyricsSource.BetterLyricsQQ, order);
         Assert.Contains(LyricsSource.BetterLyricsKugou, order);
@@ -150,7 +151,7 @@ public class SettingsTests
         settings.SetLyricsSourceOrder(settings.LyricsSourceOrder.Skip(1).Append(moved));
 
         Assert.Equal(moved, settings.LyricsSourceOrder[^1]);
-        Assert.Equal(10, settings.LyricsSourceOrder.Count);
+        Assert.Equal(11, settings.LyricsSourceOrder.Count);
     }
 
     [Fact]
@@ -158,11 +159,11 @@ public class SettingsTests
     {
         // A file saved before a service existed still asks for it.
         var file = Path.Combine(Fixtures.Scratch, $"settings-order-{Guid.NewGuid():N}.json");
-        File.WriteAllText(file, """{ "lyricsSourceOrderVersion": 1, "lyricsSourceOrder": [ "Lrclib" ] }""");
+        File.WriteAllText(file, """{ "lyricsSourceOrderVersion": 2, "lyricsSourceOrder": [ "Lrclib" ] }""");
 
         var settings = Settings.Load(file);
 
-        Assert.Equal(10, settings.LyricsSourceOrder.Count);
+        Assert.Equal(11, settings.LyricsSourceOrder.Count);
         Assert.Equal(LyricsSource.Lrclib, settings.LyricsSourceOrder[0]);
     }
 
@@ -177,8 +178,9 @@ public class SettingsTests
         Assert.Equal(Settings.CurrentLyricsSourceOrderVersion, settings.LyricsSourceOrderVersion);
         Assert.Equal(LyricsSource.BetterLyrics, settings.LyricsSourceOrder[0]);
         Assert.Equal(LyricsSource.Unison, settings.LyricsSourceOrder[1]);
-        Assert.Equal(LyricsSource.BiniLyrics, settings.LyricsSourceOrder[2]);
-        Assert.Equal(10, settings.LyricsSourceOrder.Count);
+        Assert.Equal(LyricsSource.SpicyLyrics, settings.LyricsSourceOrder[2]);
+        Assert.Equal(LyricsSource.BiniLyrics, settings.LyricsSourceOrder[3]);
+        Assert.Equal(11, settings.LyricsSourceOrder.Count);
     }
 
     [Fact]

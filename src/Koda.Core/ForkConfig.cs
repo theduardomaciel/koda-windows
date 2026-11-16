@@ -12,4 +12,9 @@ public static class ForkConfig
     public const string ReleasesUrl = RepoUrl + "/releases";
     public const string LatestReleaseUrl = ReleasesUrl + "/latest";
     public const string IssuesUrl = RepoUrl + "/issues";
+
+    /// <summary>The publishable Spicy Lyrics key (<c>sl_pk_…</c>). It ships in the app
+    /// and is public by design; the Spicy application must allow requests with no origin
+    /// header for native clients. Leave it empty to skip Spicy until the key is issued.</summary>
+    public const string SpicyLyricsKey = "";
 }

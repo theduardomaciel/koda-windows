@@ -111,15 +111,15 @@ public sealed class Settings
     /// <summary>The services lyrics can come from, in the order they are asked.</summary>
     public static readonly LyricsSource[] DefaultLyricsSources =
     [
-        LyricsSource.BetterLyrics, LyricsSource.Unison, LyricsSource.BiniLyrics,
-        LyricsSource.YouLyPlus, LyricsSource.BetterLyricsQQ, LyricsSource.NetEase,
-        LyricsSource.SimpMusic, LyricsSource.Lrclib, LyricsSource.BetterLyricsKugou,
-        LyricsSource.KuGou,
+        LyricsSource.BetterLyrics, LyricsSource.Unison, LyricsSource.SpicyLyrics,
+        LyricsSource.BiniLyrics, LyricsSource.YouLyPlus, LyricsSource.BetterLyricsQQ,
+        LyricsSource.NetEase, LyricsSource.SimpMusic, LyricsSource.Lrclib,
+        LyricsSource.BetterLyricsKugou, LyricsSource.KuGou,
     ];
 
     /// <summary>The source order's revision. A newer release moves the recommended
     /// providers to the top once; after that, a drag is the listener's own order.</summary>
-    public const int CurrentLyricsSourceOrderVersion = 1;
+    public const int CurrentLyricsSourceOrderVersion = 2;
 
     /// <summary>Which revision of the recommended order the file was saved with.</summary>
     public int LyricsSourceOrderVersion { get; set; }

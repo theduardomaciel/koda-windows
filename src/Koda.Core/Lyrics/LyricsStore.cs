@@ -119,7 +119,7 @@ public sealed class LyricsStore
 
         if (saved.Plain is { Length: > 0 } plain)
         {
-            return Lyrics.Unsynced(plain);
+            return Lyrics.Unsynced(plain).WithCredits(Credits(saved.Credits));
         }
 
         if (saved.Lines is not { Length: > 0 } stored)
@@ -141,7 +141,7 @@ public sealed class LyricsStore
                 line.Voice));
         }
 
-        return Lyrics.Synced(lines);
+        return Lyrics.Synced(lines).WithCredits(Credits(saved.Credits));
     }
 
     /// <summary>Keeps a song's lyrics, replacing an older answer for the same song.</summary>
@@ -168,6 +168,9 @@ public sealed class LyricsStore
                     line.Background
                         .Select(word => new SavedWord(word.Text, word.Start, word.End, word.SpaceAfter))
                         .ToArray()))
+                .ToArray(),
+            lyrics.Credits
+                .Select(credit => new SavedCredit(credit.Role, credit.Name, credit.Url))
                 .ToArray());
 
         var file = PathFor(songId);
@@ -232,6 +235,17 @@ public sealed class LyricsStore
                 word.SpaceAfter)).ToList()
             : [];
 
+    private static IReadOnlyList<LyricsCredit> Credits(SavedCredit[]? credits) =>
+        credits is { Length: > 0 }
+            ? credits
+                .Where(credit => !string.IsNullOrWhiteSpace(credit.Name))
+                .Select(credit => new LyricsCredit(
+                    credit.Role ?? string.Empty,
+                    credit.Name ?? string.Empty,
+                    credit.Url))
+                .ToList()
+            : [];
+
     /// <summary>The oldest files go first, so a long listening session cannot fill the disk.</summary>
     private void Trim()
     {
@@ -278,7 +292,13 @@ public sealed class LyricsStore
         [property: JsonPropertyName("version")] int Version,
         [property: JsonPropertyName("sources")] string[]? Sources,
         [property: JsonPropertyName("plain")] string? Plain,
-        [property: JsonPropertyName("lines")] SavedLine[]? Lines);
+        [property: JsonPropertyName("lines")] SavedLine[]? Lines,
+        [property: JsonPropertyName("credits")] SavedCredit[]? Credits);
+
+    private sealed record SavedCredit(
+        [property: JsonPropertyName("role")] string? Role,
+        [property: JsonPropertyName("name")] string? Name,
+        [property: JsonPropertyName("url")] string? Url);
 
     private sealed record SavedLine(
         [property: JsonPropertyName("id")] int Id,
