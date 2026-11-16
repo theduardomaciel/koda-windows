@@ -345,9 +345,7 @@ internal sealed class LyricsPanel : IDisposable
         /// <summary>The rest scale last written to the two placeholders.</summary>
         public double PlaceholderScale { get; set; } = -1;
         public double BackgroundPlaceholderScale { get; set; } = -1;
-        /// <summary>A line-timed row's one text block, which has no per-word elements.</summary>
-        public TextBlock? LineText { get; set; }
-        public double LineTextScale { get; set; } = -1;
+
         /// <summary>The height the rich content had, so collapsing does not move the scroll.</summary>
         public double CachedHeight { get; set; }
         /// <summary>The three dots of the gap that follows this line, when the gap is long.</summary>
@@ -898,20 +896,8 @@ internal sealed class LyricsPanel : IDisposable
                     Foreground = Brush(0xFF),
                 };
                 Shape(lineText, fontSize);
-                row.LineText = lineText;
-                lineText.SizeChanged += (_, _) =>
-                {
-                    if (row.LineTextScale > 0)
-                    {
-                        ApplyPlaceholderScale(lineText, row.LineTextScale);
-                    }
-                };
                 row.Words.Children.Add(lineText);
                 row.Rich = true;
-                if (_renderer == LyricsRenderer.Expressive && _motion)
-                {
-                    SetLineTextRest(row, _position >= line.Time ? 1 : LyricsMotion.WordRestScale);
-                }
             }
             else if (!_allRowsRich)
             {
@@ -1699,15 +1685,6 @@ internal sealed class LyricsPanel : IDisposable
         }
     }
 
-    private void SetLineTextRest(Row row, double scale)
-    {
-        if (row.LineText is { } text && Math.Abs(scale - row.LineTextScale) >= 0.001)
-        {
-            row.LineTextScale = scale;
-            ApplyPlaceholderScale(text, scale);
-        }
-    }
-
     private static void ApplyPlaceholderScale(FrameworkElement element, double scale)
     {
         var originX = element is TextBlock { TextAlignment: TextAlignment.Right } ? 1.0 : 0.0;
@@ -2400,8 +2377,6 @@ internal sealed class LyricsPanel : IDisposable
                 {
                     SetPlaceholderRest(row, rest);
                 }
-
-                SetLineTextRest(row, rest);
             }
 
             row.Opacity = expressive
