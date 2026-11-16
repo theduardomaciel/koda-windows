@@ -327,6 +327,9 @@ internal sealed class LyricsPanel : IDisposable
         /// <summary>The one-block stand-in for backing vocals on far lines.</summary>
         public TextBlock? BackgroundPlaceholder { get; set; }
         public SolidColorBrush? BackgroundPlaceholderBrush { get; set; }
+        /// <summary>The rest scale last written to the two placeholders.</summary>
+        public double PlaceholderScale { get; set; } = -1;
+        public double BackgroundPlaceholderScale { get; set; } = -1;
         /// <summary>The height the rich content had, so collapsing does not move the scroll.</summary>
         public double CachedHeight { get; set; }
         /// <summary>The three dots of the gap that follows this line, when the gap is long.</summary>
@@ -695,10 +698,6 @@ internal sealed class LyricsPanel : IDisposable
         UserScrolled = false;
         ReleaseGlows();
         ReturnAllRowWords();
-        // The previous song's masks were just disposed. Their native surfaces are freed
-        // when the brushes are collected, so collect once here instead of waiting for a
-        // managed heap this small to provoke a collection on its own.
-        CollectDisposedMasks(force: true);
         _repaintFrom = -1;
         _repaintTo = -1;
         _lines.Children.Clear();
@@ -710,6 +709,11 @@ internal sealed class LyricsPanel : IDisposable
         _rowsBuilt = false;
         _loaded = lyrics is { IsSynced: true };
         _pendingLyrics = lyrics;
+
+        // The previous song's rows, words, placeholders and masks were just dropped. Collect
+        // after those references are gone, so the new song does not allocate on top of the
+        // old song's native text and composition surfaces.
+        ForceCollection();
 
         if (lyrics is null)
         {
@@ -883,6 +887,13 @@ internal sealed class LyricsPanel : IDisposable
                 var placeholder = MakeRowPlaceholder(line, fontSize, textSide);
                 row.Placeholder = placeholder;
                 row.PlaceholderBrush = placeholder.Foreground as SolidColorBrush;
+                placeholder.SizeChanged += (_, _) =>
+                {
+                    if (row.PlaceholderScale > 0)
+                    {
+                        ApplyPlaceholderScale(placeholder, row.PlaceholderScale);
+                    }
+                };
                 row.Words.Children.Add(placeholder);
                 row.Rich = false;
             }
@@ -895,6 +906,13 @@ internal sealed class LyricsPanel : IDisposable
             {
                 row.BackgroundPlaceholder = background;
                 row.BackgroundPlaceholderBrush = background.Foreground as SolidColorBrush;
+                background.SizeChanged += (_, _) =>
+                {
+                    if (row.BackgroundPlaceholderScale > 0)
+                    {
+                        ApplyPlaceholderScale(background, row.BackgroundPlaceholderScale);
+                    }
+                };
                 row.Background.Children.Add(background);
                 row.Content.Children.Add(row.Background);
             }
@@ -1549,6 +1567,36 @@ internal sealed class LyricsPanel : IDisposable
         word.PaintedScale = rest.Scale;
         word.PaintedX = 0;
         word.PaintedY = y;
+    }
+
+    /// <summary>Keeps a far row's placeholder at the Expressive rest size without changing
+    /// its layout height, so promoting it to word-level text is only a change of detail.</summary>
+    private void SetPlaceholderRest(Row row, double scale)
+    {
+        if (row.Placeholder is { } placeholder
+            && Math.Abs(scale - row.PlaceholderScale) >= 0.001)
+        {
+            row.PlaceholderScale = scale;
+            ApplyPlaceholderScale(placeholder, scale);
+        }
+
+        if (row.BackgroundPlaceholder is { } background
+            && Math.Abs(scale - row.BackgroundPlaceholderScale) >= 0.001)
+        {
+            row.BackgroundPlaceholderScale = scale;
+            ApplyPlaceholderScale(background, scale);
+        }
+    }
+
+    private static void ApplyPlaceholderScale(FrameworkElement element, double scale)
+    {
+        var originX = element is TextBlock { TextAlignment: TextAlignment.Right } ? 1.0 : 0.0;
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        visual.CenterPoint = new Vector3(
+            (float)(element.ActualWidth * originX),
+            (float)(element.ActualHeight / 2),
+            0);
+        visual.Scale = new Vector3((float)scale, (float)scale, 1);
     }
 
     private void ResetFill(LinearGradientBrush fill)
@@ -2219,39 +2267,36 @@ internal sealed class LyricsPanel : IDisposable
 
             var isActive = singing && i == index;
             var distance = index >= 0 ? Math.Abs(i - index) : int.MaxValue;
-            if (expressive)
+            if (expressive && _motion && !row.Rich)
             {
-                // The line brightens with the fill front, not because it became the
-                // selected line: a word's own progress raises the whole line's opacity,
-                // and an untouched line stays at the idle level until its turn.
-                var progress = LineProgress(row, time);
-                var full = isActive || i > index ? 1 : ExpressiveSungLineOpacity;
-                row.Opacity = _idleFar + (full - _idleFar) * progress;
+                // A far line is a single static text block, but it must already sit at the
+                // same rest size as the word-level rows; otherwise it shrinks visibly when
+                // it comes close enough to materialize its words.
+                SetPlaceholderRest(row, time >= row.Line.Time ? 1 : LyricsMotion.WordRestScale);
             }
-            else
-            {
-                row.Opacity = sung
+
+            row.Opacity = expressive
+                ? isActive
+                    ? 1
+                    : index >= 0 && i <= index
+                        ? ExpressiveSungLineOpacity
+                        : _idleFar
+                : sung
                     ? 1
                     : distance <= 1
                         ? _idleNear
                         : _idleFar;
-            }
 
             // The rows step back with a fade alone: scaling them by a hair made a new line
             // snap when the fill took over the transform. While paused the fade would only
             // creep (there is no frame timer), so the row takes its target at once.
             var wordsTarget = row.Hovered ? 1 : row.Opacity;
-            if (expressive)
+            if (Math.Abs(row.Words.Opacity - wordsTarget) >= 0.001)
             {
-                // The line itself does not fade up over its duration: the only gradual
-                // opacity change is the fill's vertical front crossing each word. A
-                // line-wide approach made the unsung words brighten with the line clock.
-                row.Words.Opacity = wordsTarget;
-            }
-            else if (Math.Abs(row.Words.Opacity - wordsTarget) >= 0.001)
-            {
+                // Expressive lines take their idle-to-full step quickly when they become
+                // current; the slow change is the fill front, not a line-wide tween.
                 row.Words.Opacity = _playing
-                    ? Approach(row.Words.Opacity, wordsTarget, 0.18)
+                    ? Approach(row.Words.Opacity, wordsTarget, expressive ? 0.25 : 0.18)
                     : wordsTarget;
             }
 
@@ -2259,14 +2304,10 @@ internal sealed class LyricsPanel : IDisposable
             {
                 // Backing vocals step back with their line, at 70% of its weight.
                 var target = wordsTarget * 0.7;
-                if (expressive)
-                {
-                    row.Background.Opacity = target;
-                }
-                else if (Math.Abs(row.Background.Opacity - target) >= 0.001)
+                if (Math.Abs(row.Background.Opacity - target) >= 0.001)
                 {
                     row.Background.Opacity = _playing
-                        ? Approach(row.Background.Opacity, target, 0.18)
+                        ? Approach(row.Background.Opacity, target, expressive ? 0.25 : 0.18)
                         : target;
                 }
             }
@@ -2311,45 +2352,6 @@ internal sealed class LyricsPanel : IDisposable
     /// started keeps filling until its end, even after a later line has started.</summary>
     private static bool IsSung(Row row, double time) =>
         time >= row.Line.Time && time <= LineEnd(row) + 0.05;
-
-    /// <summary>How much of one word the fill front has crossed.</summary>
-    private static double WordProgress(LyricWord word, double time)
-    {
-        var duration = word.End - word.Start;
-        return duration <= 0
-            ? time >= word.End ? 1 : 0
-            : Math.Clamp((time - word.Start) / duration, 0, 1);
-    }
-
-    /// <summary>The filled fraction of a line, weighted by word width so the value follows
-    /// the visible front: a long word raises the line as slowly as it fills. A line whose
-    /// words are not materialized yet falls back to its own timing.</summary>
-    private static double LineProgress(Row row, double time)
-    {
-        if (row.WordItems.Count == 0)
-        {
-            var duration = LineEnd(row) - row.Line.Time;
-            return duration <= 0
-                ? time >= row.Line.Time ? 1 : 0
-                : Math.Clamp((time - row.Line.Time) / duration, 0, 1);
-        }
-
-        var total = 0.0;
-        var filled = 0.0;
-        foreach (var word in row.WordItems)
-        {
-            var weight = word.Element.ActualWidth;
-            if (weight < 1)
-            {
-                weight = Math.Max(1, word.Data.Text.Length);
-            }
-
-            total += weight;
-            filled += weight * WordProgress(word.Data, time);
-        }
-
-        return total <= 0 ? 0 : Math.Clamp(filled / total, 0, 1);
-    }
 
     /// <summary>Repaints every word after a seek, so lines ahead are unsung and the lines
     /// already behind are complete, instead of keeping the old line's partial fill.</summary>
