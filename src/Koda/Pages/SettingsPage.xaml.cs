@@ -153,6 +153,7 @@ public sealed partial class SettingsPage : Page
         LyricsGlowValue.Text = $"{settings.LyricsGlowIntensity:F1}×";
 
         WordMotionSwitch.IsOn = settings.LyricsMotion;
+        SpacingCompensationSwitch.IsOn = settings.LyricsCompensateSpacing;
         BackingVocalsBox.SelectedIndex = (int)settings.BackingVocals;
         AnimatedBackgroundSwitch.IsOn = settings.AnimatesPlayerBackground;
         KeepHistorySwitch.IsOn = settings.SavesListeningHistory;
@@ -893,6 +894,17 @@ public sealed partial class SettingsPage : Page
         App.Settings.Update(s =>
         {
             s.LyricsMotion = WordMotionSwitch.IsOn;
+            s.LyricsPreset = LyricsPreset.Custom;
+        });
+        ShowCustomPreset();
+    }
+
+    private void OnSpacingCompensationToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded) return;
+        App.Settings.Update(s =>
+        {
+            s.LyricsCompensateSpacing = SpacingCompensationSwitch.IsOn;
             s.LyricsPreset = LyricsPreset.Custom;
         });
         ShowCustomPreset();

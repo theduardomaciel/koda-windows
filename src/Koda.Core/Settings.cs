@@ -127,6 +127,10 @@ public sealed class Settings
     /// <summary>How the words light: the sweep, the heavier Expressive look, or classic lines.</summary>
     public LyricsRenderer LyricsRenderer { get; set; } = LyricsRenderer.Sweep;
 
+    /// <summary>Keep the visual gap between words proportional to their scale. Off, a
+    /// scaled word stays in its layout slot and never pushes its neighbours.</summary>
+    public bool LyricsCompensateSpacing { get; set; } = true;
+
     /// <summary>The height of a line, as a multiplier on the theme's 1.35.</summary>
     public double LyricsLineSpacing
     {

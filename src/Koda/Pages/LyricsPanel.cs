@@ -146,6 +146,7 @@ internal sealed class LyricsPanel : IDisposable
     private double _glowIntensity = 1;
     private bool _motion = true;
     private LyricsRenderer _renderer = LyricsRenderer.Sweep;
+    private bool _compensateSpacing = true;
     private string _glowTest = "";
     private bool _glowBlurFixed;
     private bool _glowTransformFixed;
@@ -688,6 +689,8 @@ internal sealed class LyricsPanel : IDisposable
         _motion = settings.LyricsMotion
             && Environment.GetEnvironmentVariable("KODA_LYRICS_MOTION_OFF") != "1";
         _renderer = settings.LyricsRenderer;
+        _compensateSpacing = settings.LyricsCompensateSpacing
+            && Environment.GetEnvironmentVariable("KODA_NP_NO_SPACING_COMP") != "1";
         UpdateScale();
     }
 
@@ -1141,7 +1144,7 @@ internal sealed class LyricsPanel : IDisposable
         // with the layout gaps still at full size.
         wrap.RefreshPlacements();
         row.Background.RefreshPlacements();
-        if (_renderer == LyricsRenderer.Expressive && _motion)
+        if (_renderer == LyricsRenderer.Expressive && _motion && _compensateSpacing)
         {
             CompensateSpacing(row.WordItems, wrap);
             CompensateSpacing(row.BackgroundItems, row.Background);
@@ -2419,7 +2422,7 @@ internal sealed class LyricsPanel : IDisposable
             }
         }
 
-        if (expressive && _motion)
+        if (expressive && _motion && _compensateSpacing)
         {
             foreach (var row in _rows)
             {
