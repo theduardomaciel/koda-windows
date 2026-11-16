@@ -1297,9 +1297,26 @@ internal sealed class LyricsPanel : IDisposable
             }
 
             var count = end - start + 1;
+
+            // Measure the whole group first. Every syllable must scale around the same
+            // absolute point, the centre of the complete word, or unequal pieces
+            // (call|ing, wa|ter) pull toward the seam and read as separate words.
+            var widths = new double[count];
+            var total = 0.0;
+            for (var index = start; index <= end; index++)
+            {
+                var element = words[index].Element;
+                element.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+                var margin = element.Margin;
+                widths[index - start] = Math.Max(1, element.DesiredSize.Width - margin.Left - margin.Right);
+                total += widths[index - start];
+            }
+
+            var offset = 0.0;
             for (var index = start; index <= end; index++)
             {
                 var word = words[index];
+                var width = widths[index - start];
                 word.PushX = count == 1
                     ? 0
                     : index == start
@@ -1307,17 +1324,13 @@ internal sealed class LyricsPanel : IDisposable
                         : index == end
                             ? LyricsMotion.WordSpread
                             : 0;
-                var originX = count == 1
-                    ? 0.5
-                    : index == start
-                        ? 1
-                        : index == end
-                            ? 0
-                            : 0.5;
+                var originX = (total / 2 - offset) / width;
                 word.OriginX = originX;
                 word.OriginY = 0.5;
-                word.Element.RenderTransformOrigin = new Windows.Foundation.Point(originX, 0.5);
+                word.Element.RenderTransformOrigin = new Windows.Foundation.Point(
+                    Math.Clamp(originX, 0, 1), 0.5);
                 ApplyCenter(word.Visual, word.Element, originX, 0.5);
+                offset += width;
             }
 
             start = end + 1;
