@@ -166,6 +166,9 @@ internal sealed class LyricsPanel : IDisposable
     private int _glowWindowIndex = -2;
     private long _glowHoldUntil;
     private int _activeRowIndex = -1;
+    private int _masksDisposed;
+    private int _masksDisposedSinceCollection;
+    private int _collectionsForced;
     private CubicBezierEasingFunction? _hoverEase;
     private ScalarKeyFrameAnimation? _hoverOpacityIn;
     private ScalarKeyFrameAnimation? _hoverOpacityOut;
@@ -634,6 +637,10 @@ internal sealed class LyricsPanel : IDisposable
         _frame.Stop();
         UserScrolled = false;
         ReleaseGlows();
+        // The previous song's masks were just disposed. Their native surfaces are freed
+        // when the brushes are collected, so collect once here instead of waiting for a
+        // managed heap this small to provoke a collection on its own.
+        CollectDisposedMasks(force: true);
         _repaintFrom = -1;
         _repaintTo = -1;
         _lines.Children.Clear();
@@ -1480,6 +1487,7 @@ internal sealed class LyricsPanel : IDisposable
         if (_glowHoldUntil != 0 && !GlowHeld)
         {
             _glowHoldUntil = 0;
+            CollectDisposedMasks();
         }
 
         var index = Lyrics.IndexOf(_position, _lyricLines) ?? -1;
@@ -2185,7 +2193,7 @@ internal sealed class LyricsPanel : IDisposable
 
     /// <summary>Disposes a letter's alpha mask. Only call this when the twin it came from
     /// is replaced at the same time.</summary>
-    private static void DisposeMask(Letter letter)
+    private void DisposeMask(Letter letter)
     {
         if (letter.Shadow is { } shadow)
         {
@@ -2194,7 +2202,14 @@ internal sealed class LyricsPanel : IDisposable
 
         var mask = letter.Mask;
         letter.Mask = null;
-        mask?.Dispose();
+        if (mask is null)
+        {
+            return;
+        }
+
+        mask.Dispose();
+        _masksDisposed++;
+        _masksDisposedSinceCollection++;
     }
 
     /// <summary>Swaps a letter's mask twin for a fresh element. GetAlphaMask may return the
@@ -2416,6 +2431,32 @@ internal sealed class LyricsPanel : IDisposable
         {
             _liveGlows.Add(letter);
         }
+    }
+
+    /// <summary>Native mask surfaces are released by dropping their references, not by
+    /// Dispose, so they wait for a collection that a heap this small rarely provokes. After
+    /// a seek's hold, or a song change, collect once on a background thread: the managed
+    /// heap is only a few megabytes, so the pause is short.</summary>
+    private void CollectDisposedMasks(bool force = false)
+    {
+        if (!force && _masksDisposedSinceCollection < 30)
+        {
+            return;
+        }
+
+        if (_masksDisposedSinceCollection == 0)
+        {
+            return;
+        }
+
+        _masksDisposedSinceCollection = 0;
+        _collectionsForced++;
+        _ = System.Threading.Tasks.Task.Run(() =>
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        });
     }
 
     /// <summary>Re-arms the glow window after a backward seek without disposing the
