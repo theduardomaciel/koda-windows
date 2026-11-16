@@ -69,6 +69,14 @@ internal sealed class WordWrapPanel : Panel
         _joins.Add(joinsPrevious);
     }
 
+    /// <summary>Empties the panel and its join flags together. A panel reused by the
+    /// virtualized lyric rows must not keep the previous line's joins at the same indices.</summary>
+    public void ClearWords()
+    {
+        Children.Clear();
+        _joins.Clear();
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var bounded = WrapWidth > 0 ? WrapWidth : availableSize.Width;

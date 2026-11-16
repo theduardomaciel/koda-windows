@@ -94,6 +94,13 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>How long after a line's end its springs may keep painting.</summary>
     private const double ExpressiveTailSeconds = 2.6;
 
+    /// <summary>How many lines around the one being sung keep their per-word text. Far
+    /// lines keep one plain text block, which looks the same while unsung but allocates no
+    /// text surface per word.</summary>
+    private const int RichRowsBefore = 2;
+    private const int RichRowsAfter = 4;
+    private const int RichRowsRelease = 3;
+
     /// <summary>How far the hover box reaches past the text, as a part of the text size.</summary>
     private const double HoverBoxPad = 0.35;
 
@@ -163,6 +170,8 @@ internal sealed class LyricsPanel : IDisposable
     private readonly HashSet<Letter> _glowWarmupSet = [];
     private readonly List<Letter> _liveGlows = [];
     private readonly HashSet<Letter> _liveGlowSet = [];
+    private readonly List<Word> _plainWordPool = [];
+    private readonly List<Word> _splitWordPool = [];
     private int _glowWindowIndex = -2;
     private long _glowHoldUntil;
     private int _activeRowIndex = -1;
@@ -183,6 +192,9 @@ internal sealed class LyricsPanel : IDisposable
     private double _offset;
     private bool _userScrolled;
     private bool _loaded;
+    private Lyrics? _pendingLyrics;
+    private bool _rowsBuilt;
+    private int _collectionRunning;
     private bool _visible;
     private bool _playing;
     private bool _needsGlide;
@@ -199,7 +211,7 @@ internal sealed class LyricsPanel : IDisposable
     /// A held syllable is drawn as a row of <see cref="Letter"/>s instead of one text block.</summary>
     private sealed class Word
     {
-        public required LyricWord Data { get; init; }
+        public LyricWord Data { get; set; }
         public required FrameworkElement Element { get; init; }
         /// <summary>The word's own text block, or null when it is split into letters.</summary>
         public TextBlock? Text { get; init; }
@@ -207,11 +219,21 @@ internal sealed class LyricsPanel : IDisposable
         public LinearGradientBrush? Fill { get; init; }
         /// <summary>The bounce of the word.</summary>
         public required CompositeTransform Transform { get; init; }
+        /// <summary>The composition visual the bounce is written to. Animating a
+        /// composition transform keeps the text surface from being re-rasterized on
+        /// every frame, which is what the old per-frame XAML RenderTransform did.</summary>
+        public Visual? Visual { get; set; }
+        /// <summary>The point the word scales around, as fractions of its size.</summary>
+        public double OriginX { get; set; } = 0.5;
+        public double OriginY { get; set; } = 0.5;
         /// <summary>The letters of a held syllable; empty for an ordinary word.</summary>
         public List<Letter> Letters { get; } = [];
+        /// <summary>How many of <see cref="Letters"/> belong to the current word; the pool
+        /// may keep extra hidden letters ready for a longer held syllable.</summary>
+        public int LetterCount { get; set; }
         /// <summary>Whether this is a syllable of the word before it: the two may not be
         /// split by a line break.</summary>
-        public bool JoinsPrevious { get; init; }
+        public bool JoinsPrevious { get; set; }
         /// <summary>The size the word is drawn at, for converting em units to pixels.</summary>
         public double FontSize { get; set; }
         /// <summary>How far the syllable pushes outward at its seam, in ems.</summary>
@@ -248,6 +270,11 @@ internal sealed class LyricsPanel : IDisposable
         public bool MaskSoft { get; set; }
         public required LinearGradientBrush Fill { get; init; }
         public required CompositeTransform Transform { get; init; }
+        /// <summary>The sharp letter's composition visual, for the wave.</summary>
+        public Visual? Visual { get; set; }
+        /// <summary>The glow layer's composition visual, moved with the letter unless a
+        /// test mode keeps the glow still.</summary>
+        public Visual? GlowHostVisual { get; set; }
         /// <summary>The empty layer behind the sharp letter that hosts the DropShadow sprite.</summary>
         public Grid? GlowHost { get; init; }
         /// <summary>The wave transform mirrored onto the glow host.</summary>
@@ -259,8 +286,8 @@ internal sealed class LyricsPanel : IDisposable
         public bool NeedsMaskRefresh { get; set; }
         public bool GlowWanted { get; set; }
         public int RowIndex { get; set; }
-        public int Index { get; init; }
-        public int Count { get; init; }
+        public int Index { get; set; }
+        public int Count { get; set; }
         public double PaintedLit { get; set; } = double.NaN;
         public bool PaintedHovered { get; set; }
         public bool PaintedActive { get; set; }
@@ -282,12 +309,26 @@ internal sealed class LyricsPanel : IDisposable
     private sealed class Row
     {
         public required LyricLine Line { get; init; }
+        /// <summary>The line's place in the song, for its letters' glow window.</summary>
+        public int Index { get; init; }
         /// <summary>The element that holds the line, for finding its place in the panel.</summary>
         public FrameworkElement Host { get; set; } = null!;
+        /// <summary>The stack that holds the words and backing vocals.</summary>
+        public StackPanel Content { get; set; } = null!;
         public required Panel Words { get; init; }
         public required WordWrapPanel Background { get; init; }
         public List<Word> WordItems { get; } = [];
         public List<Word> BackgroundItems { get; } = [];
+        /// <summary>Whether the line has its word-level text (or is a cheap one-block line).</summary>
+        public bool Rich { get; set; }
+        /// <summary>The one-block stand-in a far line keeps while its words are released.</summary>
+        public TextBlock? Placeholder { get; set; }
+        public SolidColorBrush? PlaceholderBrush { get; set; }
+        /// <summary>The one-block stand-in for backing vocals on far lines.</summary>
+        public TextBlock? BackgroundPlaceholder { get; set; }
+        public SolidColorBrush? BackgroundPlaceholderBrush { get; set; }
+        /// <summary>The height the rich content had, so collapsing does not move the scroll.</summary>
+        public double CachedHeight { get; set; }
         /// <summary>The three dots of the gap that follows this line, when the gap is long.</summary>
         public List<Ellipse> Dots { get; } = [];
         /// <summary>The dots' container; always in the flow, faint when its gap is not playing.</summary>
@@ -536,6 +577,9 @@ internal sealed class LyricsPanel : IDisposable
         UserScrolled = false;
         if (_current is not null)
         {
+            // The listener may have scrolled far from the active line while the rich
+            // window stayed behind; materialize the lines around the song again.
+            EnsureRichWindow(Lyrics.IndexOf(_position, _lyricLines) ?? 0);
             GlideTo(_current);
         }
     }
@@ -650,6 +694,7 @@ internal sealed class LyricsPanel : IDisposable
         _frame.Stop();
         UserScrolled = false;
         ReleaseGlows();
+        ReturnAllRowWords();
         // The previous song's masks were just disposed. Their native surfaces are freed
         // when the brushes are collected, so collect once here instead of waiting for a
         // managed heap this small to provoke a collection on its own.
@@ -662,12 +707,47 @@ internal sealed class LyricsPanel : IDisposable
         _leadingDots = null;
         _leadingDotItems = [];
         _current = null;
+        _rowsBuilt = false;
         _loaded = lyrics is { IsSynced: true };
+        _pendingLyrics = lyrics;
 
         if (lyrics is null)
         {
             return;
         }
+
+        if (lyrics.IsSynced)
+        {
+            _lyricLines.AddRange(lyrics.Lines);
+        }
+
+        // A closed lyrics panel keeps the timings (the current line and the timing menu
+        // still read them) but does not build the song's text. A skip while the panel is
+        // closed must not allocate hundreds of native text surfaces it will never show.
+        if (!_visible)
+        {
+            return;
+        }
+
+        BuildRows();
+    }
+
+    /// <summary>Builds the row hosts and the initial word-level window for the stored
+    /// lyrics. Only the lines near the one being sung materialize their words and glow
+    /// layers; the rest keep one plain text block placeholder.</summary>
+    private void BuildRows()
+    {
+        if (_pendingLyrics is not { } lyrics)
+        {
+            return;
+        }
+
+        _lines.Children.Clear();
+        _rows.Clear();
+        _leadingDots = null;
+        _leadingDotItems = [];
+        _tween.Stop();
+        _needsGlide = false;
 
         // The room above the first line: the first words can sit at the reading position,
         // clear of the fade at the top of the panel.
@@ -685,8 +765,15 @@ internal sealed class LyricsPanel : IDisposable
             };
             Shape(plain, size);
             _lines.Children.Add(plain);
+            _rowsBuilt = true;
             UpdateSpacers();
             return;
+        }
+
+        if (_lyricLines.Count != lyrics.Lines.Count)
+        {
+            _lyricLines.Clear();
+            _lyricLines.AddRange(lyrics.Lines);
         }
 
         // A long wait before the first line gets its dots too.
@@ -717,6 +804,7 @@ internal sealed class LyricsPanel : IDisposable
             var row = new Row
             {
                 Line = line,
+                Index = index,
                 Words = line.Words.Count == 0
                     ? new StackPanel()
                     : new WordWrapPanel
@@ -736,6 +824,7 @@ internal sealed class LyricsPanel : IDisposable
 
             var halfGap = _lineGap / 2;
             var content = new StackPanel { Spacing = 6 };
+            row.Content = content;
             var host = new Grid
             {
                 Margin = new Thickness(0, halfGap, 0, halfGap),
@@ -746,7 +835,7 @@ internal sealed class LyricsPanel : IDisposable
             host.HorizontalAlignment = side;
             row.Words.HorizontalAlignment = side;
             row.Background.HorizontalAlignment = side;
-            var textSide = side == HorizontalAlignment.Right ? TextAlignment.Right : TextAlignment.Left;
+            var textSide = rightAligned ? TextAlignment.Right : TextAlignment.Left;
 
             if (line.Words.Count > 0)
             {
@@ -774,9 +863,8 @@ internal sealed class LyricsPanel : IDisposable
 
             if (line.Words.Count == 0)
             {
-                // Line-timed lyrics: there are no words to fill, so the line is set as text
-                // and lights as a whole when the song reaches it. Without this the row was
-                // empty, which is how a song could show nothing but the interlude dots.
+                // Line-timed lyrics: one text block per line is cheap, and it lights as a
+                // whole when the song reaches it.
                 var lineText = new TextBlock
                 {
                     Text = line.Text.Length == 0 ? "♪" : line.Text,
@@ -786,74 +874,30 @@ internal sealed class LyricsPanel : IDisposable
                 };
                 Shape(lineText, fontSize);
                 row.Words.Children.Add(lineText);
+                row.Rich = true;
             }
             else
             {
-                var wrap = (WordWrapPanel)row.Words;
-                for (var wordIndex = 0; wordIndex < line.Words.Count; wordIndex++)
-                {
-                    var item = MakeWord(
-                        line.Words[wordIndex],
-                        fontSize,
-                        joinsPrevious: JoinsPrevious(line, wordIndex));
-                    row.WordItems.Add(item);
-                    wrap.Add(item.Element, item.JoinsPrevious);
-                }
-
-                // A word split into syllables bounces from its inner seam rather than its
-                // centre, so the pieces stay attached while the word bounces.
-                ShapeSyllables(row.WordItems);
-            }
-
-            foreach (var word in line.Background)
-            {
-                if (_backingMode == BackingVocalsMode.Hidden)
-                {
-                    break; // the listener turned the backing vocals off
-                }
-
-                var text = word.Text;
-                if (_backingMode == BackingVocalsMode.WithoutParentheses)
-                {
-                    text = text.Replace("(", string.Empty).Replace(")", string.Empty).Trim();
-                    if (text.Length == 0)
-                    {
-                        continue; // a bracket on its own is not a word
-                    }
-                }
-
-                // Backing vocals are drawn at 70% of the sung line, a little lighter.
-                var spoken = text == word.Text ? word : word with { Text = text };
-                var item = MakeWord(spoken, fontSize * 0.7, soft: true);
-                row.BackgroundItems.Add(item);
-                row.Background.Add(item.Element, joinsPrevious: false);
-            }
-
-            if (row.BackgroundItems.Count > 0)
-            {
-                ShapeSyllables(row.BackgroundItems);
-                content.Children.Add(row.Background);
-            }
-
-            foreach (var word in row.WordItems)
-            {
-                foreach (var letter in word.Letters)
-                {
-                    letter.RowIndex = index;
-                }
-            }
-
-            foreach (var word in row.BackgroundItems)
-            {
-                foreach (var letter in word.Letters)
-                {
-                    letter.RowIndex = index;
-                }
+                // The stand-in is the line in the same type, dimmed like unsung words. It
+                // keeps the row's place and stays readable without a text surface per word.
+                var placeholder = MakeRowPlaceholder(line, fontSize, textSide);
+                row.Placeholder = placeholder;
+                row.PlaceholderBrush = placeholder.Foreground as SolidColorBrush;
+                row.Words.Children.Add(placeholder);
+                row.Rich = false;
             }
 
             _lines.Children.Add(host);
             _rows.Add(row);
-            _lyricLines.Add(line);
+
+            var background = MakeBackgroundPlaceholder(line, fontSize, textSide);
+            if (background is not null)
+            {
+                row.BackgroundPlaceholder = background;
+                row.BackgroundPlaceholderBrush = background.Foreground as SolidColorBrush;
+                row.Background.Children.Add(background);
+                row.Content.Children.Add(row.Background);
+            }
 
             // A long silence after this line shows three dots that fill until the next one.
             // The gap runs from the line's end, as the Mac measures it: measuring from the
@@ -883,9 +927,271 @@ internal sealed class LyricsPanel : IDisposable
         // A song opened part way through needs its earlier lines painted as complete and
         // its later lines left unsung, not everything starting grey.
         _needsFullPaint = true;
-
+        _rowsBuilt = true;
         ApplyTextWidth();
         UpdateSpacers();
+
+        var start = _lyricLines.Count > 0
+            ? (Lyrics.IndexOf(_position, _lyricLines) ?? 0)
+            : 0;
+        start = Math.Clamp(start, 0, Math.Max(0, _rows.Count - 1));
+        EnsureRichWindow(start);
+    }
+
+    private TextBlock MakeRowPlaceholder(LyricLine line, double fontSize, TextAlignment textSide)
+    {
+        var brush = new SolidColorBrush(
+            _renderer == LyricsRenderer.Expressive ? ExpressiveUnsung : UnsungColor);
+        var placeholder = new TextBlock
+        {
+            Text = line.Text.Length == 0 ? "♪" : line.Text,
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = textSide,
+            Foreground = brush,
+        };
+        Shape(placeholder, fontSize);
+        return placeholder;
+    }
+
+    private TextBlock? MakeBackgroundPlaceholder(LyricLine line, double fontSize, TextAlignment textSide)
+    {
+        if (_backingMode == BackingVocalsMode.Hidden || line.Background.Count == 0)
+        {
+            return null;
+        }
+
+        var parts = new List<string>();
+        foreach (var word in line.Background)
+        {
+            var text = word.Text;
+            if (_backingMode == BackingVocalsMode.WithoutParentheses)
+            {
+                text = text.Replace("(", string.Empty).Replace(")", string.Empty).Trim();
+                if (text.Length == 0)
+                {
+                    continue;
+                }
+            }
+
+            parts.Add(text);
+        }
+
+        if (parts.Count == 0)
+        {
+            return null;
+        }
+
+        var brush = new SolidColorBrush(
+            _renderer == LyricsRenderer.Expressive ? ExpressiveUnsung : UnsungColor);
+        var placeholder = new TextBlock
+        {
+            Text = string.Join(" ", parts),
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = textSide,
+            Foreground = brush,
+        };
+        Shape(placeholder, fontSize * 0.7, soft: true);
+        return placeholder;
+    }
+
+    /// <summary>Materializes one word-level line: its words, gradient fills and glow
+    /// layers. The line is built only while it is near the line being sung.</summary>
+    private void BuildRichRow(Row row)
+    {
+        if (row.Rich || row.Line.Words.Count == 0)
+        {
+            return;
+        }
+
+        if (row.Words is not WordWrapPanel wrap)
+        {
+            row.Rich = true;
+            return;
+        }
+
+        if (row.Placeholder is { } placeholder)
+        {
+            row.Words.Children.Remove(placeholder);
+        }
+
+        wrap.ClearWords();
+        row.Background.ClearWords();
+        row.WordItems.Clear();
+        row.BackgroundItems.Clear();
+
+        var line = row.Line;
+        var fontSize = _fontSize;
+        for (var wordIndex = 0; wordIndex < line.Words.Count; wordIndex++)
+        {
+            var item = TakeWord(
+                line.Words[wordIndex],
+                fontSize,
+                soft: false,
+                joinsPrevious: JoinsPrevious(line, wordIndex));
+            row.WordItems.Add(item);
+            wrap.Add(item.Element, item.JoinsPrevious);
+        }
+
+        // A word split into syllables bounces from its inner seam rather than its centre,
+        // so the pieces stay attached while the word bounces.
+        ShapeSyllables(row.WordItems);
+
+        foreach (var word in line.Background)
+        {
+            if (_backingMode == BackingVocalsMode.Hidden)
+            {
+                break; // the listener turned the backing vocals off
+            }
+
+            var text = word.Text;
+            if (_backingMode == BackingVocalsMode.WithoutParentheses)
+            {
+                text = text.Replace("(", string.Empty).Replace(")", string.Empty).Trim();
+                if (text.Length == 0)
+                {
+                    continue; // a bracket on its own is not a word
+                }
+            }
+
+            // Backing vocals are drawn at 70% of the sung line, a little lighter.
+            var spoken = text == word.Text ? word : word with { Text = text };
+            var item = TakeWord(spoken, fontSize * 0.7, soft: true, joinsPrevious: false);
+            row.BackgroundItems.Add(item);
+            row.Background.Add(item.Element, joinsPrevious: false);
+        }
+
+        row.Content.Children.Remove(row.Background);
+        if (row.BackgroundItems.Count > 0)
+        {
+            ShapeSyllables(row.BackgroundItems);
+            row.Content.Children.Add(row.Background);
+        }
+
+        foreach (var word in row.WordItems)
+        {
+            foreach (var letter in word.Letters)
+            {
+                letter.RowIndex = row.Index;
+            }
+        }
+
+        foreach (var word in row.BackgroundItems)
+        {
+            foreach (var letter in word.Letters)
+            {
+                letter.RowIndex = row.Index;
+            }
+        }
+
+        row.Rich = true;
+        row.CachedHeight = 0;
+    }
+
+    /// <summary>Releases a far line's word-level text surfaces and leaves the one-block
+    /// placeholder at the height the rich row had, so the scroll does not jump.</summary>
+    private void CollapseRichRow(Row row)
+    {
+        if (!row.Rich || row.Line.Words.Count == 0 || row.Hovered)
+        {
+            return;
+        }
+
+        var height = row.Words.ActualHeight;
+        if (height > 0)
+        {
+            row.CachedHeight = height;
+        }
+
+        ReturnRowWords(row);
+        if (row.Words is WordWrapPanel wrap)
+        {
+            wrap.ClearWords();
+        }
+        else
+        {
+            row.Words.Children.Clear();
+        }
+        row.Background.ClearWords();
+        row.Content.Children.Remove(row.Background);
+        row.WordItems.Clear();
+        row.BackgroundItems.Clear();
+
+        if (row.Placeholder is { } placeholder)
+        {
+            if (row.CachedHeight > 0)
+            {
+                placeholder.Height = row.CachedHeight;
+            }
+            else
+            {
+                placeholder.ClearValue(FrameworkElement.HeightProperty);
+            }
+
+            row.Words.Children.Add(placeholder);
+        }
+
+        if (row.BackgroundPlaceholder is { } background)
+        {
+            row.Background.Children.Add(background);
+            row.Content.Children.Add(row.Background);
+        }
+
+        row.Rich = false;
+    }
+
+    private void ReleaseWordGlows(Word word)
+    {
+        foreach (var letter in word.Letters)
+        {
+            letter.GlowWanted = false;
+            _glowWarmupSet.Remove(letter);
+            ReleaseGlow(letter);
+            letter.GlowDone = false;
+            _liveGlowSet.Remove(letter);
+            _liveGlows.Remove(letter);
+        }
+    }
+
+    /// <summary>Keeps only the lines around the one being sung at word-level detail. The
+    /// rest are one plain text block, which looks the same while unsung and costs a
+    /// fraction of the native text surfaces.</summary>
+    private void EnsureRichWindow(int index)
+    {
+        if (!_rowsBuilt || _rows.Count == 0 || _userScrolled)
+        {
+            return;
+        }
+
+        if (index < 0)
+        {
+            index = 0;
+        }
+        else if (index >= _rows.Count)
+        {
+            index = _rows.Count - 1;
+        }
+
+        var from = Math.Max(0, index - RichRowsBefore);
+        var to = Math.Min(_rows.Count - 1, index + RichRowsAfter);
+
+        // Release the old window first: its word elements go straight back to the pool
+        // for the incoming lines instead of making a new set every line.
+        var releaseFrom = Math.Max(0, index - RichRowsBefore - RichRowsRelease);
+        var releaseTo = Math.Min(_rows.Count - 1, index + RichRowsAfter + RichRowsRelease);
+        for (var i = 0; i < releaseFrom; i++)
+        {
+            CollapseRichRow(_rows[i]);
+        }
+
+        for (var i = releaseTo + 1; i < _rows.Count; i++)
+        {
+            CollapseRichRow(_rows[i]);
+        }
+
+        for (var i = from; i <= to; i++)
+        {
+            BuildRichRow(_rows[i]);
+        }
     }
 
     /// <summary>Which side of the panel a line belongs to. A duet's second singer sits on
@@ -956,13 +1262,16 @@ internal sealed class LyricsPanel : IDisposable
                         : index == end
                             ? LyricsMotion.WordSpread
                             : 0;
-                word.Element.RenderTransformOrigin = count == 1
-                    ? new Windows.Foundation.Point(0.5, 0.5)
+                var originX = count == 1
+                    ? 0.5
                     : index == start
-                        ? new Windows.Foundation.Point(1, 0.5)
+                        ? 1
                         : index == end
-                            ? new Windows.Foundation.Point(0, 0.5)
-                            : new Windows.Foundation.Point(0.5, 0.5);
+                            ? 0
+                            : 0.5;
+                word.OriginX = originX;
+                word.OriginY = 0.5;
+                word.Element.RenderTransformOrigin = new Windows.Foundation.Point(originX, 0.5);
             }
 
             start = end + 1;
@@ -1013,75 +1322,273 @@ internal sealed class LyricsPanel : IDisposable
         }
     }
 
-    /// <summary>One word: its element, the mask it fills through, and its rise. A held
-    /// syllable in the Expressive look is drawn as a row of letters so each can wave.</summary>
-    private Word MakeWord(LyricWord word, double fontSize, bool soft = false, bool joinsPrevious = false)
+    /// <summary>Takes a word-level element from the pool and points it at the new line's
+    /// word. Reusing the TextBlocks is what stops one new native text surface per line.</summary>
+    private Word TakeWord(LyricWord data, double fontSize, bool soft, bool joinsPrevious)
     {
-        var transform = new CompositeTransform();
-        var pieces = _renderer == LyricsRenderer.Expressive && _motion && LyricsMotion.IsHeldSyllable(word)
-            ? LyricsMotion.WaveLetters(word.Text)
+        var pieces = _renderer == LyricsRenderer.Expressive && _motion && LyricsMotion.IsHeldSyllable(data)
+            ? LyricsMotion.WaveLetters(data.Text)
             : null;
-
         if (pieces is { Count: > 0 })
         {
-            var panel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Margin = new Thickness(0, 0, word.SpaceAfter ? fontSize * WordSpacing : 0, 0),
-                RenderTransform = transform,
-                RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
-            };
-
-            var letters = new List<Letter>(pieces.Count);
-            for (var index = 0; index < pieces.Count; index++)
-            {
-                var letter = MakeLetter(pieces[index], fontSize, soft, index, pieces.Count);
-                letters.Add(letter);
-                panel.Children.Add(letter.Element);
-            }
-
-            panel.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-
-            var split = new Word
-            {
-                Data = word,
-                Element = panel,
-                Text = null,
-                Fill = null,
-                Transform = transform,
-                JoinsPrevious = joinsPrevious,
-                FontSize = fontSize,
-            };
-            split.Letters.AddRange(letters);
-            return split;
+            return TakeSplitWord(data, fontSize, soft, joinsPrevious, pieces);
         }
 
-        var fill = NewFill();
-        var element = new TextBlock
+        return TakePlainWord(data, fontSize, soft, joinsPrevious);
+    }
+
+    private Word TakePlainWord(LyricWord data, double fontSize, bool soft, bool joinsPrevious)
+    {
+        Word? word = null;
+        if (_plainWordPool.Count > 0)
         {
-            // The space between words is a margin, not a space in the text: a trailing
-            // space in a text block does not draw, and two syllables of one word must
-            // sit together.
-            Text = word.Text,
-            Margin = new Thickness(0, 0, word.SpaceAfter ? fontSize * WordSpacing : 0, 0),
-            Foreground = fill,
+            var last = _plainWordPool.Count - 1;
+            word = _plainWordPool[last];
+            _plainWordPool.RemoveAt(last);
+        }
+
+        if (word is null)
+        {
+            var fill = NewFill();
+            var transform = new CompositeTransform();
+            var text = new TextBlock
+            {
+                Foreground = fill,
+                RenderTransform = transform,
+                TextWrapping = TextWrapping.NoWrap,
+            };
+            ElementCompositionPreview.SetIsTranslationEnabled(text, true);
+            word = new Word
+            {
+                Data = data,
+                Element = text,
+                Text = text,
+                Fill = fill,
+                Transform = transform,
+                Visual = ElementCompositionPreview.GetElementVisual(text),
+                FontSize = fontSize,
+                JoinsPrevious = joinsPrevious,
+            };
+        }
+
+        word.Data = data;
+        word.FontSize = fontSize;
+        word.JoinsPrevious = joinsPrevious;
+        word.LetterCount = 0;
+        word.Element.Visibility = Visibility.Visible;
+        word.Element.Margin = new Thickness(0, 0, data.SpaceAfter ? fontSize * WordSpacing : 0, 0);
+        var block = word.Text!;
+        block.Text = data.Text;
+        block.Visibility = Visibility.Visible;
+        Shape(block, fontSize, soft);
+        ResetWordMotion(word);
+        ResetFill(word.Fill!);
+        return word;
+    }
+
+    private Word TakeSplitWord(
+        LyricWord data,
+        double fontSize,
+        bool soft,
+        bool joinsPrevious,
+        IReadOnlyList<string> pieces)
+    {
+        Word? word = null;
+        for (var i = 0; i < _splitWordPool.Count; i++)
+        {
+            var candidate = _splitWordPool[i];
+            if (candidate.Letters.Count >= pieces.Count)
+            {
+                word = candidate;
+                _splitWordPool.RemoveAt(i);
+                break;
+            }
+        }
+
+        word ??= CreateSplitWord(data, pieces.Count, fontSize, soft, joinsPrevious);
+
+        word.Data = data;
+        word.FontSize = fontSize;
+        word.JoinsPrevious = joinsPrevious;
+        word.LetterCount = pieces.Count;
+        word.Element.Visibility = Visibility.Visible;
+        var panel = (StackPanel)word.Element;
+        panel.Margin = new Thickness(0, 0, data.SpaceAfter ? fontSize * WordSpacing : 0, 0);
+
+        for (var i = 0; i < word.Letters.Count; i++)
+        {
+            var letter = word.Letters[i];
+            if (i >= pieces.Count)
+            {
+                letter.Element.Visibility = Visibility.Collapsed;
+                continue;
+            }
+
+            ConfigureLetter(letter, pieces[i], fontSize, soft, i, pieces.Count);
+        }
+
+        ResetWordMotion(word);
+        return word;
+    }
+
+    private Word CreateSplitWord(
+        LyricWord data,
+        int count,
+        double fontSize,
+        bool soft,
+        bool joinsPrevious)
+    {
+        var transform = new CompositeTransform();
+        var panel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
             RenderTransform = transform,
-            TextWrapping = TextWrapping.NoWrap,
+            RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
         };
-        Shape(element, fontSize, soft);
-
-        element.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-
-        return new Word
+        ElementCompositionPreview.SetIsTranslationEnabled(panel, true);
+        var word = new Word
         {
-            Data = word,
-            Element = element,
-            Text = element,
-            Fill = fill,
+            Data = data,
+            Element = panel,
+            Text = null,
+            Fill = null,
             Transform = transform,
-            JoinsPrevious = joinsPrevious,
+            Visual = ElementCompositionPreview.GetElementVisual(panel),
             FontSize = fontSize,
+            JoinsPrevious = joinsPrevious,
+            LetterCount = count,
         };
+        for (var index = 0; index < count; index++)
+        {
+            var letter = MakeLetter(string.Empty, fontSize, soft, index, count);
+            word.Letters.Add(letter);
+            panel.Children.Add(letter.Element);
+        }
+
+        return word;
+    }
+
+    private void ConfigureLetter(Letter letter, string text, double fontSize, bool soft, int index, int count)
+    {
+        letter.Element.Visibility = Visibility.Visible;
+        letter.Text.Text = text;
+        Shape(letter.Text, fontSize, soft);
+        if (letter.MaskText is { } twin)
+        {
+            twin.Text = text;
+            Shape(twin, fontSize, soft);
+            letter.MaskFontSize = fontSize;
+            letter.MaskSoft = soft;
+        }
+
+        letter.Index = index;
+        letter.Count = count;
+        letter.Transform.ScaleX = 1;
+        letter.Transform.ScaleY = 1;
+        letter.Transform.TranslateX = 0;
+        letter.Transform.TranslateY = 0;
+        if (letter.GlowTransform is { } glowTransform)
+        {
+            glowTransform.ScaleX = 1;
+            glowTransform.ScaleY = 1;
+            glowTransform.TranslateX = 0;
+            glowTransform.TranslateY = 0;
+        }
+
+        ApplyScale(letter.Visual, letter.Text, 1, 0.5, 0.5);
+        ApplyTranslation(letter.Visual, 0, 0);
+        ApplyScale(letter.GlowHostVisual, letter.GlowHost, 1, 0.5, 0.5);
+        ApplyTranslation(letter.GlowHostVisual, 0, 0);
+
+        letter.PaintedLit = double.NaN;
+        letter.PaintedHovered = false;
+        letter.PaintedActive = false;
+        letter.PaintedScale = -1;
+        letter.PaintedX = double.NaN;
+        letter.PaintedY = double.NaN;
+        letter.PaintedGlow = -1;
+        letter.PaintedBlur = -1;
+        letter.GlowShown = false;
+        letter.GlowDone = false;
+        letter.GlowIdleSince = -1;
+        letter.GlowWanted = false;
+        letter.NeedsMaskRefresh = true;
+        ResetFill(letter.Fill);
+    }
+
+    private void ResetWordMotion(Word word)
+    {
+        word.Transform.ScaleX = 1;
+        word.Transform.ScaleY = 1;
+        word.Transform.TranslateX = 0;
+        word.Transform.TranslateY = 0;
+        ApplyScale(word.Visual, word.Element, 1, word.OriginX, word.OriginY);
+        ApplyTranslation(word.Visual, 0, 0);
+        word.PushX = 0;
+        word.PaintedFill = -1;
+        word.PaintedLit = double.NaN;
+        word.PaintedHovered = false;
+        word.PaintedActive = false;
+        word.PaintedRise = -1;
+        word.PaintedSwell = -1;
+        word.PaintedScale = -1;
+        word.PaintedX = double.NaN;
+        word.PaintedY = double.NaN;
+    }
+
+    private void ResetFill(LinearGradientBrush fill)
+    {
+        var unsung = _renderer == LyricsRenderer.Expressive ? ExpressiveUnsung : UnsungColor;
+        var stops = fill.GradientStops;
+        stops[0].Color = unsung;
+        stops[1].Color = unsung;
+        stops[2].Color = unsung;
+        stops[1].Offset = 0;
+        stops[2].Offset = 0.0001;
+    }
+
+    private void ReturnWordToPool(Word word)
+    {
+        ReleaseWordGlows(word);
+        if (word.Element.Parent is Panel parent)
+        {
+            parent.Children.Remove(word.Element);
+        }
+
+        word.Element.Visibility = Visibility.Collapsed;
+        if (word.Text is null)
+        {
+            _splitWordPool.Add(word);
+        }
+        else
+        {
+            _plainWordPool.Add(word);
+        }
+    }
+
+    private void ReturnRowWords(Row row)
+    {
+        foreach (var word in row.WordItems)
+        {
+            ReturnWordToPool(word);
+        }
+
+        foreach (var word in row.BackgroundItems)
+        {
+            ReturnWordToPool(word);
+        }
+
+        _glowWarmup.Clear();
+        _glowWarmupSet.Clear();
+        _glowWindowIndex = -2;
+    }
+
+    private void ReturnAllRowWords()
+    {
+        foreach (var row in _rows)
+        {
+            ReturnRowWords(row);
+        }
     }
 
     /// <summary>One letter of a held syllable. An empty layer behind the letter hosts a
@@ -1099,6 +1606,7 @@ internal sealed class LyricsPanel : IDisposable
             TextWrapping = TextWrapping.NoWrap,
         };
         Shape(textBlock, fontSize, soft);
+        ElementCompositionPreview.SetIsTranslationEnabled(textBlock, true);
 
         var host = new Grid();
         Grid? glowHost = null;
@@ -1120,6 +1628,7 @@ internal sealed class LyricsPanel : IDisposable
                 RenderTransform = glowTransform,
                 RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
             };
+            ElementCompositionPreview.SetIsTranslationEnabled(glowHost, true);
             host.Children.Add(glowHost);
 
             if (_glowStaticMask)
@@ -1145,6 +1654,10 @@ internal sealed class LyricsPanel : IDisposable
             MaskSoft = soft,
             Fill = fill,
             Transform = transform,
+            Visual = ElementCompositionPreview.GetElementVisual(textBlock),
+            GlowHostVisual = glowHost is null
+                ? null
+                : ElementCompositionPreview.GetElementVisual(glowHost),
             GlowHost = glowHost,
             GlowTransform = glowTransform,
             Index = index,
@@ -1272,6 +1785,20 @@ internal sealed class LyricsPanel : IDisposable
                 ReshapeWord(word, _fontSize * 0.7, soft: true);
             }
 
+            if (row.Placeholder is { } placeholder)
+            {
+                Shape(placeholder, _fontSize);
+                placeholder.MaxWidth = lineWidth;
+                placeholder.ClearValue(FrameworkElement.HeightProperty);
+                row.CachedHeight = 0;
+            }
+
+            if (row.BackgroundPlaceholder is { } background)
+            {
+                Shape(background, _fontSize * 0.7, soft: true);
+                background.MaxWidth = lineWidth;
+            }
+
             if (row.WordItems.Count == 0)
             {
                 foreach (var text in row.Words.Children.OfType<TextBlock>())
@@ -1333,6 +1860,13 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         row.Hovered = on;
+        if (on && !row.Rich && row.Line.Words.Count > 0)
+        {
+            // A hovered line needs its per-word fills; build it even if it is outside
+            // the current reading window.
+            BuildRichRow(row);
+        }
+
         var visual = ElementCompositionPreview.GetElementVisual(box);
         EnsureHoverAnimations(visual.Compositor);
 
@@ -1399,6 +1933,18 @@ internal sealed class LyricsPanel : IDisposable
                 }
             }
 
+            if (row.Placeholder is { } placeholder)
+            {
+                placeholder.MaxWidth = contentWidth;
+                placeholder.ClearValue(FrameworkElement.HeightProperty);
+                row.CachedHeight = 0;
+            }
+
+            if (row.BackgroundPlaceholder is { } background)
+            {
+                background.MaxWidth = contentWidth;
+            }
+
             row.Background.WrapWidth = contentWidth;
         }
     }
@@ -1416,6 +1962,11 @@ internal sealed class LyricsPanel : IDisposable
     {
         _visible = true;
         UserScrolled = false;
+        if (!_rowsBuilt)
+        {
+            BuildRows();
+        }
+
         UpdateFrame();
 
         // The rows were just filled: let the panel measure them before placing the line.
@@ -1459,11 +2010,36 @@ internal sealed class LyricsPanel : IDisposable
         storyboard.Begin();
     }
 
-    /// <summary>The panel is closed: it stops reading the song.</summary>
+    /// <summary>The panel is closed: it stops reading the song and releases the text
+    /// surfaces it was showing. The lyrics themselves stay for when it opens again.</summary>
     public void Pause()
     {
         _visible = false;
+        ReleaseRowsForClosedPanel();
         UpdateFrame();
+    }
+
+    private void ReleaseRowsForClosedPanel()
+    {
+        if (!_rowsBuilt && _rows.Count == 0)
+        {
+            return;
+        }
+
+        _tween.Stop();
+        _needsGlide = false;
+        ReleaseGlows();
+        ReturnAllRowWords();
+        CollectDisposedMasks(force: true);
+        _lines.Children.Clear();
+        _rows.Clear();
+        _rowsBuilt = false;
+        _current = null;
+        _leadingDots = null;
+        _leadingDotItems = [];
+        _repaintFrom = -1;
+        _repaintTo = -1;
+        _needsFullPaint = true;
     }
 
     /// <summary>Whether the song is playing. The panel only repaints while it is, so a
@@ -1504,6 +2080,9 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         var index = Lyrics.IndexOf(_position, _lyricLines) ?? -1;
+        // Keep the word-level text around the line being sung; far lines stay as one
+        // text block and do not allocate their per-word surfaces.
+        EnsureRichWindow(index < 0 ? 0 : index);
         if (index < 0)
         {
             // Before the first line (the intro): still paint, so its dots fill.
@@ -1571,6 +2150,7 @@ internal sealed class LyricsPanel : IDisposable
         // The glow hold builds only for the line being sung; remember which one this
         // frame is painting before the repaint range can touch any letter.
         _activeRowIndex = index;
+        EnsureRichWindow(index < 0 ? 0 : index);
         _paintedLetters = 0;
         if (_needsFullPaint)
         {
@@ -1597,6 +2177,26 @@ internal sealed class LyricsPanel : IDisposable
         {
             var row = _rows[i];
             var sung = IsSung(row, time);
+            if (row.PlaceholderBrush is not null || row.BackgroundPlaceholderBrush is not null)
+            {
+                var color = sung
+                    ? expressive
+                        ? ExpressiveSung
+                        : SungColor
+                    : expressive
+                        ? ExpressiveUnsung
+                        : UnsungColor;
+                if (row.PlaceholderBrush is { } placeholderBrush && placeholderBrush.Color != color)
+                {
+                    placeholderBrush.Color = color;
+                }
+
+                if (row.BackgroundPlaceholderBrush is { } backgroundBrush && backgroundBrush.Color != color)
+                {
+                    backgroundBrush.Color = color;
+                }
+            }
+
             var isActive = singing && i == index;
             var distance = index >= 0 ? Math.Abs(i - index) : int.MaxValue;
             row.Opacity = expressive
@@ -1912,7 +2512,7 @@ internal sealed class LyricsPanel : IDisposable
         if (Math.Abs(eased - word.PaintedRise) >= 0.001)
         {
             word.PaintedRise = eased;
-            word.Transform.TranslateY = -_risePixels * eased;
+            SetWordTranslation(word, 0, -_risePixels * eased);
         }
 
         // A note held long swells, by as much as the look asks for.
@@ -1921,8 +2521,7 @@ internal sealed class LyricsPanel : IDisposable
         if (Math.Abs(swell - word.PaintedSwell) >= 0.0005)
         {
             word.PaintedSwell = swell;
-            word.Transform.ScaleX = swell;
-            word.Transform.ScaleY = swell;
+            SetWordScale(word, swell);
         }
     }
 
@@ -1957,12 +2556,13 @@ internal sealed class LyricsPanel : IDisposable
             : new WordMotion(1, 0, 0);
         SetWordMotion(word, wordMotion);
 
-        if (word.Letters.Count > 0)
+        if (word.LetterCount > 0)
         {
-            _paintedLetters += word.Letters.Count;
+            _paintedLetters += word.LetterCount;
             var strength = _glow ? Math.Clamp(_glowIntensity, 0, 2) : 0;
-            foreach (var letter in word.Letters)
+            for (var letterIndex = 0; letterIndex < word.LetterCount; letterIndex++)
             {
+                var letter = word.Letters[letterIndex];
                 var letterMotion = motion
                     ? LyricsMotion.Letter(elapsed, duration, letter.Index, letter.Count)
                     : new LetterMotion(1, 0, 0, 0);
@@ -2081,28 +2681,67 @@ internal sealed class LyricsPanel : IDisposable
             (byte)(from.B + (to.B - from.B) * t));
     }
 
+    /// <summary>Writes a scale to a composition visual, around the same point the XAML
+    /// render transform used. Layout keeps owning the visual's offset, so scaling here
+    /// never forces the text to be measured or rasterized again.</summary>
+    private static void ApplyScale(
+        Visual? visual,
+        FrameworkElement? element,
+        double scale,
+        double originX,
+        double originY)
+    {
+        if (visual is null)
+        {
+            return;
+        }
+
+        if (element is not null)
+        {
+            var center = new Vector3(
+                (float)(element.ActualWidth * originX),
+                (float)(element.ActualHeight * originY),
+                0);
+            if (visual.CenterPoint != center)
+            {
+                visual.CenterPoint = center;
+            }
+        }
+
+        visual.Scale = new Vector3((float)scale, (float)scale, 1);
+    }
+
+    private static void ApplyTranslation(Visual? visual, double x, double y)
+    {
+        visual?.Properties.InsertVector3("Translation", new Vector3((float)x, (float)y, 0));
+    }
+
+    private static void SetWordScale(Word word, double scale)
+    {
+        word.PaintedScale = scale;
+        ApplyScale(word.Visual, word.Element, scale, word.OriginX, word.OriginY);
+    }
+
+    private static void SetWordTranslation(Word word, double x, double y)
+    {
+        if (double.IsNaN(word.PaintedX)
+            || Math.Abs(x - word.PaintedX) >= 0.01
+            || Math.Abs(y - word.PaintedY) >= 0.01)
+        {
+            word.PaintedX = x;
+            word.PaintedY = y;
+            ApplyTranslation(word.Visual, x, y);
+        }
+    }
+
     private static void SetWordMotion(Word word, WordMotion motion)
     {
         if (Math.Abs(motion.Scale - word.PaintedScale) >= 0.0005)
         {
-            word.PaintedScale = motion.Scale;
-            word.Transform.ScaleX = motion.Scale;
-            word.Transform.ScaleY = motion.Scale;
+            SetWordScale(word, motion.Scale);
         }
 
-        var x = motion.X * word.FontSize;
-        if (double.IsNaN(word.PaintedX) || Math.Abs(x - word.PaintedX) >= 0.01)
-        {
-            word.PaintedX = x;
-            word.Transform.TranslateX = x;
-        }
-
-        var y = motion.Y * word.FontSize;
-        if (double.IsNaN(word.PaintedY) || Math.Abs(y - word.PaintedY) >= 0.01)
-        {
-            word.PaintedY = y;
-            word.Transform.TranslateY = y;
-        }
+        SetWordTranslation(word, motion.X * word.FontSize, motion.Y * word.FontSize);
     }
 
     private void SetLetterMotion(
@@ -2116,34 +2755,25 @@ internal sealed class LyricsPanel : IDisposable
         if (Math.Abs(motion.Scale - letter.PaintedScale) >= 0.0005)
         {
             letter.PaintedScale = motion.Scale;
-            letter.Transform.ScaleX = motion.Scale;
-            letter.Transform.ScaleY = motion.Scale;
-            if (!_glowTransformFixed && letter.GlowTransform is { } glowTransform)
+            ApplyScale(letter.Visual, letter.Text, motion.Scale, 0.5, 0.5);
+            if (!_glowTransformFixed)
             {
-                glowTransform.ScaleX = motion.Scale;
-                glowTransform.ScaleY = motion.Scale;
+                ApplyScale(letter.GlowHostVisual, letter.GlowHost, motion.Scale, 0.5, 0.5);
             }
         }
 
         var x = motion.X * fontSize;
-        if (double.IsNaN(letter.PaintedX) || Math.Abs(x - letter.PaintedX) >= 0.01)
+        var y = motion.Y * fontSize;
+        if (double.IsNaN(letter.PaintedX)
+            || Math.Abs(x - letter.PaintedX) >= 0.01
+            || Math.Abs(y - letter.PaintedY) >= 0.01)
         {
             letter.PaintedX = x;
-            letter.Transform.TranslateX = x;
-            if (!_glowTransformFixed && letter.GlowTransform is { } glowTransform)
-            {
-                glowTransform.TranslateX = x;
-            }
-        }
-
-        var y = motion.Y * fontSize;
-        if (double.IsNaN(letter.PaintedY) || Math.Abs(y - letter.PaintedY) >= 0.01)
-        {
             letter.PaintedY = y;
-            letter.Transform.TranslateY = y;
-            if (!_glowTransformFixed && letter.GlowTransform is { } glowTransform)
+            ApplyTranslation(letter.Visual, x, y);
+            if (!_glowTransformFixed)
             {
-                glowTransform.TranslateY = y;
+                ApplyTranslation(letter.GlowHostVisual, x, y);
             }
         }
 
@@ -2481,10 +3111,36 @@ internal sealed class LyricsPanel : IDisposable
         }
     }
 
-    /// <summary>Native mask surfaces are released by dropping their references, not by
-    /// Dispose, so they wait for a collection that a heap this small rarely provokes. After
-    /// a seek's hold, or a song change, collect once on a background thread: the managed
-    /// heap is only a few megabytes, so the pause is short.</summary>
+    /// <summary>Runs one full collection on a background thread. The managed heap is
+    /// small; the point is to run finalizers for the native text and composition surfaces
+    /// that were just released. Never more than one is in flight.</summary>
+    private void ForceCollection()
+    {
+        _collectionsForced++;
+        _masksDisposedSinceCollection = 0;
+        if (System.Threading.Interlocked.Exchange(ref _collectionRunning, 1) != 0)
+        {
+            return;
+        }
+
+        _ = System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
+            finally
+            {
+                System.Threading.Interlocked.Exchange(ref _collectionRunning, 0);
+            }
+        });
+    }
+
+    /// <summary>Native text/composition surfaces are released by dropping their references,
+    /// not by Dispose, so they wait for a collection a small managed heap rarely provokes.
+    /// After a seek's hold, a song change, or a few collapsed lyric rows, collect once.</summary>
     private void CollectDisposedMasks(bool force = false)
     {
         if (!force && _masksDisposedSinceCollection < 30)
@@ -2497,14 +3153,7 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
-        _masksDisposedSinceCollection = 0;
-        _collectionsForced++;
-        _ = System.Threading.Tasks.Task.Run(() =>
-        {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-        });
+        ForceCollection();
     }
 
     /// <summary>Re-arms the glow window after a backward seek without disposing the
@@ -2567,8 +3216,9 @@ internal sealed class LyricsPanel : IDisposable
             var row = _rows[rowIndex];
             foreach (var word in row.WordItems)
             {
-                foreach (var letter in word.Letters)
+                for (var letterIndex = 0; letterIndex < word.LetterCount; letterIndex++)
                 {
+                    var letter = word.Letters[letterIndex];
                     letter.GlowWanted = true;
                     AddLiveGlow(letter);
                     if (letter.GlowVisual is null && !letter.GlowDone && _glowWarmupSet.Add(letter))
@@ -2580,8 +3230,9 @@ internal sealed class LyricsPanel : IDisposable
 
             foreach (var word in row.BackgroundItems)
             {
-                foreach (var letter in word.Letters)
+                for (var letterIndex = 0; letterIndex < word.LetterCount; letterIndex++)
                 {
+                    var letter = word.Letters[letterIndex];
                     letter.GlowWanted = true;
                     AddLiveGlow(letter);
                     if (letter.GlowVisual is null && !letter.GlowDone && _glowWarmupSet.Add(letter))
