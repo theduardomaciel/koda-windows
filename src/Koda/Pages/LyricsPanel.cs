@@ -235,6 +235,12 @@ internal sealed class LyricsPanel : IDisposable
         public required TextBlock Text { get; init; }
         /// <summary>Test only: the never-changing twin the alpha mask is taken from.</summary>
         public TextBlock? MaskText { get; set; }
+        /// <summary>The element in the glow host that holds the twin, for replacing it when
+        /// its mask is disposed.</summary>
+        public FrameworkElement? MaskWrapper { get; set; }
+        /// <summary>The size and weight the twin was built at, so it can be rebuilt.</summary>
+        public double MaskFontSize { get; set; }
+        public bool MaskSoft { get; set; }
         public required LinearGradientBrush Fill { get; init; }
         public required CompositeTransform Transform { get; init; }
         /// <summary>The empty layer behind the sharp letter that hosts the DropShadow sprite.</summary>
@@ -1078,6 +1084,7 @@ internal sealed class LyricsPanel : IDisposable
         Grid? glowHost = null;
         CompositeTransform? glowTransform = null;
         TextBlock? maskText = null;
+        FrameworkElement? maskWrapper = null;
 
         if (_glow)
         {
@@ -1100,52 +1107,8 @@ internal sealed class LyricsPanel : IDisposable
                 // Test only: a twin whose fill is a fixed solid, so the mask source is
                 // never invalidated by the sharp letter's per-frame gradient. It is
                 // nearly transparent but still rendered, which GetAlphaMask needs.
-                maskText = new TextBlock
-                {
-                    Text = text,
-                    Foreground = new SolidColorBrush(MaskTwinColor),
-                    IsHitTestVisible = false,
-                    Opacity = _maskHide.Length > 0 ? 1 : _maskTwinOpacity,
-                    TextWrapping = TextWrapping.NoWrap,
-                };
-                Shape(maskText, fontSize, soft);
-
-                if (_maskHide.Length > 0)
-                {
-                    var wrapper = new Grid
-                    {
-                        IsHitTestVisible = false,
-                    };
-                    wrapper.Children.Add(maskText);
-
-                    switch (_maskHide)
-                    {
-                        case "wrapper":
-                            wrapper.Opacity = 0.01;
-                            break;
-                        case "visual":
-                            ElementCompositionPreview.GetElementVisual(wrapper).Opacity = 0f;
-                            break;
-                        case "visual01":
-                            ElementCompositionPreview.GetElementVisual(wrapper).Opacity = 0.01f;
-                            break;
-                        case "clip":
-                            wrapper.Clip = new RectangleGeometry
-                            {
-                                Rect = new Windows.Foundation.Rect(0, 0, 0, 0),
-                            };
-                            break;
-                        case "offscreen":
-                            wrapper.RenderTransform = new TranslateTransform { X = -10000 };
-                            break;
-                    }
-
-                    glowHost.Children.Add(wrapper);
-                }
-                else
-                {
-                    glowHost.Children.Add(maskText);
-                }
+                (maskText, maskWrapper) = MakeMaskTwin(text, fontSize, soft);
+                glowHost.Children.Add(maskWrapper);
             }
         }
 
@@ -1157,6 +1120,9 @@ internal sealed class LyricsPanel : IDisposable
             Element = host,
             Text = textBlock,
             MaskText = maskText,
+            MaskWrapper = maskWrapper,
+            MaskFontSize = fontSize,
+            MaskSoft = soft,
             Fill = fill,
             Transform = transform,
             GlowHost = glowHost,
@@ -1178,6 +1144,57 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         return letter;
+    }
+
+    /// <summary>Builds a letter's static mask twin, with the wrapper that hides it in the
+    /// glow host. Kept apart from <see cref="MakeLetter"/> so a disposed mask can be
+    /// paired with a fresh twin.</summary>
+    private (TextBlock Text, FrameworkElement Wrapper) MakeMaskTwin(string text, double fontSize, bool soft)
+    {
+        var maskText = new TextBlock
+        {
+            Text = text,
+            Foreground = new SolidColorBrush(MaskTwinColor),
+            IsHitTestVisible = false,
+            Opacity = _maskHide.Length > 0 ? 1 : _maskTwinOpacity,
+            TextWrapping = TextWrapping.NoWrap,
+        };
+        Shape(maskText, fontSize, soft);
+
+        if (_maskHide.Length == 0)
+        {
+            return (maskText, maskText);
+        }
+
+        var wrapper = new Grid
+        {
+            IsHitTestVisible = false,
+        };
+        wrapper.Children.Add(maskText);
+
+        switch (_maskHide)
+        {
+            case "wrapper":
+                wrapper.Opacity = 0.01;
+                break;
+            case "visual":
+                ElementCompositionPreview.GetElementVisual(wrapper).Opacity = 0f;
+                break;
+            case "visual01":
+                ElementCompositionPreview.GetElementVisual(wrapper).Opacity = 0.01f;
+                break;
+            case "clip":
+                wrapper.Clip = new RectangleGeometry
+                {
+                    Rect = new Windows.Foundation.Rect(0, 0, 0, 0),
+                };
+                break;
+            case "offscreen":
+                wrapper.RenderTransform = new TranslateTransform { X = -10000 };
+                break;
+        }
+
+        return (maskText, wrapper);
     }
 
     private static LinearGradientBrush NewFill() => new()
@@ -1270,6 +1287,8 @@ internal sealed class LyricsPanel : IDisposable
 
                 letter.PaintedLit = double.NaN;
                 letter.NeedsMaskRefresh = true;
+                letter.MaskFontSize = size;
+                letter.MaskSoft = soft;
             }
         }
         else if (word.Text is { } text)
@@ -2152,6 +2171,51 @@ internal sealed class LyricsPanel : IDisposable
     /// position to settle makes it raise one window instead.</summary>
     private bool GlowHeld => _glowHoldUntil > _frameClock.ElapsedMilliseconds;
 
+    /// <summary>The element a letter's alpha mask is taken from: the hidden twin when the
+    /// static-mask mode is on, or the sharp letter itself.</summary>
+    private TextBlock MaskSource(Letter letter) =>
+        _glowStaticMask && letter.MaskText is { } twin ? twin : letter.Text;
+
+    /// <summary>Whether the mask's source has been laid out. A twin added this frame has
+    /// no size until the next layout pass, and GetAlphaMask needs one.</summary>
+    private bool MaskSourceHasSize(Letter letter) =>
+        _glowStaticMask && letter.MaskText is { } twin
+            ? twin.ActualWidth >= 0.5 && twin.ActualHeight >= 0.5
+            : letter.Text.ActualWidth >= 0.5 && letter.Text.ActualHeight >= 0.5;
+
+    /// <summary>Disposes a letter's alpha mask. Only call this when the twin it came from
+    /// is replaced at the same time.</summary>
+    private static void DisposeMask(Letter letter)
+    {
+        if (letter.Shadow is { } shadow)
+        {
+            shadow.Mask = null;
+        }
+
+        var mask = letter.Mask;
+        letter.Mask = null;
+        mask?.Dispose();
+    }
+
+    /// <summary>Swaps a letter's mask twin for a fresh element. GetAlphaMask may return the
+    /// same brush for the same element, so a disposed mask's twin must never be asked for
+    /// another one: the next mask comes from an element that has never handed one out.</summary>
+    private void ReplaceMaskTwin(Letter letter)
+    {
+        if (letter.GlowHost is not { } host || letter.MaskWrapper is not { } old)
+        {
+            return;
+        }
+
+        host.Children.Remove(old);
+        var (text, wrapper) = MakeMaskTwin(
+            letter.Text.Text, letter.MaskFontSize, letter.MaskSoft);
+        host.Children.Add(wrapper);
+        letter.MaskText = text;
+        letter.MaskWrapper = wrapper;
+        letter.NeedsMaskRefresh = true;
+    }
+
     /// <summary>Lazily gives a letter its Gaussian glow. The sprite lives in an empty
     /// layer before the text, so the shadow is drawn behind the sharp glyph.</summary>
     private void EnsureGlow(Letter letter)
@@ -2174,6 +2238,21 @@ internal sealed class LyricsPanel : IDisposable
             return; // the first paint can run before the letter has a size
         }
 
+        if (!_glowNoMask && !MaskSourceHasSize(letter))
+        {
+            return; // a fresh twin is measured on the next layout pass
+        }
+
+        if (!_glowNoMask && letter.Mask is not null && letter.NeedsMaskRefresh
+            && letter.MaskWrapper is not null)
+        {
+            // The font or size changed. Dispose the stale mask with its twin, then let
+            // the layout measure the fresh twin before its alpha is taken.
+            DisposeMask(letter);
+            ReplaceMaskTwin(letter);
+            return;
+        }
+
         var visual = ElementCompositionPreview.GetElementVisual(letter.GlowHost);
         var compositor = visual.Compositor;
         var shadow = compositor.CreateDropShadow();
@@ -2183,14 +2262,11 @@ internal sealed class LyricsPanel : IDisposable
         shadow.BlurRadius = _glowBlurFixed ? 12 : 0;
         if (!_glowNoMask)
         {
-            var source = _glowStaticMask && letter.MaskText is { } maskText
-                ? maskText
-                : letter.Text;
             if (letter.Mask is null || letter.NeedsMaskRefresh)
             {
                 // Keep the mask while this letter stays in the live window; a seek
                 // back into the same window can reuse it instead of taking a new one.
-                letter.Mask = source.GetAlphaMask();
+                letter.Mask = MaskSource(letter).GetAlphaMask();
                 letter.NeedsMaskRefresh = false;
             }
 
@@ -2234,40 +2310,68 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
-        var source = _glowStaticMask && letter.MaskText is { } maskText
-            ? maskText
-            : letter.Text;
-        var mask = source.GetAlphaMask();
+        if (letter.NeedsMaskRefresh && letter.Mask is not null && letter.MaskWrapper is not null)
+        {
+            // The font or size changed: the old mask is stale, and it may only be
+            // disposed together with the twin that produced it.
+            DisposeMask(letter);
+            ReplaceMaskTwin(letter);
+        }
+
+        if (!MaskSourceHasSize(letter))
+        {
+            return; // the fresh twin is measured on the next layout pass
+        }
+
+        var mask = MaskSource(letter).GetAlphaMask();
         if (!ReferenceEquals(letter.Mask, mask))
         {
             letter.Shadow.Mask = mask;
-            // Do not dispose the replaced mask: GetAlphaMask may hand the same brush
-            // back for the same element, and a closed brush was what broke the glow.
             letter.Mask = mask;
         }
 
         letter.NeedsMaskRefresh = false;
     }
 
-    private static void ReleaseGlow(Letter letter, bool keepMask = false)
+    private void ReleaseGlow(Letter letter, bool keepMask = false)
     {
+        // Detach the shadow from its mask before the shadow goes, then take the sprite
+        // off its host. Dispose frees the composition objects; the native surfaces behind
+        // the mask are only released once the brush itself is collected.
+        if (letter.Shadow is { } shadow)
+        {
+            shadow.Mask = null;
+        }
+
         if (letter.GlowHost is { } host)
         {
             ElementCompositionPreview.SetElementChildVisual(host, null);
         }
 
-        letter.GlowVisual?.Dispose();
-        letter.GlowVisual = null;
-        letter.GlowBrush?.Dispose();
-        letter.GlowBrush = null;
         letter.Shadow?.Dispose();
+        letter.GlowVisual?.Dispose();
+        letter.GlowBrush?.Dispose();
         letter.Shadow = null;
-        if (!keepMask)
+        letter.GlowVisual = null;
+        letter.GlowBrush = null;
+
+        if (!keepMask && letter.Mask is not null)
         {
-            // The letter is leaving the live window. Drop the mask reference and let
-            // the GC release it; disposing here could close a brush the framework
-            // returns again for the same element.
-            letter.Mask = null;
+            if (letter.MaskWrapper is not null)
+            {
+                // The letter is leaving the live window: dispose the mask together with
+                // the twin that produced it, then replace the twin. GetAlphaMask may hand
+                // the same brush back for the same element, and a closed brush breaks the
+                // glow; the next mask is taken from a new element.
+                DisposeMask(letter);
+                ReplaceMaskTwin(letter);
+            }
+            else
+            {
+                // No twin to replace (a test mode takes the mask from the sharp letter):
+                // only drop the reference, since the same element may hand it back.
+                letter.Mask = null;
+            }
         }
 
         letter.GlowShown = false;
@@ -2419,7 +2523,8 @@ internal sealed class LyricsPanel : IDisposable
                 continue;
             }
 
-            if (letter.Text.ActualWidth < 0.5 || letter.Text.ActualHeight < 0.5)
+            if (letter.Text.ActualWidth < 0.5 || letter.Text.ActualHeight < 0.5
+                || !MaskSourceHasSize(letter))
             {
                 continue;
             }
