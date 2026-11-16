@@ -43,10 +43,10 @@ public static class LyricsMotion
     /// <summary>How far the outer syllables of a split word push apart at the seam.</summary>
     public const double WordSpread = 0.02;
 
-    /// <summary>A letter does not shrink again on top of its word's rest scale: the
-    /// word's 0.95 is the whole word's resting size. The letter wave is relative to it.</summary>
-    public const double LetterRestScale = 1.0;
-    public const double LetterRestY = 0.0;
+    /// <summary>A resting letter of a held syllable sits a little small and low inside
+    /// its word, as Spicy does: word rest 0.95 and letter rest 0.95 compose.</summary>
+    public const double LetterRestScale = 0.95;
+    public const double LetterRestY = 0.02;
 
     /// <summary>Scales the wave's swell and lift; Spicy's RefreshedEmphasis strength.</summary>
     public const double LetterStrength = 1.4;

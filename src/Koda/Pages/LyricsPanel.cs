@@ -147,6 +147,8 @@ internal sealed class LyricsPanel : IDisposable
     private bool _motion = true;
     private LyricsRenderer _renderer = LyricsRenderer.Sweep;
     private bool _compensateSpacing = true;
+    private readonly bool _allRowsRich =
+        Environment.GetEnvironmentVariable("KODA_NP_WINDOWED") != "1";
     private string _glowTest = "";
     private bool _glowBlurFixed;
     private bool _glowTransformFixed;
@@ -689,7 +691,8 @@ internal sealed class LyricsPanel : IDisposable
         _motion = settings.LyricsMotion
             && Environment.GetEnvironmentVariable("KODA_LYRICS_MOTION_OFF") != "1";
         _renderer = settings.LyricsRenderer;
-        _compensateSpacing = settings.LyricsCompensateSpacing
+        _compensateSpacing = !_allRowsRich
+            && settings.LyricsCompensateSpacing
             && Environment.GetEnvironmentVariable("KODA_NP_NO_SPACING_COMP") != "1";
         UpdateScale();
     }
@@ -910,7 +913,7 @@ internal sealed class LyricsPanel : IDisposable
                     SetLineTextRest(row, _position >= line.Time ? 1 : LyricsMotion.WordRestScale);
                 }
             }
-            else
+            else if (!_allRowsRich)
             {
                 // The stand-in is the line in the same type, dimmed like unsung words. It
                 // keeps the row's place and stays readable without a text surface per word.
@@ -931,12 +934,19 @@ internal sealed class LyricsPanel : IDisposable
             _lines.Children.Add(host);
             _rows.Add(row);
 
+            if (_allRowsRich && line.Words.Count > 0)
+            {
+                BuildRichRow(row);
+            }
+
             if (_renderer == LyricsRenderer.Expressive && _motion && !row.Rich)
             {
                 SetPlaceholderRest(row, _position >= line.Time ? 1 : LyricsMotion.WordRestScale);
             }
 
-            var background = MakeBackgroundPlaceholder(line, fontSize, textSide);
+            var background = _allRowsRich && line.Words.Count > 0
+                ? null
+                : MakeBackgroundPlaceholder(line, fontSize, textSide);
             if (background is not null)
             {
                 row.BackgroundPlaceholder = background;
@@ -1224,6 +1234,11 @@ internal sealed class LyricsPanel : IDisposable
     /// fraction of the native text surfaces.</summary>
     private void EnsureRichWindow(int index)
     {
+        if (_allRowsRich)
+        {
+            return;
+        }
+
         if (!_rowsBuilt || _rows.Count == 0 || _userScrolled)
         {
             return;
@@ -1306,7 +1321,8 @@ internal sealed class LyricsPanel : IDisposable
         Math.Clamp(fontSize * HoverBoxRadiusRatio, HoverBoxRadiusMin, HoverBoxRadiusMax);
 
     /// <summary>Points the syllables of a split word at their shared seam: the first grows
-    /// from its right edge, the last from its left, and the middle stays centred.</summary>
+    /// from its right edge, the last from its left, and the middle stays centred, as the
+    /// Spicy CSS does.</summary>
     private static void ShapeSyllables(IReadOnlyList<Word> words)
     {
         var start = 0;
@@ -1319,26 +1335,9 @@ internal sealed class LyricsPanel : IDisposable
             }
 
             var count = end - start + 1;
-
-            // Measure the whole group first. Every syllable must scale around the same
-            // absolute point, the centre of the complete word, or unequal pieces
-            // (call|ing, wa|ter) pull toward the seam and read as separate words.
-            var widths = new double[count];
-            var total = 0.0;
-            for (var index = start; index <= end; index++)
-            {
-                var element = words[index].Element;
-                element.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-                var margin = element.Margin;
-                widths[index - start] = Math.Max(1, element.DesiredSize.Width - margin.Left - margin.Right);
-                total += widths[index - start];
-            }
-
-            var offset = 0.0;
             for (var index = start; index <= end; index++)
             {
                 var word = words[index];
-                var width = widths[index - start];
                 word.PushX = count == 1
                     ? 0
                     : index == start
@@ -1346,13 +1345,17 @@ internal sealed class LyricsPanel : IDisposable
                         : index == end
                             ? LyricsMotion.WordSpread
                             : 0;
-                var originX = (total / 2 - offset) / width;
+                var originX = count == 1
+                    ? 0.5
+                    : index == start
+                        ? 1
+                        : index == end
+                            ? 0
+                            : 0.5;
                 word.OriginX = originX;
                 word.OriginY = 0.5;
-                word.Element.RenderTransformOrigin = new Windows.Foundation.Point(
-                    Math.Clamp(originX, 0, 1), 0.5);
+                word.Element.RenderTransformOrigin = new Windows.Foundation.Point(originX, 0.5);
                 ApplyCenter(word.Visual, word.Element, originX, 0.5);
-                offset += width;
             }
 
             start = end + 1;
@@ -3899,8 +3902,10 @@ internal sealed class LyricsPanel : IDisposable
     /// own space and the per-word shift keeps it proportional. With compensation off, the
     /// gap is reduced once in layout so it matches the word's 0.95 rest; no word moves later.</summary>
     private double WordGap(double fontSize, bool soft) =>
-        WordSpace(fontSize, soft) *
-        (_compensateSpacing ? 1 : LyricsMotion.WordRestScale);
+        _allRowsRich
+            ? WordSpace(fontSize, soft) + fontSize * 0.06
+            : WordSpace(fontSize, soft) *
+                (_compensateSpacing ? 1 : LyricsMotion.WordRestScale);
 
     /// <summary>The width the font itself gives a space, so word-level margins match the
     /// one-block placeholder that uses real spaces. A fixed em guess made the spaces change
