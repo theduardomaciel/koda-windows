@@ -1510,6 +1510,7 @@ internal sealed class LyricsPanel : IDisposable
             ConfigureLetter(letter, pieces[i], fontSize, soft, i, pieces.Count);
         }
 
+        AlignLetters(word, data.Text, fontSize, soft);
         ResetWordMotion(word);
         return word;
     }
@@ -1556,6 +1557,7 @@ internal sealed class LyricsPanel : IDisposable
     private void ConfigureLetter(Letter letter, string text, double fontSize, bool soft, int index, int count)
     {
         letter.Element.Visibility = Visibility.Visible;
+        letter.Element.Margin = new Thickness(0);
         letter.Text.Text = text;
         Shape(letter.Text, fontSize, soft);
         if (letter.MaskText is { } twin)
@@ -1603,6 +1605,45 @@ internal sealed class LyricsPanel : IDisposable
         letter.GlowWanted = false;
         letter.NeedsMaskRefresh = true;
         ResetFill(letter.Fill);
+    }
+
+    /// <summary>Separate letter blocks do not shape/kerning together, so their sum can be
+    /// wider than the word drawn as one run. Distribute the difference as static gaps between
+    /// letters; the word then occupies exactly the placeholder's width at rest and after the
+    /// wave. The gaps are layout, so no word is moved at runtime.</summary>
+    private void AlignLetters(Word word, string text, double fontSize, bool soft)
+    {
+        var count = Math.Min(word.LetterCount, word.Letters.Count);
+        if (count <= 0)
+        {
+            return;
+        }
+
+        if (count == 1)
+        {
+            word.Letters[0].Element.Margin = new Thickness(0);
+            return;
+        }
+
+        var probe = new TextBlock { Text = text, TextWrapping = TextWrapping.NoWrap };
+        Shape(probe, fontSize, soft);
+        probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+
+        var total = 0.0;
+        for (var i = 0; i < count; i++)
+        {
+            var element = word.Letters[i].Element;
+            element.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            total += element.DesiredSize.Width;
+        }
+
+        var gap = (probe.DesiredSize.Width - total) / (count - 1);
+        for (var i = 0; i < word.Letters.Count; i++)
+        {
+            word.Letters[i].Element.Margin = i > 0 && i < count
+                ? new Thickness(gap, 0, 0, 0)
+                : new Thickness(0);
+        }
     }
 
     private void ResetWordMotion(Word word)
@@ -1982,6 +2023,8 @@ internal sealed class LyricsPanel : IDisposable
                 letter.MaskFontSize = size;
                 letter.MaskSoft = soft;
             }
+
+            AlignLetters(word, word.Data.Text, size, soft);
         }
         else if (word.Text is { } text)
         {
