@@ -8,51 +8,57 @@ namespace Koda.Core;
 /// <summary>A service lyrics can come from.</summary>
 public enum LyricsSource
 {
+    /// <summary>Syllable-timed TTML from Better Lyrics' own provider, or lines when that is all it has.</summary>
+    BetterLyrics,
+    /// <summary>Community-synced lyrics, from word timing down to plain text.</summary>
+    Unison,
+    /// <summary>Apple Music lyrics from BiniLyrics' lrc.red catalogue.</summary>
+    BiniLyrics,
+    /// <summary>Word-timed QRC from Better Lyrics' QQ provider.</summary>
+    BetterLyricsQQ,
     /// <summary>Word-by-word, with duets and backing vocals.</summary>
     YouLyPlus,
-    /// <summary>Word-by-word, from several catalogues.</summary>
-    BetterLyrics,
-    /// <summary>Word-by-word from NetEase's catalogue.</summary>
+    /// <summary>NetEase's own timing: word when it has it, otherwise lines.</summary>
     NetEase,
-    /// <summary>Word-by-word, timed by SimpMusic.</summary>
+    /// <summary>Community timing from SimpMusic: word when it has it, otherwise lines.</summary>
     SimpMusic,
     /// <summary>Line-by-line and plain lyrics, community-made.</summary>
     Lrclib,
+    /// <summary>Line-timed LRC from Better Lyrics' KuGou provider.</summary>
+    BetterLyricsKugou,
     /// <summary>Line-timed lyrics from KuGou.</summary>
     KuGou,
-    /// <summary>Apple Music's word timing, through Unison.</summary>
-    Unison,
 }
 
 /// <summary>
-/// Lyrics from several services at once, keeping the best: word-timed from
-/// YouLyPlus, BetterLyrics, NetEase or SimpMusic, else line-timed or plain
-/// from LRCLIB, KuGou or Unison.
+/// Lyrics from several services, in the listener's priority order: the first service
+/// with lyrics wins, and a higher-ranked answer is preferred for a short settling
+/// period before a lower-ranked one is shown.
 ///
-/// The services answer at different speeds and come and go. All of them are
-/// asked together; a word-timed answer is taken as soon as every service ranked
-/// above it has answered, and otherwise the best answer by the deadline.
+/// The services answer at different speeds and come and go. All of them are asked
+/// together; the best-ranked answer is taken as soon as every service above it has
+/// answered, or after a brief settle when a slower higher-ranked source is still out.
 /// Ported from the KodaCore LyricsClient.swift contract.
 /// </summary>
 public sealed class LyricsClient : IDisposable
 {
+    // The other public mirrors were retired (404, 402, 530) or now fail TLS validation.
     private static readonly string[] YouLyPlusMirrors =
     [
         "https://lyricsplus.binimum.org/",
-        "https://lyricsplus.prjktla.my.id/",
-        "https://lyricsplus.prjktla.workers.dev/",
-        "https://lyricsplus.atomix.one/",
-        "https://lyricsplus-seven.vercel.app/",
     ];
 
-    private static readonly string[] BetterLyricsEndpoints =
-    [
-        "https://lyrics-api.boidu.dev/getLyrics",
-        "https://lyrics-api.boidu.dev/qq/getLyrics",
-        "https://lyrics-api.boidu.dev/kugou/getLyrics",
-    ];
+    private const string BetterLyricsTtml = "https://api.betterlyrics.org/getLyrics";
+    private const string BetterLyricsQq = "https://api.betterlyrics.org/qq/getLyrics";
+    private const string BetterLyricsKugouUrl = "https://api.betterlyrics.org/kugou/getLyrics";
+    private const string BiniLyricsSearch = "https://lrc.red/search.json";
+    private const string BiniLyricsSong = "https://lrc.red/s/";
+    private const string UnisonLyricsUrl = "https://unison.betterlyrics.org/lyrics";
 
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(9);
+
+    /// <summary>How long a slower, higher-ranked source may hold up an answer already found.</summary>
+    private static readonly TimeSpan Settle = TimeSpan.FromSeconds(1.2);
 
     /// <summary>Lyrics already found this session, so reopening the panel or replaying a song is instant.</summary>
     private static readonly ConcurrentDictionary<string, Lyrics> Cache = new(StringComparer.Ordinal);
@@ -90,9 +96,7 @@ public sealed class LyricsClient : IDisposable
         IReadOnlyList<LyricsSource>? sources = null,
         CancellationToken cancellation = default)
     {
-        var wanted = sources ?? [
-            LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.NetEase,
-            LyricsSource.SimpMusic, LyricsSource.Lrclib, LyricsSource.KuGou, LyricsSource.Unison];
+        var wanted = sources ?? Settings.DefaultLyricsSources;
         if (wanted.Count == 0)
         {
             return null;
@@ -173,67 +177,84 @@ public sealed class LyricsClient : IDisposable
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         deadline.CancelAfter(Deadline);
 
-        var running = new List<Task<(int Rank, Lyrics? Lyrics)>>(sources.Count);
+        var running = new List<(int Rank, Task<(int Rank, Lyrics? Lyrics)> Task)>(sources.Count);
         for (var rank = 0; rank < sources.Count; rank++)
         {
             var source = sources[rank];
-            running.Add(Ask(rank, source, song, deadline.Token));
+            running.Add((rank, Ask(rank, source, song, deadline.Token)));
         }
 
-        var answers = new Dictionary<int, Lyrics>();
+        var answers = new SortedDictionary<int, Lyrics>();
         var pending = new HashSet<int>(Enumerable.Range(0, sources.Count));
+        Task? settle = null;
         try
         {
             while (pending.Count > 0)
             {
-                var waiting = running.Where(task => !task.IsCompleted).ToList();
+                // Completed answers are still waiting to be recorded, so they join the set.
+                var waiting = running
+                    .Where(entry => pending.Contains(entry.Rank))
+                    .Select(entry => entry.Task)
+                    .ToList();
                 if (waiting.Count == 0)
                 {
                     break;
                 }
 
-                var finished = await Task.WhenAny(waiting).WaitAsync(deadline.Token).ConfigureAwait(false);
+                var next = Task.WhenAny(waiting);
+                if (settle is not null)
+                {
+                    // A source slower than the settle period does not keep the listener waiting:
+                    // the best answer found so far is shown instead.
+                    var first = await Task.WhenAny(next, settle).WaitAsync(deadline.Token).ConfigureAwait(false);
+                    if (first == settle)
+                    {
+                        break;
+                    }
+                }
+
+                var finished = await next.WaitAsync(deadline.Token).ConfigureAwait(false);
                 var (rank, lyrics) = await finished.ConfigureAwait(false);
                 pending.Remove(rank);
                 if (lyrics is not null)
                 {
                     answers[rank] = lyrics;
+                    settle ??= Task.Delay(Settle);
                 }
 
-                // Word timing from the best-ranked service still in the running wins outright.
-                var top = answers
-                    .Where(answer => answer.Value.Quality == 2)
-                    .OrderBy(answer => answer.Key)
-                    .FirstOrDefault();
-                if (top.Value is not null && !pending.Any(rank => rank < top.Key))
+                // The best-ranked answer wins once every service above it has answered.
+                if (answers.Count > 0)
                 {
-                    return top.Value;
+                    var top = answers.First();
+                    if (!pending.Any(rank => rank < top.Key))
+                    {
+                        return top.Value;
+                    }
                 }
             }
         }
         catch (OperationCanceledException)
         {
-            // The deadline passed: the best answer so far is the answer.
+            // The deadline passed: the best-ranked answer so far is the answer.
         }
 
-        var best = answers
-            .OrderByDescending(answer => answer.Value.Quality)
-            .ThenBy(answer => answer.Key)
-            .FirstOrDefault();
-        return best.Value;
+        return answers.Count > 0 ? answers.First().Value : null;
     }
 
     private async Task<(int Rank, Lyrics? Lyrics)> Ask(int rank, LyricsSource source, Song song, CancellationToken cancellation)
     {
         Lyrics? lyrics = source switch
         {
+            LyricsSource.BetterLyrics => await BetterLyrics(song, BetterLyricsTtml, cancellation).ConfigureAwait(false),
+            LyricsSource.Unison => await Unison(song, cancellation).ConfigureAwait(false),
+            LyricsSource.BiniLyrics => await BiniLyrics(song, cancellation).ConfigureAwait(false),
+            LyricsSource.BetterLyricsQQ => await BetterLyrics(song, BetterLyricsQq, cancellation).ConfigureAwait(false),
             LyricsSource.YouLyPlus => await YouLyPlus(song, cancellation).ConfigureAwait(false),
-            LyricsSource.BetterLyrics => await BetterLyrics(song, cancellation).ConfigureAwait(false),
             LyricsSource.NetEase => await NetEase(song, cancellation).ConfigureAwait(false),
             LyricsSource.SimpMusic => await SimpMusic(song, cancellation).ConfigureAwait(false),
             LyricsSource.Lrclib => await Lrclib(song, cancellation).ConfigureAwait(false),
+            LyricsSource.BetterLyricsKugou => await BetterLyrics(song, BetterLyricsKugouUrl, cancellation).ConfigureAwait(false),
             LyricsSource.KuGou => await KuGou(song, cancellation).ConfigureAwait(false),
-            LyricsSource.Unison => await Unison(song, cancellation).ConfigureAwait(false),
             _ => null,
         };
 
@@ -324,7 +345,8 @@ public sealed class LyricsClient : IDisposable
 
     // MARK: BetterLyrics
 
-    private async Task<Lyrics?> BetterLyrics(Song song, CancellationToken cancellation)
+    /// <summary>One of Better Lyrics' providers: TTML, QQ's QRC or KuGou's LRC.</summary>
+    private async Task<Lyrics?> BetterLyrics(Song song, string endpoint, CancellationToken cancellation)
     {
         var artist = song.ArtistLine;
         if (artist.Length == 0)
@@ -332,33 +354,146 @@ public sealed class LyricsClient : IDisposable
             return null;
         }
 
+        // The API's cache key includes every one of these, so they are always sent.
         var parameters = new Dictionary<string, string>
         {
             ["s"] = song.Title,
             ["a"] = artist,
+            ["al"] = song.Album?.Title ?? "",
+            ["d"] = song.Duration is { } duration && duration > 0
+                ? ((int)Math.Round(duration)).ToString(CultureInfo.InvariantCulture)
+                : "0",
         };
-        if (song.Album is { } album && album.Title.Length > 0)
+
+        if (endpoint == BetterLyricsTtml && song.Id.Length > 0)
         {
-            parameters["al"] = album.Title;
+            parameters["videoId"] = song.Id;
         }
 
-        if (song.Duration is { } duration && duration > 0)
+        var data = await Fetch(endpoint, parameters, cancellation).ConfigureAwait(false);
+        return data is null ? null : DecodeWrapped(data);
+    }
+
+    // MARK: BiniLyrics
+
+    /// <summary>lrc.red's catalogue: search for a matching release, then take its TTML
+    /// (or LRC when the release has no word timing).</summary>
+    private async Task<Lyrics?> BiniLyrics(Song song, CancellationToken cancellation)
+    {
+        if (song.ArtistLine.Length == 0)
         {
-            parameters["d"] = ((int)Math.Round(duration)).ToString();
+            return null;
         }
 
-        foreach (var endpoint in BetterLyricsEndpoints)
+        var search = new Dictionary<string, string> { ["q"] = $"{song.Title} {song.ArtistLine}" };
+        if (await Fetch(BiniLyricsSearch, search, cancellation).ConfigureAwait(false) is not { } data)
         {
-            cancellation.ThrowIfCancellationRequested();
-            var data = await Fetch(endpoint, parameters, cancellation).ConfigureAwait(false);
-            if (data is not null && DecodeWrapped(data) is { } found)
+            return null;
+        }
+
+        Json root;
+        try
+        {
+            root = Json.Parse(Encoding.UTF8.GetString(data));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        var candidates = root["hits"].Array
+            .Where(hit => MatchesBiniLyrics(hit, song))
+            .OrderBy(hit => DurationDelta(hit, song))
+            .Take(3);
+
+        foreach (var hit in candidates)
+        {
+            if (hit["isrc"].NonEmpty is not { } isrc)
             {
-                return found;
+                continue;
+            }
+
+            foreach (var extension in new[] { "ttml", "lrc" })
+            {
+                var body = await Fetch($"{BiniLyricsSong}{Uri.EscapeDataString(isrc)}.{extension}",
+                    new Dictionary<string, string>(), cancellation).ConfigureAwait(false);
+                if (body is not null && DecodeWrapped(body) is { } found)
+                {
+                    return found;
+                }
             }
         }
 
         return null;
     }
+
+    /// <summary>A search hit is taken only when its title and one credited artist match,
+    /// and its length is close enough to be the same recording.</summary>
+    internal static bool MatchesBiniLyrics(Json hit, Song song)
+    {
+        if (!SameTitle(hit["title"].String, song.Title) ||
+            !SharesArtist(hit["artist"].String, song.ArtistLine))
+        {
+            return false;
+        }
+
+        return song.Duration is not { } wanted ||
+               hit["duration"].Double is not { } seconds ||
+               seconds <= 0 ||
+               Math.Abs(seconds - wanted) <= 8;
+    }
+
+    private static double DurationDelta(Json hit, Song song) =>
+        song.Duration is { } wanted && hit["duration"].Double is { } seconds && seconds > 0
+            ? Math.Abs(seconds - wanted)
+            : double.MaxValue;
+
+    private static bool SameTitle(string? candidate, string title) =>
+        candidate is not null &&
+        string.Equals(NormalizeTitle(candidate), NormalizeTitle(title), StringComparison.Ordinal);
+
+    private static bool SharesArtist(string? candidate, string artist)
+    {
+        if (candidate is null)
+        {
+            return false;
+        }
+
+        var wanted = NormalizeWords(artist);
+        if (wanted.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var credit in candidate.Split([',', '&', '/', ';', '|'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var name = NormalizeWords(credit);
+            if (name.Length == 0)
+            {
+                continue;
+            }
+
+            if (name == wanted ||
+                name.StartsWith(wanted + " ", StringComparison.Ordinal) ||
+                wanted.StartsWith(name + " ", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Case and punctuation do not decide a match; the words do.</summary>
+    private static string NormalizeWords(string text) =>
+        string.Join(' ', System.Text.RegularExpressions.Regex
+            .Replace(text.ToLowerInvariant(), @"[^\p{L}\p{N}]+", " ")
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>A release label such as "(Remastered 2011)" is not part of the song's name.</summary>
+    private static string NormalizeTitle(string title) =>
+        NormalizeWords(System.Text.RegularExpressions.Regex.Replace(
+            title, @"[\(\[（「『<《〈＜].*?[\)\]）)」』>》〉＞]", " "));
 
     /// <summary>TTML or LRC as the body, or inside a JSON object under a key such as <c>ttml</c> or <c>lyrics</c>.</summary>
     internal static Lyrics? DecodeWrapped(byte[] data)
@@ -475,6 +610,8 @@ public sealed class LyricsClient : IDisposable
 
     // MARK: NetEase
 
+    /// <summary>NetEase's public web API: cloud search, then the lyric endpoint's word or
+    /// line timing. It needs the site's referer, but no key.</summary>
     private async Task<Lyrics?> NetEase(Song song, CancellationToken cancellation)
     {
         if (song.ArtistLine.Length == 0)
@@ -482,8 +619,15 @@ public sealed class LyricsClient : IDisposable
             return null;
         }
 
-        var search = new Dictionary<string, string> { ["q"] = $"{song.Title} {song.ArtistLine}" };
-        if (await Fetch("https://lyrics.paxsenix.org/netease/search", search, cancellation).ConfigureAwait(false) is not { } searchData)
+        var search = new Dictionary<string, string>
+        {
+            ["s"] = $"{song.Title} {song.ArtistLine}",
+            ["type"] = "1",
+            ["limit"] = "10",
+            ["offset"] = "0",
+        };
+        if (await Fetch("https://music.163.com/api/cloudsearch/pc", search, cancellation,
+                headers: NetEaseHeaders).ConfigureAwait(false) is not { } searchData)
         {
             return null;
         }
@@ -502,7 +646,7 @@ public sealed class LyricsClient : IDisposable
         var bestDelta = double.MaxValue;
         foreach (var item in root["result"]["songs"].Array)
         {
-            var milliseconds = item["duration"].Double ?? 0;
+            var milliseconds = item["dt"].Double ?? item["duration"].Double ?? 0;
             var delta = song.Duration is { } wanted && milliseconds > 0
                 ? Math.Abs(milliseconds / 1000 - wanted)
                 : 0;
@@ -520,8 +664,15 @@ public sealed class LyricsClient : IDisposable
             return null;
         }
 
-        var parameters = new Dictionary<string, string> { ["id"] = id, ["word"] = "true" };
-        if (await Fetch("https://lyrics.paxsenix.org/netease/lyrics", parameters, cancellation).ConfigureAwait(false) is not { } lyricsData)
+        var parameters = new Dictionary<string, string>
+        {
+            ["id"] = id,
+            ["lv"] = "1",
+            ["kv"] = "1",
+            ["tv"] = "-1",
+        };
+        if (await Fetch("https://music.163.com/api/song/lyric", parameters, cancellation,
+                headers: NetEaseHeaders).ConfigureAwait(false) is not { } lyricsData)
         {
             return null;
         }
@@ -538,6 +689,12 @@ public sealed class LyricsClient : IDisposable
         }
     }
 
+    private static readonly Dictionary<string, string> NetEaseHeaders = new()
+    {
+        ["Referer"] = "https://music.163.com/",
+        ["Origin"] = "https://music.163.com",
+    };
+
     // MARK: SimpMusic
 
     private async Task<Lyrics?> SimpMusic(Song song, CancellationToken cancellation)
@@ -548,7 +705,8 @@ public sealed class LyricsClient : IDisposable
         }
 
         var url = "https://api-lyrics.simpmusic.org/v1/" + Uri.EscapeDataString(song.Id);
-        if (await Fetch(url, new Dictionary<string, string>(), cancellation).ConfigureAwait(false) is not { } data)
+        if (await Fetch(url, new Dictionary<string, string>(), cancellation,
+                userAgent: "SimpMusicLyrics/1.0").ConfigureAwait(false) is not { } data)
         {
             return null;
         }
@@ -723,8 +881,15 @@ public sealed class LyricsClient : IDisposable
 
     // MARK: Unison
 
+    /// <summary>Unison is keyed by video first, then by song and artist.</summary>
     private async Task<Lyrics?> Unison(Song song, CancellationToken cancellation)
     {
+        if (song.Id.Length > 0 &&
+            await UnisonLyrics(new Dictionary<string, string> { ["v"] = song.Id }, cancellation).ConfigureAwait(false) is { } byVideo)
+        {
+            return byVideo;
+        }
+
         if (song.ArtistLine.Length == 0)
         {
             return null;
@@ -734,7 +899,6 @@ public sealed class LyricsClient : IDisposable
         {
             ["song"] = song.Title,
             ["artist"] = song.ArtistLine,
-            ["limit"] = "5",
         };
         if (song.Album is { } album && album.Title.Length > 0)
         {
@@ -746,41 +910,31 @@ public sealed class LyricsClient : IDisposable
             search["duration"] = ((int)Math.Round(duration)).ToString(CultureInfo.InvariantCulture);
         }
 
-        if (await Fetch("https://unison.boidu.dev/lyrics/search", search, cancellation).ConfigureAwait(false) is not { } data)
+        return await UnisonLyrics(search, cancellation).ConfigureAwait(false);
+    }
+
+    private async Task<Lyrics?> UnisonLyrics(Dictionary<string, string> parameters, CancellationToken cancellation)
+    {
+        if (await Fetch(UnisonLyricsUrl, parameters, cancellation).ConfigureAwait(false) is not { } data)
         {
             return null;
         }
 
-        Json root;
         try
         {
-            root = Json.Parse(Encoding.UTF8.GetString(data));
+            var root = Json.Parse(Encoding.UTF8.GetString(data));
+            if (root["success"].Bool != true)
+            {
+                return null;
+            }
+
+            var text = root["data"]["lyrics"].NonEmpty;
+            return text is null ? null : LyricsFormats.ParseAny(text);
         }
         catch (Exception)
         {
             return null;
         }
-
-        foreach (var item in root["data"].Array)
-        {
-            if (item["lyrics"].NonEmpty is { } text && LyricsFormats.ParseAny(text) is { } found)
-            {
-                return found;
-            }
-
-            if (IdOf(item) is not { } id)
-            {
-                continue;
-            }
-
-            var byId = await Fetch($"https://unison.boidu.dev/lyrics/{Uri.EscapeDataString(id)}", new Dictionary<string, string>(), cancellation).ConfigureAwait(false);
-            if (byId is not null && DecodeWrapped(byId) is { } again)
-            {
-                return again;
-            }
-        }
-
-        return null;
     }
 
     /// <summary>Provider ids arrive as numbers or strings.</summary>
@@ -796,7 +950,12 @@ public sealed class LyricsClient : IDisposable
 
     // MARK: Network
 
-    private async Task<byte[]?> Fetch(string url, IReadOnlyDictionary<string, string> parameters, CancellationToken cancellation)
+    private async Task<byte[]?> Fetch(
+        string url,
+        IReadOnlyDictionary<string, string> parameters,
+        CancellationToken cancellation,
+        string? userAgent = null,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
         var query = string.Join("&", parameters
             .OrderBy(pair => pair.Key, StringComparer.Ordinal)
@@ -807,8 +966,17 @@ public sealed class LyricsClient : IDisposable
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, full);
-            request.Headers.TryAddWithoutValidation("User-Agent", "Koda for Windows (https://github.com/Ivorisnoob/Koda-Windows)");
+            request.Headers.TryAddWithoutValidation("User-Agent",
+                userAgent ?? $"Koda for Windows ({ForkConfig.RepoUrl}; {ForkConfig.IssuesUrl})");
             request.Headers.TryAddWithoutValidation("Accept", "application/json, application/xml, text/plain, */*");
+            if (headers is not null)
+            {
+                foreach (var header in headers)
+                {
+                    request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+            }
+
             using var response = await _http.SendAsync(request, cancellation).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {

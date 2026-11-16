@@ -157,5 +157,18 @@ public class LyricsTests
         Assert.NotNull(lines);
         CheckWordTimed(lines!);
     }
+
+    [Fact]
+    public void BiniLyricsMatchesOnlyTheSameRecording()
+    {
+        var hit = Json.Parse("""{"title":"Creep","artist":"Radiohead","duration":238.6}""");
+        var song = new Song("XFkzRNyygfk", "Creep", "Radiohead", [], null, 238, null, false, null);
+        var otherCut = new Song("x", "Creep (Acoustic)", "Radiohead", [], null, 258, null, false, null);
+        var otherArtist = new Song("x", "Creep", "Someone Else", [], null, 238, null, false, null);
+
+        Assert.True(LyricsClient.MatchesBiniLyrics(hit, song));
+        Assert.False(LyricsClient.MatchesBiniLyrics(hit, otherCut));
+        Assert.False(LyricsClient.MatchesBiniLyrics(hit, otherArtist));
+    }
 }
 

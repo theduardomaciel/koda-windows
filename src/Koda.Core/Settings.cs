@@ -108,12 +108,24 @@ public sealed class Settings
     /// <summary>The cover's colours drift behind Now Playing; off, they hold still.</summary>
     public bool AnimatesPlayerBackground { get; set; } = true;
 
-    /// <summary>Every lyrics service, best first; the order decides which answer wins.</summary>
-    public List<LyricsSource> LyricsSourceOrder { get; set; } =
+    /// <summary>The services lyrics can come from, in the order they are asked.</summary>
+    public static readonly LyricsSource[] DefaultLyricsSources =
     [
-        LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.NetEase,
-        LyricsSource.SimpMusic, LyricsSource.Lrclib, LyricsSource.KuGou, LyricsSource.Unison,
+        LyricsSource.BetterLyrics, LyricsSource.Unison, LyricsSource.BiniLyrics,
+        LyricsSource.YouLyPlus, LyricsSource.BetterLyricsQQ, LyricsSource.NetEase,
+        LyricsSource.SimpMusic, LyricsSource.Lrclib, LyricsSource.BetterLyricsKugou,
+        LyricsSource.KuGou,
     ];
+
+    /// <summary>The source order's revision. A newer release moves the recommended
+    /// providers to the top once; after that, a drag is the listener's own order.</summary>
+    public const int CurrentLyricsSourceOrderVersion = 1;
+
+    /// <summary>Which revision of the recommended order the file was saved with.</summary>
+    public int LyricsSourceOrderVersion { get; set; }
+
+    /// <summary>Every lyrics service, best first; the order decides which answer wins.</summary>
+    public List<LyricsSource> LyricsSourceOrder { get; set; } = [.. DefaultLyricsSources];
 
     /// <summary>The services the listener turned off.</summary>
     public List<LyricsSource> DisabledLyricsSources { get; set; } = [];
@@ -202,7 +214,7 @@ public sealed class Settings
             case LyricsPreset.Expressive:
                 LyricsRenderer = LyricsRenderer.Expressive;
                 LyricsLineSpacing = 0.90;
-                LyricsIdleOpacity = 0.76;
+                LyricsIdleOpacity = 0.30;
                 LyricsSoftness = 0.20;
                 LyricsGlowIntensity = 1.0;
                 LyricsFont = "Segoe UI Variable Display";
@@ -418,6 +430,22 @@ public sealed class Settings
         }
     }
 
+    /// <summary>Replaces the priority order, keeping any service the new order forgot
+    /// at the end so a drag can never lose a provider.</summary>
+    public void SetLyricsSourceOrder(IEnumerable<LyricsSource> order)
+    {
+        var listed = order.Distinct().ToList();
+        foreach (var source in LyricsSourceOrder)
+        {
+            if (!listed.Contains(source))
+            {
+                listed.Add(source);
+            }
+        }
+
+        LyricsSourceOrder = listed;
+    }
+
     /// <summary>Changes a setting and writes the file.</summary>
     public void Update(Action<Settings> change)
     {
@@ -461,13 +489,13 @@ public sealed class Settings
 
             if (!File.Exists(path))
             {
-                return new Settings();
+                return new Settings { LyricsSourceOrderVersion = CurrentLyricsSourceOrderVersion };
             }
 
             var settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path), Options);
             if (settings is null)
             {
-                return new Settings();
+                return new Settings { LyricsSourceOrderVersion = CurrentLyricsSourceOrderVersion };
             }
 
             // The Expressive look changed from a softer Koda to the Spicy motion. A saved
@@ -478,11 +506,17 @@ public sealed class Settings
                 settings.ApplyLyricsPreset(LyricsPreset.Expressive);
             }
 
+            // A release that changes the recommended order puts the best providers at the
+            // top once. After that, the listener's own drag order is what is kept.
+            if (settings.LyricsSourceOrderVersion < CurrentLyricsSourceOrderVersion)
+            {
+                settings.LyricsSourceOrder = [.. DefaultLyricsSources];
+                settings.LyricsSourceOrderVersion = CurrentLyricsSourceOrderVersion;
+            }
+
             // Services added in a later version join at the end of a saved order.
             var known = settings.LyricsSourceOrder
-                .Concat([
-                    LyricsSource.YouLyPlus, LyricsSource.BetterLyrics, LyricsSource.NetEase,
-                    LyricsSource.SimpMusic, LyricsSource.Lrclib, LyricsSource.KuGou, LyricsSource.Unison])
+                .Concat(DefaultLyricsSources)
                 .Distinct()
                 .ToList();
             settings.LyricsSourceOrder = known;
@@ -490,7 +524,7 @@ public sealed class Settings
         }
         catch (Exception)
         {
-            return new Settings();
+            return new Settings { LyricsSourceOrderVersion = CurrentLyricsSourceOrderVersion };
         }
     }
 }

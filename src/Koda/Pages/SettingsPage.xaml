@@ -6,7 +6,6 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:helpers="using:Koda.Helpers"
-    xmlns:controls="using:Koda.Controls"
     mc:Ignorable="d">
     <Page.Resources>
         <!-- A Windows Settings card: a hairline border, the card fill, and 4px corners.
@@ -37,6 +36,15 @@
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="OffContent" Value="" />
             <Setter Property="OnContent" Value="" />
+        </Style>
+        <!-- A reorderable settings row: no list padding, so the row keeps the card's rhythm. -->
+        <Style x:Key="SettingsListItem" TargetType="ListViewItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="Transparent" />
         </Style>
     </Page.Resources>
 
@@ -466,10 +474,6 @@
             <TextBlock Text="Lyrics" Style="{ThemeResource BodyStrongTextBlockStyle}" Margin="0,20,0,8" Tag="section" />
             <Border Style="{StaticResource SettingsCard}">
                 <StackPanel>
-                    <!-- A small still sample of the look; its own control so it can be
-                         taken out without touching the rest of the page. -->
-                    <controls:LyricsPreview x:Name="LyricsPreviewCard" Margin="16,16,16,4" />
-
                     <Grid Style="{StaticResource SettingsRow}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -625,10 +629,9 @@
                             <TextBlock
                                 Text="Advanced"
                                 Style="{ThemeResource BodyStrongTextBlockStyle}"
-                                Margin="16,12,16,12" />
+                                Margin="0,12,16,12" />
                         </Expander.Header>
                         <StackPanel>
-                            <Border Style="{StaticResource SettingsDivider}" />
                             <Grid Style="{StaticResource SettingsRow}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -789,13 +792,22 @@
             <Border Style="{StaticResource SettingsCard}">
                 <StackPanel>
                     <TextBlock
-                        Text="The services the lyrics are asked for, best first. The last one cannot be turned off: the lyrics need somewhere to come from."
+                        Text="The services the lyrics are asked for, best first. Drag a row to change its priority; the first service with lyrics wins."
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap"
                         Margin="16,14,16,2" />
-                    <StackPanel x:Name="LyricsSourcesPanel" />
-                    <Border Style="{StaticResource SettingsDivider}" />
+                    <ListView
+                        x:Name="LyricsSourcesList"
+                        SelectionMode="None"
+                        CanDragItems="True"
+                        CanReorderItems="True"
+                        AllowDrop="True"
+                        DragItemsCompleted="OnLyricsSourcesReordered"
+                        ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                        ScrollViewer.VerticalScrollMode="Disabled"
+                        ScrollViewer.IsVerticalRailEnabled="False"
+                        ItemContainerStyle="{StaticResource SettingsListItem}" />
                     <Grid Style="{StaticResource SettingsRow}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />

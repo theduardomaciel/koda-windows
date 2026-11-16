@@ -19,7 +19,7 @@ public class SettingsTests
         Assert.True(settings.CloseToTray);
         Assert.True(settings.Autoplay);
         Assert.Equal(100, settings.Volume);
-        Assert.Equal(7, settings.LyricsSources.Count);
+        Assert.Equal(10, settings.LyricsSources.Count);
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public class SettingsTests
         }
 
         Assert.Single(settings.LyricsSources);
-        Assert.True(settings.IsEnabled(LyricsSource.Unison));
+        Assert.True(settings.IsEnabled(LyricsSource.KuGou));
     }
 
     [Fact]
@@ -130,16 +130,55 @@ public class SettingsTests
     }
 
     [Fact]
+    public void TheSourcesStartInBetterLyricsOrder()
+    {
+        var order = new Settings().LyricsSourceOrder;
+
+        Assert.Equal(LyricsSource.BetterLyrics, order[0]);
+        Assert.Contains(LyricsSource.Unison, order);
+        Assert.Contains(LyricsSource.BiniLyrics, order);
+        Assert.Contains(LyricsSource.BetterLyricsQQ, order);
+        Assert.Contains(LyricsSource.BetterLyricsKugou, order);
+    }
+
+    [Fact]
+    public void ReorderingTheServicesKeepsEveryOne()
+    {
+        var settings = new Settings();
+        var moved = settings.LyricsSourceOrder[0];
+
+        settings.SetLyricsSourceOrder(settings.LyricsSourceOrder.Skip(1).Append(moved));
+
+        Assert.Equal(moved, settings.LyricsSourceOrder[^1]);
+        Assert.Equal(10, settings.LyricsSourceOrder.Count);
+    }
+
+    [Fact]
     public void AServiceAddedLaterJoinsTheEndOfTheOrder()
     {
         // A file saved before a service existed still asks for it.
         var file = Path.Combine(Fixtures.Scratch, $"settings-order-{Guid.NewGuid():N}.json");
-        File.WriteAllText(file, """{ "lyricsSourceOrder": [ "Lrclib" ] }""");
+        File.WriteAllText(file, """{ "lyricsSourceOrderVersion": 1, "lyricsSourceOrder": [ "Lrclib" ] }""");
 
         var settings = Settings.Load(file);
 
-        Assert.Equal(7, settings.LyricsSourceOrder.Count);
+        Assert.Equal(10, settings.LyricsSourceOrder.Count);
         Assert.Equal(LyricsSource.Lrclib, settings.LyricsSourceOrder[0]);
+    }
+
+    [Fact]
+    public void AnOldOrderTakesTheBestFirstOrderOnce()
+    {
+        var file = Path.Combine(Fixtures.Scratch, $"settings-old-order-{Guid.NewGuid():N}.json");
+        File.WriteAllText(file, """{ "lyricsSourceOrder": [ "YouLyPlus", "BetterLyrics", "Lrclib" ] }""");
+
+        var settings = Settings.Load(file);
+
+        Assert.Equal(Settings.CurrentLyricsSourceOrderVersion, settings.LyricsSourceOrderVersion);
+        Assert.Equal(LyricsSource.BetterLyrics, settings.LyricsSourceOrder[0]);
+        Assert.Equal(LyricsSource.Unison, settings.LyricsSourceOrder[1]);
+        Assert.Equal(LyricsSource.BiniLyrics, settings.LyricsSourceOrder[2]);
+        Assert.Equal(10, settings.LyricsSourceOrder.Count);
     }
 
     [Fact]
@@ -162,7 +201,7 @@ public class SettingsTests
         Assert.Equal(LyricsRenderer.Expressive, settings.LyricsRenderer);
         Assert.Equal(0.90, settings.LyricsLineSpacing, 2);
         Assert.Equal(0.20, settings.LyricsSoftness, 2);
-        Assert.Equal(0.76, settings.LyricsIdleOpacity, 2);
+        Assert.Equal(0.30, settings.LyricsIdleOpacity, 2);
         Assert.Equal(1.0, settings.LyricsGlowIntensity, 2);
         Assert.Equal("Segoe UI Variable Display", settings.LyricsFont);
 

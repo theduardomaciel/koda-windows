@@ -352,6 +352,20 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
+        if (node is ListViewBase list)
+        {
+            // The lyrics sources are a reorderable list, not a stack of card rows.
+            foreach (var item in list.Items)
+            {
+                if (item is ListViewItem { Content: Grid row } && IsRow(row))
+                {
+                    rows.Add(row);
+                }
+            }
+
+            return;
+        }
+
         if (node is Panel panel)
         {
             foreach (var child in panel.Children)
@@ -813,28 +827,43 @@ public sealed partial class SettingsPage : Page
 
         App.Settings.Update(s => s.SetEnabled(source, toggle.IsOn));
 
-        // The last service cannot be turned off, so the switches are rebuilt in their real state.
+        // The last service cannot be turned off, so its switch springs back.
+        if (App.Settings.IsEnabled(source) != toggle.IsOn)
+        {
+            _loaded = false;
+            toggle.IsOn = !toggle.IsOn;
+            _loaded = true;
+        }
+
         LyricsService.Forget();
-        Load();
     }
 
-    /// <summary>The services, in the order the settings keep, each with its switch. Generated
-    /// from the order so a new provider is a Core change, not another XAML row.</summary>
+    /// <summary>The services in priority order, each with a switch and a drag handle.
+    /// Generated from the saved order so a new provider is a Core change, not another
+    /// XAML row.</summary>
     private void BuildLyricsSources()
     {
-        LyricsSourcesPanel.Children.Clear();
+        LyricsSourcesList.Items.Clear();
         var sources = App.Settings.LyricsSourceOrder;
         for (var index = 0; index < sources.Count; index++)
         {
-            if (index > 0)
-            {
-                LyricsSourcesPanel.Children.Add(new Border { Style = _dividerStyle });
-            }
-
             var source = sources[index];
             var row = new Grid { Style = _rowStyle };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.ColumnDefinitions.Add(new ColumnDefinition());
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var grip = new FontIcon
+            {
+                Glyph = "\uE76F",
+                FontSize = 16,
+                Opacity = 0.55,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+            };
+            AutomationProperties.SetName(grip, "Drag to reorder");
+            row.Children.Add(grip);
+
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
             text.Children.Add(new TextBlock
             {
@@ -848,6 +877,7 @@ public sealed partial class SettingsPage : Page
                 Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
                 TextWrapping = TextWrapping.Wrap,
             });
+            Grid.SetColumn(text, 1);
             row.Children.Add(text);
 
             var toggle = new ToggleSwitch
@@ -856,35 +886,70 @@ public sealed partial class SettingsPage : Page
                 IsOn = App.Settings.IsEnabled(source),
                 Tag = source,
             };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, SourceName(source));
+            AutomationProperties.SetName(toggle, SourceName(source));
             toggle.Toggled += OnSourceToggled;
-            Grid.SetColumn(toggle, 1);
+            Grid.SetColumn(toggle, 2);
             row.Children.Add(toggle);
-            LyricsSourcesPanel.Children.Add(row);
+
+            var item = new ListViewItem
+            {
+                Content = row,
+                Tag = source,
+                Padding = new Thickness(0),
+                Margin = new Thickness(0),
+                MinHeight = 0,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Stretch,
+            };
+            ToolTipService.SetToolTip(item, "Drag to change the priority");
+            LyricsSourcesList.Items.Add(item);
         }
+    }
+
+    /// <summary>The list has already moved the row; the new order is what it holds.</summary>
+    private void OnLyricsSourcesReordered(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        var order = LyricsSourcesList.Items
+            .OfType<ListViewItem>()
+            .Select(item => item.Tag)
+            .OfType<LyricsSource>()
+            .ToList();
+        if (order.Count == 0 || order.SequenceEqual(App.Settings.LyricsSourceOrder))
+        {
+            return;
+        }
+
+        App.Settings.Update(s => s.SetLyricsSourceOrder(order));
+        LyricsService.Forget();
     }
 
     private static string SourceName(LyricsSource source) => source switch
     {
+        LyricsSource.BetterLyrics => "Better Lyrics",
+        LyricsSource.Unison => "Unison",
+        LyricsSource.BiniLyrics => "BiniLyrics",
+        LyricsSource.BetterLyricsQQ => "Better Lyrics Portato",
         LyricsSource.YouLyPlus => "YouLyPlus",
-        LyricsSource.BetterLyrics => "BetterLyrics",
         LyricsSource.NetEase => "NetEase",
         LyricsSource.SimpMusic => "SimpMusic",
         LyricsSource.Lrclib => "LRCLIB",
+        LyricsSource.BetterLyricsKugou => "Better Lyrics Legato",
         LyricsSource.KuGou => "KuGou",
-        LyricsSource.Unison => "Unison",
         _ => source.ToString(),
     };
 
     private static string SourceDescription(LyricsSource source) => source switch
     {
+        LyricsSource.BetterLyrics => "Syllable-timed when available, otherwise lines.",
+        LyricsSource.Unison => "Community-synced, from word timing down to plain text.",
+        LyricsSource.BiniLyrics => "Apple Music lyrics from lrc.red, word or line timed.",
+        LyricsSource.BetterLyricsQQ => "Word-timed, through Better Lyrics' QQ provider.",
         LyricsSource.YouLyPlus => "Word-by-word, with duets and backing vocals.",
-        LyricsSource.BetterLyrics => "Word-by-word, from several catalogues.",
-        LyricsSource.NetEase => "Word-by-word from NetEase's catalogue.",
-        LyricsSource.SimpMusic => "Word-by-word, timed by SimpMusic.",
+        LyricsSource.NetEase => "NetEase's own timing: word when it has it, otherwise lines.",
+        LyricsSource.SimpMusic => "Community timing from SimpMusic: word when it has it, otherwise lines.",
         LyricsSource.Lrclib => "Line-by-line and plain lyrics, community-made.",
+        LyricsSource.BetterLyricsKugou => "Line-timed, through Better Lyrics' KuGou provider.",
         LyricsSource.KuGou => "Line-timed lyrics from KuGou.",
-        LyricsSource.Unison => "Apple Music's word timing, through Unison.",
         _ => "",
     };
 

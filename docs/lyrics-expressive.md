@@ -65,7 +65,7 @@ matches the source.
 - Unsung: `50%` white (`#80FFFFFF`).
 - Sung: `85%` white (`#D9FFFFFF`).
 - Hovered active line: up to `100%` white.
-- Upcoming line opacity: `0.76`; sung line opacity: `0.96`; active: `1.0`.
+- Upcoming line opacity: `0.30`; sung line opacity: `0.96`; active: `1.0`.
 
 ### Lines and extras
 
@@ -82,7 +82,6 @@ matches the source.
 | Motion math, springs, safe letter splitting | `src/Koda.Core/Lyrics/LyricsMotion.cs` |
 | Word/letter views, painting, hover box, dots | `src/Koda/Pages/LyricsPanel.cs` |
 | Preset values and the saved-preset refresh | `src/Koda.Core/Settings.cs` |
-| Settings preview | `src/Koda/Controls/LyricsPreview.cs` |
 | Motion tests | `tests/Koda.Core.Tests/LyricsMotionTests.cs` |
 
 ## What is approximated
