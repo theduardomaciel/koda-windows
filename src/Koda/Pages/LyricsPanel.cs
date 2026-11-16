@@ -1272,6 +1272,7 @@ internal sealed class LyricsPanel : IDisposable
                 word.OriginX = originX;
                 word.OriginY = 0.5;
                 word.Element.RenderTransformOrigin = new Windows.Foundation.Point(originX, 0.5);
+                ApplyCenter(word.Visual, word.Element, originX, 0.5);
             }
 
             start = end + 1;
@@ -1369,6 +1370,7 @@ internal sealed class LyricsPanel : IDisposable
                 FontSize = fontSize,
                 JoinsPrevious = joinsPrevious,
             };
+            TrackCenter(word);
         }
 
         word.Data = data;
@@ -1458,6 +1460,7 @@ internal sealed class LyricsPanel : IDisposable
             JoinsPrevious = joinsPrevious,
             LetterCount = count,
         };
+        TrackCenter(word);
         for (var index = 0; index < count; index++)
         {
             var letter = MakeLetter(string.Empty, fontSize, soft, index, count);
@@ -1495,17 +1498,21 @@ internal sealed class LyricsPanel : IDisposable
             glowTransform.TranslateY = 0;
         }
 
-        ApplyScale(letter.Visual, letter.Text, 1, 0.5, 0.5);
-        ApplyTranslation(letter.Visual, 0, 0);
-        ApplyScale(letter.GlowHostVisual, letter.GlowHost, 1, 0.5, 0.5);
-        ApplyTranslation(letter.GlowHostVisual, 0, 0);
+        var rest = _renderer == LyricsRenderer.Expressive && _motion
+            ? new LetterMotion(LyricsMotion.LetterRestScale, 0, LyricsMotion.LetterRestY, 0)
+            : new LetterMotion(1, 0, 0, 0);
+        var restY = rest.Y * fontSize;
+        ApplyScale(letter.Visual, letter.Text, rest.Scale, 0.5, 0.5);
+        ApplyTranslation(letter.Visual, 0, restY);
+        ApplyScale(letter.GlowHostVisual, letter.GlowHost, rest.Scale, 0.5, 0.5);
+        ApplyTranslation(letter.GlowHostVisual, 0, restY);
 
         letter.PaintedLit = double.NaN;
         letter.PaintedHovered = false;
         letter.PaintedActive = false;
-        letter.PaintedScale = -1;
-        letter.PaintedX = double.NaN;
-        letter.PaintedY = double.NaN;
+        letter.PaintedScale = rest.Scale;
+        letter.PaintedX = 0;
+        letter.PaintedY = restY;
         letter.PaintedGlow = -1;
         letter.PaintedBlur = -1;
         letter.GlowShown = false;
@@ -1522,8 +1529,16 @@ internal sealed class LyricsPanel : IDisposable
         word.Transform.ScaleY = 1;
         word.Transform.TranslateX = 0;
         word.Transform.TranslateY = 0;
-        ApplyScale(word.Visual, word.Element, 1, word.OriginX, word.OriginY);
-        ApplyTranslation(word.Visual, 0, 0);
+
+        // An unsung Expressive word already rests small and low. Starting it at full
+        // size would make the whole line shrink the moment it became the current line.
+        var rest = _renderer == LyricsRenderer.Expressive && _motion
+            ? new WordMotion(LyricsMotion.WordRestScale, 0, LyricsMotion.WordRestY)
+            : new WordMotion(1, 0, 0);
+        var y = rest.Y * word.FontSize;
+        ApplyScale(word.Visual, word.Element, rest.Scale, word.OriginX, word.OriginY);
+        ApplyTranslation(word.Visual, 0, y);
+
         word.PushX = 0;
         word.PaintedFill = -1;
         word.PaintedLit = double.NaN;
@@ -1531,9 +1546,9 @@ internal sealed class LyricsPanel : IDisposable
         word.PaintedActive = false;
         word.PaintedRise = -1;
         word.PaintedSwell = -1;
-        word.PaintedScale = -1;
-        word.PaintedX = double.NaN;
-        word.PaintedY = double.NaN;
+        word.PaintedScale = rest.Scale;
+        word.PaintedX = 0;
+        word.PaintedY = y;
     }
 
     private void ResetFill(LinearGradientBrush fill)
@@ -1663,6 +1678,11 @@ internal sealed class LyricsPanel : IDisposable
             Index = index,
             Count = count,
         };
+        TrackCenter(letter, textBlock, letter.Visual);
+        if (glowHost is not null)
+        {
+            TrackCenter(letter, glowHost, letter.GlowHostVisual);
+        }
 
         if (glowHost is not null)
         {
@@ -2199,26 +2219,39 @@ internal sealed class LyricsPanel : IDisposable
 
             var isActive = singing && i == index;
             var distance = index >= 0 ? Math.Abs(i - index) : int.MaxValue;
-            row.Opacity = expressive
-                ? isActive
-                    ? 1
-                    : index >= 0 && i <= index
-                        ? ExpressiveSungLineOpacity
-                        : _idleFar
-                : sung
+            if (expressive)
+            {
+                // The line brightens with the fill front, not because it became the
+                // selected line: a word's own progress raises the whole line's opacity,
+                // and an untouched line stays at the idle level until its turn.
+                var progress = LineProgress(row, time);
+                var full = isActive || i > index ? 1 : ExpressiveSungLineOpacity;
+                row.Opacity = _idleFar + (full - _idleFar) * progress;
+            }
+            else
+            {
+                row.Opacity = sung
                     ? 1
                     : distance <= 1
                         ? _idleNear
                         : _idleFar;
+            }
 
             // The rows step back with a fade alone: scaling them by a hair made a new line
             // snap when the fill took over the transform. While paused the fade would only
             // creep (there is no frame timer), so the row takes its target at once.
             var wordsTarget = row.Hovered ? 1 : row.Opacity;
-            if (Math.Abs(row.Words.Opacity - wordsTarget) >= 0.001)
+            if (expressive)
+            {
+                // The line itself does not fade up over its duration: the only gradual
+                // opacity change is the fill's vertical front crossing each word. A
+                // line-wide approach made the unsung words brighten with the line clock.
+                row.Words.Opacity = wordsTarget;
+            }
+            else if (Math.Abs(row.Words.Opacity - wordsTarget) >= 0.001)
             {
                 row.Words.Opacity = _playing
-                    ? Approach(row.Words.Opacity, wordsTarget, expressive ? 0.03 : 0.18)
+                    ? Approach(row.Words.Opacity, wordsTarget, 0.18)
                     : wordsTarget;
             }
 
@@ -2226,10 +2259,14 @@ internal sealed class LyricsPanel : IDisposable
             {
                 // Backing vocals step back with their line, at 70% of its weight.
                 var target = wordsTarget * 0.7;
-                if (Math.Abs(row.Background.Opacity - target) >= 0.001)
+                if (expressive)
+                {
+                    row.Background.Opacity = target;
+                }
+                else if (Math.Abs(row.Background.Opacity - target) >= 0.001)
                 {
                     row.Background.Opacity = _playing
-                        ? Approach(row.Background.Opacity, target, expressive ? 0.03 : 0.18)
+                        ? Approach(row.Background.Opacity, target, 0.18)
                         : target;
                 }
             }
@@ -2274,6 +2311,45 @@ internal sealed class LyricsPanel : IDisposable
     /// started keeps filling until its end, even after a later line has started.</summary>
     private static bool IsSung(Row row, double time) =>
         time >= row.Line.Time && time <= LineEnd(row) + 0.05;
+
+    /// <summary>How much of one word the fill front has crossed.</summary>
+    private static double WordProgress(LyricWord word, double time)
+    {
+        var duration = word.End - word.Start;
+        return duration <= 0
+            ? time >= word.End ? 1 : 0
+            : Math.Clamp((time - word.Start) / duration, 0, 1);
+    }
+
+    /// <summary>The filled fraction of a line, weighted by word width so the value follows
+    /// the visible front: a long word raises the line as slowly as it fills. A line whose
+    /// words are not materialized yet falls back to its own timing.</summary>
+    private static double LineProgress(Row row, double time)
+    {
+        if (row.WordItems.Count == 0)
+        {
+            var duration = LineEnd(row) - row.Line.Time;
+            return duration <= 0
+                ? time >= row.Line.Time ? 1 : 0
+                : Math.Clamp((time - row.Line.Time) / duration, 0, 1);
+        }
+
+        var total = 0.0;
+        var filled = 0.0;
+        foreach (var word in row.WordItems)
+        {
+            var weight = word.Element.ActualWidth;
+            if (weight < 1)
+            {
+                weight = Math.Max(1, word.Data.Text.Length);
+            }
+
+            total += weight;
+            filled += weight * WordProgress(word.Data, time);
+        }
+
+        return total <= 0 ? 0 : Math.Clamp(filled / total, 0, 1);
+    }
 
     /// <summary>Repaints every word after a seek, so lines ahead are unsung and the lines
     /// already behind are complete, instead of keeping the old line's partial fill.</summary>
@@ -2696,19 +2772,60 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
-        if (element is not null)
+        ApplyCenter(visual, element, originX, originY);
+        visual.Scale = new Vector3((float)scale, (float)scale, 1);
+    }
+
+    /// <summary>Keeps the scale origin on the element's current size. A pooled word is
+    /// measured again after it is reattached, and a scale written before that layout
+    /// would otherwise make the word jump the first time it is painted.</summary>
+    private static void ApplyCenter(
+        Visual? visual,
+        FrameworkElement? element,
+        double originX,
+        double originY)
+    {
+        if (visual is null || element is null)
         {
-            var center = new Vector3(
-                (float)(element.ActualWidth * originX),
-                (float)(element.ActualHeight * originY),
-                0);
-            if (visual.CenterPoint != center)
-            {
-                visual.CenterPoint = center;
-            }
+            return;
         }
 
-        visual.Scale = new Vector3((float)scale, (float)scale, 1);
+        var center = new Vector3(
+            (float)(element.ActualWidth * originX),
+            (float)(element.ActualHeight * originY),
+            0);
+        if (visual.CenterPoint != center)
+        {
+            visual.CenterPoint = center;
+        }
+    }
+
+    private static void TrackCenter(Word word)
+    {
+        word.Element.SizeChanged += (_, e) =>
+        {
+            if (word.Visual is { } visual)
+            {
+                visual.CenterPoint = new Vector3(
+                    (float)(e.NewSize.Width * word.OriginX),
+                    (float)(e.NewSize.Height * word.OriginY),
+                    0);
+            }
+        };
+    }
+
+    private static void TrackCenter(Letter letter, FrameworkElement element, Visual? visual)
+    {
+        element.SizeChanged += (_, e) =>
+        {
+            if (visual is not null)
+            {
+                visual.CenterPoint = new Vector3(
+                    (float)(e.NewSize.Width / 2),
+                    (float)(e.NewSize.Height / 2),
+                    0);
+            }
+        };
     }
 
     private static void ApplyTranslation(Visual? visual, double x, double y)
@@ -3070,6 +3187,11 @@ internal sealed class LyricsPanel : IDisposable
         letter.PaintedGlow = -1;
         letter.PaintedBlur = -1;
         letter.GlowIdleSince = -1;
+
+        // The mask's native surface is only released once the brush is collected. A long
+        // song can dispose hundreds of them, so collect when the backlog grows instead of
+        // waiting for a collection the small managed heap may not provoke for minutes.
+        CollectDisposedMasks();
     }
 
     private void ReleaseGlows()
