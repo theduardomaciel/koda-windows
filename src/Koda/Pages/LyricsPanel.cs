@@ -135,6 +135,10 @@ internal sealed class LyricsPanel : IDisposable
     private double _baseLineGap = 32;
     private double _fontSize = 36;
     private double _lineGap = 32;
+    private double _spaceSize = -1;
+    private double _spaceSoftSize = -1;
+    private double _spaceWidth;
+    private double _spaceSoftWidth;
     private BackingVocalsMode _backingMode = BackingVocalsMode.Shown;
     private double _idleNear = 0.5;
     private double _idleFar = 0.36;
@@ -336,6 +340,11 @@ internal sealed class LyricsPanel : IDisposable
         /// <summary>A line-timed row's one text block, which has no per-word elements.</summary>
         public TextBlock? LineText { get; set; }
         public double LineTextScale { get; set; } = -1;
+        /// <summary>The composition visuals that carry a static rest scale for the whole
+        /// row, so layout margins (spaces) shrink with the glyphs.</summary>
+        public Visual? WordsVisual { get; set; }
+        public Visual? BackgroundVisual { get; set; }
+        public double RestScale { get; set; } = -1;
         /// <summary>The height the rich content had, so collapsing does not move the scroll.</summary>
         public double CachedHeight { get; set; }
         /// <summary>The three dots of the gap that follows this line, when the gap is long.</summary>
@@ -857,6 +866,10 @@ internal sealed class LyricsPanel : IDisposable
             content.Children.Add(row.Words);
 
             row.Host = host;
+            row.WordsVisual = ElementCompositionPreview.GetElementVisual(row.Words);
+            row.BackgroundVisual = ElementCompositionPreview.GetElementVisual(row.Background);
+            row.Words.SizeChanged += (_, e) => CenterRowVisual(row, row.WordsVisual, e.NewSize);
+            row.Background.SizeChanged += (_, e) => CenterRowVisual(row, row.BackgroundVisual, e.NewSize);
 
             // A tap on the line jumps the song to it, and hands the panel back to the song.
             host.Tapped += (_, _) =>
@@ -1182,6 +1195,8 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         row.Rich = false;
+        SetRowRestScale(row, 1);
+        row.RestScale = -1;
     }
 
     private void ReleaseWordGlows(Word word)
@@ -1437,7 +1452,7 @@ internal sealed class LyricsPanel : IDisposable
         word.JoinsPrevious = joinsPrevious;
         word.LetterCount = 0;
         word.Element.Visibility = Visibility.Visible;
-        word.Element.Margin = new Thickness(0, 0, data.SpaceAfter ? fontSize * WordSpacing : 0, 0);
+        word.Element.Margin = new Thickness(0, 0, data.SpaceAfter ? WordSpace(fontSize, soft) : 0, 0);
         var block = word.Text!;
         block.Text = data.Text;
         block.Visibility = Visibility.Visible;
@@ -1474,7 +1489,7 @@ internal sealed class LyricsPanel : IDisposable
         word.LetterCount = pieces.Count;
         word.Element.Visibility = Visibility.Visible;
         var panel = (StackPanel)word.Element;
-        panel.Margin = new Thickness(0, 0, data.SpaceAfter ? fontSize * WordSpacing : 0, 0);
+        panel.Margin = new Thickness(0, 0, data.SpaceAfter ? WordSpace(fontSize, soft) : 0, 0);
 
         for (var i = 0; i < word.Letters.Count; i++)
         {
@@ -1590,14 +1605,10 @@ internal sealed class LyricsPanel : IDisposable
         word.Transform.TranslateX = 0;
         word.Transform.TranslateY = 0;
 
-        // An unsung Expressive word already rests small and low. Starting it at full
-        // size would make the whole line shrink the moment it became the current line.
-        var rest = _renderer == LyricsRenderer.Expressive && _motion
-            ? new WordMotion(LyricsMotion.WordRestScale, 0, LyricsMotion.WordRestY)
-            : new WordMotion(1, 0, 0);
-        var y = rest.Y * word.FontSize;
-        ApplyScale(word.Visual, word.Element, rest.Scale, word.OriginX, word.OriginY);
-        ApplyTranslation(word.Visual, 0, y);
+        // A static rich row is scaled as a whole (so its word margins shrink too); its
+        // words start at 1.0. The line's own first paint takes them to the 0.95 rest.
+        ApplyScale(word.Visual, word.Element, 1, word.OriginX, word.OriginY);
+        ApplyTranslation(word.Visual, 0, 0);
 
         word.PushX = 0;
         word.PaintedFill = -1;
@@ -1606,9 +1617,9 @@ internal sealed class LyricsPanel : IDisposable
         word.PaintedActive = false;
         word.PaintedRise = -1;
         word.PaintedSwell = -1;
-        word.PaintedScale = rest.Scale;
+        word.PaintedScale = 1;
         word.PaintedX = 0;
-        word.PaintedY = y;
+        word.PaintedY = 0;
     }
 
     /// <summary>Keeps a far row's placeholder at the Expressive rest size without changing
@@ -1637,6 +1648,47 @@ internal sealed class LyricsPanel : IDisposable
             row.LineTextScale = scale;
             ApplyPlaceholderScale(text, scale);
         }
+    }
+
+    private void SetRowRestScale(Row row, double scale)
+    {
+        if (!row.Rich || Math.Abs(scale - row.RestScale) < 0.001)
+        {
+            return;
+        }
+
+        row.RestScale = scale;
+        ApplyRowScale(row.WordsVisual, row.Words, scale);
+        ApplyRowScale(row.BackgroundVisual, row.Background, scale);
+    }
+
+    private static void CenterRowVisual(Row row, Visual? visual, Windows.Foundation.Size size)
+    {
+        if (visual is null)
+        {
+            return;
+        }
+
+        var originX = row.Words.HorizontalAlignment == HorizontalAlignment.Right ? 1.0 : 0.0;
+        visual.CenterPoint = new Vector3(
+            (float)(size.Width * originX),
+            (float)(size.Height / 2),
+            0);
+    }
+
+    private static void ApplyRowScale(Visual? visual, FrameworkElement element, double scale)
+    {
+        if (visual is null)
+        {
+            return;
+        }
+
+        var originX = element.HorizontalAlignment == HorizontalAlignment.Right ? 1.0 : 0.0;
+        visual.CenterPoint = new Vector3(
+            (float)(element.ActualWidth * originX),
+            (float)(element.ActualHeight / 2),
+            0);
+        visual.Scale = new Vector3((float)scale, (float)scale, 1);
     }
 
     private static void ApplyPlaceholderScale(FrameworkElement element, double scale)
@@ -1964,7 +2016,7 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         word.FontSize = size;
-        word.Element.Margin = new Thickness(0, 0, word.Data.SpaceAfter ? size * WordSpacing : 0, 0);
+        word.Element.Margin = new Thickness(0, 0, word.Data.SpaceAfter ? WordSpace(size, soft) : 0, 0);
         word.PaintedRise = -1; // the lift distance changed with the size
         word.PaintedScale = -1;
         word.PaintedLit = double.NaN;
@@ -2331,6 +2383,12 @@ internal sealed class LyricsPanel : IDisposable
                 }
 
                 SetLineTextRest(row, rest);
+
+                // A rich row that is waiting its turn carries the rest scale on the whole
+                // panel, so the glyphs and the layout spaces shrink together. The row being
+                // sung drops that panel scale and lets each word animate from 0.95.
+                var rowRest = row.Rich && !isActive && i > index ? LyricsMotion.WordRestScale : 1;
+                SetRowRestScale(row, rowRest);
             }
 
             row.Opacity = expressive
@@ -3699,6 +3757,44 @@ internal sealed class LyricsPanel : IDisposable
 
     private static SolidColorBrush Brush(byte alpha) =>
         new(Windows.UI.Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF));
+
+    /// <summary>The width the font itself gives a space, so word-level margins match the
+    /// one-block placeholder that uses real spaces. A fixed em guess made the spaces change
+    /// when a line was promoted to word-level text.</summary>
+    private double WordSpace(double fontSize, bool soft)
+    {
+        if (soft)
+        {
+            if (Math.Abs(fontSize - _spaceSoftSize) < 0.01 && _spaceSoftSize >= 0)
+            {
+                return _spaceSoftWidth;
+            }
+        }
+        else if (Math.Abs(fontSize - _spaceSize) < 0.01 && _spaceSize >= 0)
+        {
+            return _spaceWidth;
+        }
+
+        var spaced = new TextBlock { Text = "| |", TextWrapping = TextWrapping.NoWrap };
+        var bare = new TextBlock { Text = "||", TextWrapping = TextWrapping.NoWrap };
+        Shape(spaced, fontSize, soft);
+        Shape(bare, fontSize, soft);
+        spaced.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        bare.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var width = Math.Max(0, spaced.DesiredSize.Width - bare.DesiredSize.Width);
+        if (soft)
+        {
+            _spaceSoftSize = fontSize;
+            _spaceSoftWidth = width;
+        }
+        else
+        {
+            _spaceSize = fontSize;
+            _spaceWidth = width;
+        }
+
+        return width;
+    }
 
     /// <summary>The lyric type: the chosen family, the look's weight, a little tracked out and airy.
     /// The backing vocals are the same shape in a lighter weight.</summary>
