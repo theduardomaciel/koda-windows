@@ -1459,7 +1459,7 @@ internal sealed class LyricsPanel : IDisposable
         word.JoinsPrevious = joinsPrevious;
         word.LetterCount = 0;
         word.Element.Visibility = Visibility.Visible;
-        word.Element.Margin = new Thickness(0, 0, data.SpaceAfter ? WordSpace(fontSize, soft) : 0, 0);
+        word.Element.Margin = new Thickness(0, 0, data.SpaceAfter ? WordGap(fontSize, soft) : 0, 0);
         var block = word.Text!;
         block.Text = data.Text;
         block.Visibility = Visibility.Visible;
@@ -1496,7 +1496,7 @@ internal sealed class LyricsPanel : IDisposable
         word.LetterCount = pieces.Count;
         word.Element.Visibility = Visibility.Visible;
         var panel = (StackPanel)word.Element;
-        panel.Margin = new Thickness(0, 0, data.SpaceAfter ? WordSpace(fontSize, soft) : 0, 0);
+        panel.Margin = new Thickness(0, 0, data.SpaceAfter ? WordGap(fontSize, soft) : 0, 0);
 
         for (var i = 0; i < word.Letters.Count; i++)
         {
@@ -1989,7 +1989,7 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         word.FontSize = size;
-        word.Element.Margin = new Thickness(0, 0, word.Data.SpaceAfter ? WordSpace(size, soft) : 0, 0);
+        word.Element.Margin = new Thickness(0, 0, word.Data.SpaceAfter ? WordGap(size, soft) : 0, 0);
         word.PaintedRise = -1; // the lift distance changed with the size
         word.PaintedScale = -1;
         word.PaintedLit = double.NaN;
@@ -3851,6 +3851,13 @@ internal sealed class LyricsPanel : IDisposable
 
     private static SolidColorBrush Brush(byte alpha) =>
         new(Windows.UI.Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF));
+
+    /// <summary>The layout gap used after a word. With compensation on, it is the font's
+    /// own space and the per-word shift keeps it proportional. With compensation off, the
+    /// gap is reduced once in layout so it matches the word's 0.95 rest; no word moves later.</summary>
+    private double WordGap(double fontSize, bool soft) =>
+        WordSpace(fontSize, soft) *
+        (_compensateSpacing ? 1 : LyricsMotion.WordRestScale);
 
     /// <summary>The width the font itself gives a space, so word-level margins match the
     /// one-block placeholder that uses real spaces. A fixed em guess made the spaces change
