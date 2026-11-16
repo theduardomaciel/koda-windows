@@ -2382,9 +2382,7 @@ internal sealed class LyricsPanel : IDisposable
             row.Opacity = expressive
                 ? isActive
                     ? 1
-                    : index >= 0 && i <= index
-                        ? ExpressiveSungLineOpacity
-                        : _idleFar
+                    : _idleFar
                 : sung
                     ? 1
                     : distance <= 1
