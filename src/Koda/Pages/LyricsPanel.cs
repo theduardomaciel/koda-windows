@@ -260,6 +260,11 @@ internal sealed class LyricsPanel : IDisposable
         public double PaintedScale { get; set; } = -1;
         public double PaintedX { get; set; } = double.NaN;
         public double PaintedY { get; set; } = double.NaN;
+        /// <summary>The motion translation without the spacing correction.</summary>
+        public double MotionX { get; set; }
+        public double MotionY { get; set; }
+        /// <summary>The visual shift that keeps word gaps proportional to its scale.</summary>
+        public double SpaceX { get; set; }
     }
 
     /// <summary>One letter of a held syllable: its own fill, wave and glow layers.</summary>
@@ -340,11 +345,6 @@ internal sealed class LyricsPanel : IDisposable
         /// <summary>A line-timed row's one text block, which has no per-word elements.</summary>
         public TextBlock? LineText { get; set; }
         public double LineTextScale { get; set; } = -1;
-        /// <summary>The composition visuals that carry a static rest scale for the whole
-        /// row, so layout margins (spaces) shrink with the glyphs.</summary>
-        public Visual? WordsVisual { get; set; }
-        public Visual? BackgroundVisual { get; set; }
-        public double RestScale { get; set; } = -1;
         /// <summary>The height the rich content had, so collapsing does not move the scroll.</summary>
         public double CachedHeight { get; set; }
         /// <summary>The three dots of the gap that follows this line, when the gap is long.</summary>
@@ -866,10 +866,6 @@ internal sealed class LyricsPanel : IDisposable
             content.Children.Add(row.Words);
 
             row.Host = host;
-            row.WordsVisual = ElementCompositionPreview.GetElementVisual(row.Words);
-            row.BackgroundVisual = ElementCompositionPreview.GetElementVisual(row.Background);
-            row.Words.SizeChanged += (_, e) => CenterRowVisual(row, row.WordsVisual, e.NewSize);
-            row.Background.SizeChanged += (_, e) => CenterRowVisual(row, row.BackgroundVisual, e.NewSize);
 
             // A tap on the line jumps the song to it, and hands the panel back to the song.
             host.Tapped += (_, _) =>
@@ -1195,8 +1191,6 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         row.Rich = false;
-        SetRowRestScale(row, 1);
-        row.RestScale = -1;
     }
 
     private void ReleaseWordGlows(Word word)
@@ -1605,11 +1599,18 @@ internal sealed class LyricsPanel : IDisposable
         word.Transform.TranslateX = 0;
         word.Transform.TranslateY = 0;
 
-        // A static rich row is scaled as a whole (so its word margins shrink too); its
-        // words start at 1.0. The line's own first paint takes them to the 0.95 rest.
-        ApplyScale(word.Visual, word.Element, 1, word.OriginX, word.OriginY);
-        ApplyTranslation(word.Visual, 0, 0);
+        // An unsung Expressive word rests small and low; the spacing compensation keeps
+        // the layout margins matching the scaled glyphs.
+        var rest = _renderer == LyricsRenderer.Expressive && _motion
+            ? new WordMotion(LyricsMotion.WordRestScale, 0, LyricsMotion.WordRestY)
+            : new WordMotion(1, 0, 0);
+        var y = rest.Y * word.FontSize;
+        ApplyScale(word.Visual, word.Element, rest.Scale, word.OriginX, word.OriginY);
+        ApplyTranslation(word.Visual, 0, y);
 
+        word.MotionX = 0;
+        word.MotionY = y;
+        word.SpaceX = 0;
         word.PushX = 0;
         word.PaintedFill = -1;
         word.PaintedLit = double.NaN;
@@ -1617,9 +1618,9 @@ internal sealed class LyricsPanel : IDisposable
         word.PaintedActive = false;
         word.PaintedRise = -1;
         word.PaintedSwell = -1;
-        word.PaintedScale = 1;
+        word.PaintedScale = rest.Scale;
         word.PaintedX = 0;
-        word.PaintedY = 0;
+        word.PaintedY = y;
     }
 
     /// <summary>Keeps a far row's placeholder at the Expressive rest size without changing
@@ -1648,47 +1649,6 @@ internal sealed class LyricsPanel : IDisposable
             row.LineTextScale = scale;
             ApplyPlaceholderScale(text, scale);
         }
-    }
-
-    private void SetRowRestScale(Row row, double scale)
-    {
-        if (!row.Rich || Math.Abs(scale - row.RestScale) < 0.001)
-        {
-            return;
-        }
-
-        row.RestScale = scale;
-        ApplyRowScale(row.WordsVisual, row.Words, scale);
-        ApplyRowScale(row.BackgroundVisual, row.Background, scale);
-    }
-
-    private static void CenterRowVisual(Row row, Visual? visual, Windows.Foundation.Size size)
-    {
-        if (visual is null)
-        {
-            return;
-        }
-
-        var originX = row.Words.HorizontalAlignment == HorizontalAlignment.Right ? 1.0 : 0.0;
-        visual.CenterPoint = new Vector3(
-            (float)(size.Width * originX),
-            (float)(size.Height / 2),
-            0);
-    }
-
-    private static void ApplyRowScale(Visual? visual, FrameworkElement element, double scale)
-    {
-        if (visual is null)
-        {
-            return;
-        }
-
-        var originX = element.HorizontalAlignment == HorizontalAlignment.Right ? 1.0 : 0.0;
-        visual.CenterPoint = new Vector3(
-            (float)(element.ActualWidth * originX),
-            (float)(element.ActualHeight / 2),
-            0);
-        visual.Scale = new Vector3((float)scale, (float)scale, 1);
     }
 
     private static void ApplyPlaceholderScale(FrameworkElement element, double scale)
@@ -2383,20 +2343,6 @@ internal sealed class LyricsPanel : IDisposable
                 }
 
                 SetLineTextRest(row, rest);
-
-                // A rich row that is waiting its turn carries the rest scale on the whole
-                // panel, so the glyphs and the layout spaces shrink together. When it becomes
-                // current, grow that panel scale back over the line's activation fade instead
-                // of removing it in one frame; the words themselves stay at 1.0.
-                if (row.Rich)
-                {
-                    var target = !isActive && i > index ? LyricsMotion.WordRestScale : 1.0;
-                    var current = row.RestScale < 0 ? target : row.RestScale;
-                    var next = _playing
-                        ? Approach(current, target, expressive ? 0.1 : 0.18)
-                        : target;
-                    SetRowRestScale(row, next);
-                }
             }
 
             row.Opacity = expressive
@@ -2462,6 +2408,24 @@ internal sealed class LyricsPanel : IDisposable
                 Paint(word, time, motion, hovered: row.Hovered, active: isActive);
             }
         }
+
+        if (expressive && _motion)
+        {
+            foreach (var row in _rows)
+            {
+                if (!row.Rich)
+                {
+                    continue;
+                }
+
+                if (row.Words is WordWrapPanel words)
+                {
+                    CompensateSpacing(row.WordItems, words);
+                }
+
+                CompensateSpacing(row.BackgroundItems, row.Background);
+            }
+        }
     }
 
     /// <summary>The end of a line: the provider's end, or its last word's end.</summary>
@@ -2471,6 +2435,113 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Whether a line is still inside the Expressive settle window.</summary>
     private static bool IsWithinTail(Row row, double time) =>
         time >= row.Line.Time && time <= LineEnd(row) + ExpressiveTailSeconds;
+
+    /// <summary>Keeps the visual gap after each word proportional to its scale. A word's
+    /// 0.95 rest scale is a composition transform, so the layout margin would otherwise
+    /// stay full size and the spaces would open up. Translate each word to close the
+    /// difference; the layout itself is untouched.</summary>
+    private static void CompensateSpacing(IReadOnlyList<Word> words, WordWrapPanel panel)
+    {
+        if (words.Count == 0)
+        {
+            return;
+        }
+
+        var placed = new List<(Word Word, double X, double Y, double Width, double MarginLeft, double MarginRight)>(words.Count);
+        foreach (var word in words)
+        {
+            if (!panel.TryGetPlacement(word.Element, out var placement))
+            {
+                return;
+            }
+
+            var margin = word.Element.Margin;
+            var width = placement.Width - margin.Left - margin.Right;
+            if (width < 1)
+            {
+                width = Math.Max(1, word.Element.DesiredSize.Width - margin.Left - margin.Right);
+            }
+
+            placed.Add((word, placement.X + margin.Left, placement.Y, width, margin.Left, margin.Right));
+        }
+
+        var rightAligned = panel.AlignRight;
+        var start = 0;
+        while (start < placed.Count)
+        {
+            var end = start + 1;
+            while (end < placed.Count && Math.Abs(placed[end].Y - placed[start].Y) < 0.5)
+            {
+                end++;
+            }
+
+            if (rightAligned)
+            {
+                var shift = 0.0;
+                for (var i = end - 1; i >= start; i--)
+                {
+                    var part = placed[i];
+                    var scale = ScaleOf(part.Word);
+                    var origin = part.Word.OriginX * part.Width;
+                    if (i == end - 1)
+                    {
+                        shift = (part.Width - origin) * (1 - scale);
+                    }
+
+                    SetSpacingShift(part.Word, shift);
+                    if (i > start)
+                    {
+                        var next = placed[i];
+                        var nextScale = ScaleOf(next.Word);
+                        var nextOrigin = next.Word.OriginX * next.Width;
+                        var nextLeft = next.X + shift + nextOrigin * (1 - nextScale);
+                        var prev = placed[i - 1];
+                        var prevScale = ScaleOf(prev.Word);
+                        var prevOrigin = prev.Word.OriginX * prev.Width;
+                        var desired = prev.MarginRight * prevScale;
+                        shift = nextLeft - desired -
+                            (prev.X + prev.Width * prevScale + prevOrigin * (1 - prevScale));
+                    }
+                }
+            }
+            else
+            {
+                var shift = 0.0;
+                for (var i = start; i < end; i++)
+                {
+                    var part = placed[i];
+                    var scale = ScaleOf(part.Word);
+                    var origin = part.Word.OriginX * part.Width;
+                    if (i == start)
+                    {
+                        shift = -origin * (1 - scale);
+                    }
+
+                    SetSpacingShift(part.Word, shift);
+                    if (i < end - 1)
+                    {
+                        var next = placed[i + 1];
+                        var nextScale = ScaleOf(next.Word);
+                        var nextOrigin = next.Word.OriginX * next.Width;
+                        var right = part.X + shift + part.Width * scale + origin * (1 - scale);
+                        var desired = part.MarginRight * scale;
+                        shift = right + desired - (next.X + nextOrigin * (1 - nextScale));
+                    }
+                }
+            }
+
+            start = end;
+        }
+    }
+
+    private static double ScaleOf(Word word) =>
+        word.PaintedScale > 0 ? word.PaintedScale : LyricsMotion.WordRestScale;
+
+    private static void SetSpacingShift(Word word, double shift)
+    {
+        word.SpaceX = shift;
+        SetWordTranslation(word, word.MotionX + shift, word.MotionY);
+    }
 
     /// <summary>Whether a line's own time still covers the song's position: a line that
     /// started keeps filling until its end, even after a later line has started.</summary>
@@ -2979,15 +3050,14 @@ internal sealed class LyricsPanel : IDisposable
 
     private static void SetWordMotion(Word word, WordMotion motion)
     {
-        // The resting 0.95 lives on the row panel while it is waiting. A word must not
-        // shrink again on top of that, or the handoff to the active row drops twice.
-        var scale = Math.Max(1, motion.Scale);
-        if (Math.Abs(scale - word.PaintedScale) >= 0.0005)
+        if (Math.Abs(motion.Scale - word.PaintedScale) >= 0.0005)
         {
-            SetWordScale(word, scale);
+            SetWordScale(word, motion.Scale);
         }
 
-        SetWordTranslation(word, motion.X * word.FontSize, motion.Y * word.FontSize);
+        word.MotionX = motion.X * word.FontSize;
+        word.MotionY = motion.Y * word.FontSize;
+        SetWordTranslation(word, word.MotionX + word.SpaceX, word.MotionY);
     }
 
     private void SetLetterMotion(

@@ -17,6 +17,7 @@ namespace Koda.Controls;
 internal sealed class WordWrapPanel : Panel
 {
     private readonly List<bool> _joins = [];
+    private readonly Dictionary<UIElement, (double X, double Y, double Width)> _placements = [];
 
     /// <summary>The width to wrap against. Set from the lyrics panel's real width; a
     /// ScrollViewer can measure its content with an unbounded width, which would otherwise
@@ -75,7 +76,13 @@ internal sealed class WordWrapPanel : Panel
     {
         Children.Clear();
         _joins.Clear();
+        _placements.Clear();
     }
+
+    /// <summary>The arrange position and width of a child in the last layout pass. The
+    /// lyrics panel uses it to compensate the visual gap left by a scaled word.</summary>
+    public bool TryGetPlacement(UIElement child, out (double X, double Y, double Width) placement) =>
+        _placements.TryGetValue(child, out placement);
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -125,6 +132,7 @@ internal sealed class WordWrapPanel : Panel
 
     protected override Size ArrangeOverride(Size finalSize)
     {
+        _placements.Clear();
         var bounded = WrapWidth > 0 ? WrapWidth : finalSize.Width;
         var limit = Math.Max(0, bounded - Inset);
         var right = Math.Min(finalSize.Width, limit);
@@ -174,6 +182,7 @@ internal sealed class WordWrapPanel : Panel
         {
             var size = Children[part].DesiredSize;
             Children[part].Arrange(new Rect(x, y, size.Width, size.Height));
+            _placements[Children[part]] = (x, y, size.Width);
             x += size.Width;
         }
     }
