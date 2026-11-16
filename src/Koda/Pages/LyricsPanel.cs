@@ -164,6 +164,8 @@ internal sealed class LyricsPanel : IDisposable
     private readonly List<Letter> _liveGlows = [];
     private readonly HashSet<Letter> _liveGlowSet = [];
     private int _glowWindowIndex = -2;
+    private long _glowHoldUntil;
+    private int _activeRowIndex = -1;
     private CubicBezierEasingFunction? _hoverEase;
     private ScalarKeyFrameAnimation? _hoverOpacityIn;
     private ScalarKeyFrameAnimation? _hoverOpacityOut;
@@ -548,6 +550,12 @@ internal sealed class LyricsPanel : IDisposable
             {
                 RearmGlows(newIndex);
             }
+
+            // A drag or a skip moves the position in bursts. Hold the glow rebuilds for
+            // a moment after the jump, so the masks are built once for where the seek
+            // landed instead of once for every intermediate line.
+            _glowHoldUntil = _frameClock.ElapsedMilliseconds + 300;
+            _glowWindowIndex = -2;
         }
 
         _position = next;
@@ -1448,6 +1456,13 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
+        // The hold is over: the window is scheduled again for the line the seek landed
+        // on. Until now every rebuild waited, however many positions the drag crossed.
+        if (_glowHoldUntil != 0 && !GlowHeld)
+        {
+            _glowHoldUntil = 0;
+        }
+
         var index = Lyrics.IndexOf(_position, _lyricLines) ?? -1;
         if (index < 0)
         {
@@ -1509,6 +1524,10 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         var time = _position;
+        var index = knownIndex ?? (Lyrics.IndexOf(time, _lyricLines) ?? -1);
+        // The glow hold builds only for the line being sung; remember which one this
+        // frame is painting before the repaint range can touch any letter.
+        _activeRowIndex = index;
         _paintedLetters = 0;
         if (_needsFullPaint)
         {
@@ -1526,7 +1545,6 @@ internal sealed class LyricsPanel : IDisposable
             RepaintRange(from, to, time);
         }
 
-        var index = knownIndex ?? (Lyrics.IndexOf(time, _lyricLines) ?? -1);
         PaintInterlude(time, index >= 0 ? index : null);
 
         var motion = _motion;
@@ -2129,11 +2147,22 @@ internal sealed class LyricsPanel : IDisposable
         }
     }
 
+    /// <summary>Whether a seek's brief hold is still suppressing glow rebuilds. A drag or
+    /// a skip can raise a window of masks for every position it crosses; waiting for the
+    /// position to settle makes it raise one window instead.</summary>
+    private bool GlowHeld => _glowHoldUntil > _frameClock.ElapsedMilliseconds;
+
     /// <summary>Lazily gives a letter its Gaussian glow. The sprite lives in an empty
     /// layer before the text, so the shadow is drawn behind the sharp glyph.</summary>
     private void EnsureGlow(Letter letter)
     {
         if (!_glow || letter.GlowHost is null || letter.GlowVisual is not null)
+        {
+            return;
+        }
+
+        // While a seek settles, only the line being sung may build its glow.
+        if (GlowHeld && letter.RowIndex != _activeRowIndex)
         {
             return;
         }
@@ -2314,7 +2343,8 @@ internal sealed class LyricsPanel : IDisposable
     /// Only the small live list is scanned when the line changes.</summary>
     private void ScheduleGlows(int index)
     {
-        if (!_glow || index == _glowWindowIndex)
+        // The seek hold owns the window: it is scheduled once when the hold ends.
+        if (!_glow || GlowHeld || index == _glowWindowIndex)
         {
             return;
         }
@@ -2374,6 +2404,11 @@ internal sealed class LyricsPanel : IDisposable
     /// it is sung without a composition setup spike on the frame a note starts.</summary>
     private void WarmQueuedGlows()
     {
+        if (GlowHeld)
+        {
+            return;
+        }
+
         while (_glowWarmup.Count > 0)
         {
             var letter = _glowWarmup.Dequeue();
