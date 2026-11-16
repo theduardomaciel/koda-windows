@@ -172,6 +172,9 @@ internal sealed class LyricsPanel : IDisposable
     private readonly HashSet<Letter> _liveGlowSet = [];
     private readonly List<Word> _plainWordPool = [];
     private readonly List<Word> _splitWordPool = [];
+    private int _plainWordsMade;
+    private int _splitWordsMade;
+    private int _lettersMade;
     private int _glowWindowIndex = -2;
     private long _glowHoldUntil;
     private int _activeRowIndex = -1;
@@ -330,6 +333,9 @@ internal sealed class LyricsPanel : IDisposable
         /// <summary>The rest scale last written to the two placeholders.</summary>
         public double PlaceholderScale { get; set; } = -1;
         public double BackgroundPlaceholderScale { get; set; } = -1;
+        /// <summary>A line-timed row's one text block, which has no per-word elements.</summary>
+        public TextBlock? LineText { get; set; }
+        public double LineTextScale { get; set; } = -1;
         /// <summary>The height the rich content had, so collapsing does not move the scroll.</summary>
         public double CachedHeight { get; set; }
         /// <summary>The three dots of the gap that follows this line, when the gap is long.</summary>
@@ -877,8 +883,20 @@ internal sealed class LyricsPanel : IDisposable
                     Foreground = Brush(0xFF),
                 };
                 Shape(lineText, fontSize);
+                row.LineText = lineText;
+                lineText.SizeChanged += (_, _) =>
+                {
+                    if (row.LineTextScale > 0)
+                    {
+                        ApplyPlaceholderScale(lineText, row.LineTextScale);
+                    }
+                };
                 row.Words.Children.Add(lineText);
                 row.Rich = true;
+                if (_renderer == LyricsRenderer.Expressive && _motion)
+                {
+                    SetLineTextRest(row, _position >= line.Time ? 1 : LyricsMotion.WordRestScale);
+                }
             }
             else
             {
@@ -901,6 +919,11 @@ internal sealed class LyricsPanel : IDisposable
             _lines.Children.Add(host);
             _rows.Add(row);
 
+            if (_renderer == LyricsRenderer.Expressive && _motion && !row.Rich)
+            {
+                SetPlaceholderRest(row, _position >= line.Time ? 1 : LyricsMotion.WordRestScale);
+            }
+
             var background = MakeBackgroundPlaceholder(line, fontSize, textSide);
             if (background is not null)
             {
@@ -915,6 +938,10 @@ internal sealed class LyricsPanel : IDisposable
                 };
                 row.Background.Children.Add(background);
                 row.Content.Children.Add(row.Background);
+                if (_renderer == LyricsRenderer.Expressive && _motion && !row.Rich)
+                {
+                    SetPlaceholderRest(row, _position >= line.Time ? 1 : LyricsMotion.WordRestScale);
+                }
             }
 
             // A long silence after this line shows three dots that fill until the next one.
@@ -1388,6 +1415,7 @@ internal sealed class LyricsPanel : IDisposable
                 FontSize = fontSize,
                 JoinsPrevious = joinsPrevious,
             };
+            _plainWordsMade++;
             TrackCenter(word);
         }
 
@@ -1478,6 +1506,7 @@ internal sealed class LyricsPanel : IDisposable
             JoinsPrevious = joinsPrevious,
             LetterCount = count,
         };
+        _splitWordsMade++;
         TrackCenter(word);
         for (var index = 0; index < count; index++)
         {
@@ -1588,6 +1617,15 @@ internal sealed class LyricsPanel : IDisposable
         }
     }
 
+    private void SetLineTextRest(Row row, double scale)
+    {
+        if (row.LineText is { } text && Math.Abs(scale - row.LineTextScale) >= 0.001)
+        {
+            row.LineTextScale = scale;
+            ApplyPlaceholderScale(text, scale);
+        }
+    }
+
     private static void ApplyPlaceholderScale(FrameworkElement element, double scale)
     {
         var originX = element is TextBlock { TextAlignment: TextAlignment.Right } ? 1.0 : 0.0;
@@ -1669,6 +1707,7 @@ internal sealed class LyricsPanel : IDisposable
             TextWrapping = TextWrapping.NoWrap,
         };
         Shape(textBlock, fontSize, soft);
+        _lettersMade++;
         ElementCompositionPreview.SetIsTranslationEnabled(textBlock, true);
 
         var host = new Grid();
@@ -2267,12 +2306,18 @@ internal sealed class LyricsPanel : IDisposable
 
             var isActive = singing && i == index;
             var distance = index >= 0 ? Math.Abs(i - index) : int.MaxValue;
-            if (expressive && _motion && !row.Rich)
+            if (expressive && _motion)
             {
-                // A far line is a single static text block, but it must already sit at the
-                // same rest size as the word-level rows; otherwise it shrinks visibly when
-                // it comes close enough to materialize its words.
-                SetPlaceholderRest(row, time >= row.Line.Time ? 1 : LyricsMotion.WordRestScale);
+                // Every line is a single static text block until it comes close enough to
+                // materialize its words. Keep both the far-row placeholder and a line-timed
+                // row at the same rest size, so no line shrinks when its detail arrives.
+                var rest = time >= row.Line.Time ? 1 : LyricsMotion.WordRestScale;
+                if (!row.Rich)
+                {
+                    SetPlaceholderRest(row, rest);
+                }
+
+                SetLineTextRest(row, rest);
             }
 
             row.Opacity = expressive
@@ -2296,7 +2341,7 @@ internal sealed class LyricsPanel : IDisposable
                 // Expressive lines take their idle-to-full step quickly when they become
                 // current; the slow change is the fill front, not a line-wide tween.
                 row.Words.Opacity = _playing
-                    ? Approach(row.Words.Opacity, wordsTarget, expressive ? 0.25 : 0.18)
+                    ? Approach(row.Words.Opacity, wordsTarget, expressive ? 0.1 : 0.18)
                     : wordsTarget;
             }
 
@@ -2307,7 +2352,7 @@ internal sealed class LyricsPanel : IDisposable
                 if (Math.Abs(row.Background.Opacity - target) >= 0.001)
                 {
                     row.Background.Opacity = _playing
-                        ? Approach(row.Background.Opacity, target, expressive ? 0.25 : 0.18)
+                        ? Approach(row.Background.Opacity, target, expressive ? 0.1 : 0.18)
                         : target;
                 }
             }
@@ -3480,6 +3525,8 @@ internal sealed class LyricsPanel : IDisposable
                 $"{DateTime.Now:HH:mm:ss.fff} test={_glowTest} live={live} painted={_paintedLetters} " +
                 $"masks={_masksCreated} disposed={_masksDisposed} built={_glowsBuilt} " +
                 $"forced={_collectionsForced} hold={(GlowHeld ? 1 : 0)} " +
+                $"pools={_plainWordPool.Count}+{_splitWordPool.Count} " +
+                $"made={_plainWordsMade}+{_splitWordsMade}/{_lettersMade} " +
                 $"private={privateBytes / 1048576.0:F1}MB growth={growth:F1}MB/s{Environment.NewLine}");
         }
         catch (Exception)
