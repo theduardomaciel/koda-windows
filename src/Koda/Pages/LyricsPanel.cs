@@ -689,8 +689,7 @@ internal sealed class LyricsPanel : IDisposable
         _motion = settings.LyricsMotion
             && Environment.GetEnvironmentVariable("KODA_LYRICS_MOTION_OFF") != "1";
         _renderer = settings.LyricsRenderer;
-        _compensateSpacing = !_allRowsRich
-            && settings.LyricsCompensateSpacing
+        _compensateSpacing = settings.LyricsCompensateSpacing
             && Environment.GetEnvironmentVariable("KODA_NP_NO_SPACING_COMP") != "1";
         UpdateScale();
     }

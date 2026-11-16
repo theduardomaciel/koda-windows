@@ -765,9 +765,9 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="Compensate word spacing" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock Text="Word spacing push" Style="{ThemeResource BodyStrongTextBlockStyle}" />
                                     <TextBlock
-                                        Text="Keep spaces proportional while a word scales. Off, a word never pushes its neighbours."
+                                        Text="Let words shift slightly so the gaps follow their animation."
                                         Style="{ThemeResource CaptionTextBlockStyle}"
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         TextWrapping="Wrap" />
@@ -776,7 +776,7 @@
                                     x:Name="SpacingCompensationSwitch"
                                     Grid.Column="1"
                                     Style="{StaticResource SettingsToggle}"
-                                    AutomationProperties.Name="Compensate word spacing"
+                                    AutomationProperties.Name="Word spacing push"
                                     Toggled="OnSpacingCompensationToggled" />
                             </Grid>
                         </StackPanel>

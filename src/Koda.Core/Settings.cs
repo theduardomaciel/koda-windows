@@ -129,7 +129,7 @@ public sealed class Settings
 
     /// <summary>Keep the visual gap between words proportional to their scale. Off, a
     /// scaled word stays in its layout slot and never pushes its neighbours.</summary>
-    public bool LyricsCompensateSpacing { get; set; } = true;
+    public bool LyricsCompensateSpacing { get; set; }
 
     /// <summary>The height of a line, as a multiplier on the theme's 1.35.</summary>
     public double LyricsLineSpacing
