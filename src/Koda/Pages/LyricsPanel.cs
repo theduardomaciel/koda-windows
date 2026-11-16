@@ -1137,6 +1137,16 @@ internal sealed class LyricsPanel : IDisposable
             }
         }
 
+        // The first render must already have the promoted row's spacing, not one frame
+        // with the layout gaps still at full size.
+        wrap.RefreshPlacements();
+        row.Background.RefreshPlacements();
+        if (_renderer == LyricsRenderer.Expressive && _motion)
+        {
+            CompensateSpacing(row.WordItems, wrap);
+            CompensateSpacing(row.BackgroundItems, row.Background);
+        }
+
         row.Rich = true;
         row.CachedHeight = 0;
     }

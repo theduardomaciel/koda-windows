@@ -84,6 +84,71 @@ internal sealed class WordWrapPanel : Panel
     public bool TryGetPlacement(UIElement child, out (double X, double Y, double Width) placement) =>
         _placements.TryGetValue(child, out placement);
 
+    /// <summary>Fills the placement map immediately after children are added, without
+    /// waiting for the next layout pass. The first rendered frame of a promoted row would
+    /// otherwise have uncompensated word gaps for one frame.</summary>
+    public void RefreshPlacements()
+    {
+        _placements.Clear();
+        var bounded = WrapWidth;
+        var limit = bounded > 0
+            ? Math.Max(0, bounded - Inset)
+            : double.PositiveInfinity;
+        var right = double.IsPositiveInfinity(limit) ? 0 : Math.Min(bounded, limit);
+
+        var units = new List<(int Start, int Count, double Width, double Height)>();
+        for (var index = 0; index < Children.Count;)
+        {
+            var start = index;
+            var width = 0.0;
+            var height = 0.0;
+            do
+            {
+                var child = Children[index];
+                child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                width += child.DesiredSize.Width;
+                height = Math.Max(height, child.DesiredSize.Height);
+                index++;
+            }
+            while (index < Children.Count && index < _joins.Count && _joins[index]);
+
+            units.Add((start, index - start, width, height));
+        }
+
+        var y = 0.0;
+        var rowStart = 0;
+        var rowWidth = 0.0;
+        var rowHeight = 0.0;
+        for (var unit = 0; unit <= units.Count; unit++)
+        {
+            var wraps = unit == units.Count
+                || (rowWidth > 0 && rowWidth + units[unit].Width > limit);
+            if (!wraps)
+            {
+                rowWidth += units[unit].Width;
+                rowHeight = Math.Max(rowHeight, units[unit].Height);
+                continue;
+            }
+
+            var x = AlignRight ? Math.Max(0, right - rowWidth) : 0;
+            for (var placed = rowStart; placed < unit; placed++)
+            {
+                var (childStart, count, _, _) = units[placed];
+                for (var childIndex = childStart; childIndex < childStart + count; childIndex++)
+                {
+                    var size = Children[childIndex].DesiredSize;
+                    _placements[Children[childIndex]] = (x, y, size.Width);
+                    x += size.Width;
+                }
+            }
+
+            y += rowHeight + RowSpacing;
+            rowStart = unit;
+            rowWidth = unit < units.Count ? units[unit].Width : 0;
+            rowHeight = unit < units.Count ? units[unit].Height : 0;
+        }
+    }
+
     protected override Size MeasureOverride(Size availableSize)
     {
         var bounded = WrapWidth > 0 ? WrapWidth : availableSize.Width;
