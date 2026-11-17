@@ -1322,14 +1322,17 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>SplitView closes an Overlay pane when the listener taps anywhere outside
-    /// it. The lyrics drawer is a surface, not a flyout: it stays until its close button,
-    /// the bar toggle, or Esc puts it away.</summary>
+    /// it. That dismissal is theirs: the drawer goes away and the bar's toggle follows,
+    /// rather than staying checked for a panel that is no longer on screen.</summary>
     private void OnLyricsPaneClosing(SplitView sender, SplitViewPaneClosingEventArgs args)
     {
-        if (!_closingLyricsDrawer && _lyricsOpen)
+        if (_closingLyricsDrawer)
         {
-            args.Cancel = true;
+            return;
         }
+
+        _lyricsOpen = false;
+        UpdateLyricsChrome();
     }
 
     private void OnLyricsPaneClosed(SplitView sender, object args) => _closingLyricsDrawer = false;
@@ -1544,16 +1547,17 @@ public sealed partial class MainWindow : Window
         var hasSong = Playback.CurrentSong is not null;
         var menu = new MenuFlyout();
 
-        var lyrics = new ToggleMenuFlyoutItem
+        var lyrics = new MenuFlyoutItem
         {
-            Text = _lyricsOpen ? "Hide lyrics" : "Lyrics",
-            IsChecked = _lyricsOpen,
+            Text = "Lyrics",
             Icon = new FontIcon { Glyph = "\uE8F2" },
             IsEnabled = hasSong,
         };
         lyrics.Click += (_, _) =>
         {
-            _lyricsOpen = lyrics.IsChecked;
+            // The compact drawer is a surface that closes on the next tap outside it,
+            // so this menu is only an opener; it never carries a checked state.
+            _lyricsOpen = true;
             ApplyLyricsDrawer();
         };
         menu.Items.Add(lyrics);
