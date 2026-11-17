@@ -129,6 +129,29 @@ public static class Pages
 
     // MARK: Search
 
+    /// <summary>
+    /// The search field's suggestions. The endpoint carries plain query
+    /// expansions and, in a second section, rich result rows that arrive as
+    /// ordinary <c>musicResponsiveListItemRenderer</c>s. The rich rows are read
+    /// with the same parser as search results, then filtered by
+    /// <see cref="SuggestionRanking"/> so only a confident match is promoted.
+    /// </summary>
+    public static SearchSuggestions Suggestions(Json root, string query)
+    {
+        var queries = root.Objects("searchSuggestionRenderer")
+            .Select(suggestion => suggestion["suggestion"].Text().Trim())
+            .Where(text => text.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var items = root.Objects("musicResponsiveListItemRenderer")
+            .Select(row => Rows.ItemFromListRow(row))
+            .OfType<MusicItem>()
+            .ToArray();
+
+        return new SearchSuggestions(SuggestionRanking.Rank(query, items), queries);
+    }
+
     public static SearchResults Search(Json root)
     {
         var results = SearchResults.Empty;

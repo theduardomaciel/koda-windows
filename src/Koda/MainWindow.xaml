@@ -9,6 +9,105 @@
     Title="Koda">
 
     <Grid x:Name="Root">
+        <Grid.Resources>
+            <!-- One row for both rich music suggestions and plain query suggestions.
+                 See docs/search-suggestions.md before changing the metrics. -->
+            <Style
+                x:Key="SearchSuggestionItemStyle"
+                TargetType="ListViewItem"
+                BasedOn="{StaticResource DefaultListViewItemStyle}">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                <Setter Property="FocusVisualMargin" Value="0" />
+            </Style>
+
+            <DataTemplate x:Key="SearchSuggestionTemplate">
+                <Border
+                    HorizontalAlignment="Stretch"
+                    ToolTipService.ToolTip="{Binding ToolTip}"
+                    AutomationProperties.Name="{Binding AutomationName}"
+                    AutomationProperties.HelpText="{Binding HelpText}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <!-- Zero-height row keeps the divider out of layout, so the
+                                 hover/focus rectangle is the same on every row. -->
+                            <RowDefinition Height="0" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border
+                            Grid.Row="0"
+                            Grid.RowSpan="2"
+                            Height="1"
+                            VerticalAlignment="Top"
+                            Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                            Visibility="{Binding ShowsDivider, Converter={StaticResource BoolToVisibility}}"
+                            IsHitTestVisible="False" />
+
+                        <Grid
+                            Grid.Row="1"
+                            MinHeight="{Binding RowHeight}"
+                            Padding="12,4"
+                            ColumnSpacing="12"
+                            VerticalAlignment="Stretch">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="24" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border
+                                Width="{Binding ArtSize}"
+                                Height="{Binding ArtSize}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                CornerRadius="{Binding ArtRadius}"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                <Grid>
+                                    <FontIcon
+                                        Glyph="{Binding KindGlyph}"
+                                        FontSize="16"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                                    <Image
+                                        helpers:Art.Pixels="{Binding ArtSize}"
+                                        helpers:Art.Source="{Binding Artwork}"
+                                        Stretch="UniformToFill" />
+                                </Grid>
+                            </Border>
+
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                <TextBlock
+                                    Text="{Binding Title}"
+                                    helpers:Highlight.Query="{Binding Query}"
+                                    Style="{ThemeResource BodyTextBlockStyle}"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="NoWrap" />
+                                <TextBlock
+                                    Text="{Binding Detail}"
+                                    Visibility="{Binding HasDetail, Converter={StaticResource BoolToVisibility}}"
+                                    Style="{ThemeResource CaptionTextBlockStyle}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="NoWrap" />
+                            </StackPanel>
+
+                            <FontIcon
+                                Grid.Column="2"
+                                Glyph="{Binding TrailingGlyph}"
+                                Visibility="{Binding HasTrailing, Converter={StaticResource BoolToVisibility}}"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </Grid>
+                </Border>
+            </DataTemplate>
+        </Grid.Resources>
+
         <Grid.RowDefinitions>
             <RowDefinition Height="48" />
             <RowDefinition Height="*" />
@@ -39,9 +138,23 @@
                     VerticalAlignment="Center"
                     PlaceholderText="Songs, albums, artists or a link"
                     QueryIcon="Find"
+                    ItemTemplate="{StaticResource SearchSuggestionTemplate}"
+                    ItemContainerStyle="{StaticResource SearchSuggestionItemStyle}"
+                    TextMemberPath="Text"
+                    UpdateTextOnSelect="False"
+                    MaxSuggestionListHeight="420"
+                    AutoMaximizeSuggestionArea="False"
                     TextChanged="OnSearchTextChanged"
                     QuerySubmitted="OnSearchSubmitted"
                     AutomationProperties.Name="Search YouTube Music">
+                    <AutoSuggestBox.Resources>
+                        <!-- A quieter, more rectangular suggestion surface. -->
+                        <CornerRadius x:Key="OverlayCornerRadius">4</CornerRadius>
+                        <CornerRadius x:Key="ListViewItemCornerRadius">4</CornerRadius>
+                        <!-- The hover fill is the selection cue; the extra accent
+                             pill at the left edge looks like a stray line here. -->
+                        <x:Boolean x:Key="ListViewItemSelectionIndicatorVisualEnabled">False</x:Boolean>
+                    </AutoSuggestBox.Resources>
                     <!-- The built-in TitleBar centers Content in the space left after the
                          account chip, min drag strip and caption inset. Nudge the field
                          right so it reads closer to the window's center. -->
