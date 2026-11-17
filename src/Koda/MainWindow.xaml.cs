@@ -25,6 +25,9 @@ using Windows.Media;
 using CoreVirtualKeyStates = Windows.UI.Core.CoreVirtualKeyStates;
 using VirtualKey = Windows.System.VirtualKey;
 using VirtualKeyModifiers = Windows.System.VirtualKeyModifiers;
+using MusicItem = Koda.Core.MusicItem;
+using SearchSuggestions = Koda.Core.SearchSuggestions;
+using SuggestionRanking = Koda.Core.SuggestionRanking;
 using YouTubeLink = Koda.Core.YouTubeLink;
 
 namespace Koda;
@@ -63,7 +66,6 @@ public sealed partial class MainWindow : Window
     private DispatcherQueueTimer? _statusTimer;
     private DispatcherQueueTimer? _suggestTimer;
     private CancellationTokenSource? _suggestCancel;
-    private YouTubeLink? _linkSuggestion;
     private DispatcherQueueTimer? _zoomTimer;
     private double _zoom = 1;
     private bool _shutdown;
@@ -879,19 +881,26 @@ public sealed partial class MainWindow : Window
         }
 
         _suggestTimer?.Stop();
-        _linkSuggestion = YouTubeLink.Parse(sender.Text);
-        if (sender.Text.Trim().Length == 0)
+        _suggestCancel?.Cancel();
+        var text = sender.Text.Trim();
+        if (text.Length == 0)
         {
-            sender.ItemsSource = App.Library.Searches.Take(8).ToList();
+            ShowSuggestions(sender, RecentRows());
             return;
         }
 
         // A pasted YouTube link is offered instead of searching for the URL itself.
-        if (_linkSuggestion is { } link)
+        if (YouTubeLink.Parse(sender.Text) is { } link)
         {
-            _suggestCancel?.Cancel();
-            sender.ItemsSource = new[] { link.OpenTitle };
-            sender.IsSuggestionListOpen = true;
+            ShowSuggestions(sender, [SuggestionRow.LinkRow(link)]);
+            return;
+        }
+
+        // One letter is not enough to ask YouTube for rich rows; keep the
+        // dropdown useful with local history and a way to submit.
+        if (text.Length < 2)
+        {
+            ShowSuggestions(sender, MatchingRecentRows(text));
             return;
         }
 
@@ -913,30 +922,125 @@ public sealed partial class MainWindow : Window
             var suggestions = await EngineHost.Music.SuggestionsAsync(text.Trim(), cancel.Token);
             if (!cancel.IsCancellationRequested && TitleSearch.Text == text)
             {
-                TitleSearch.ItemsSource = suggestions.Take(8).ToList();
+                ShowSuggestions(TitleSearch, BuildSuggestions(text.Trim(), suggestions));
             }
         }
         catch (Exception)
         {
-            // Suggestions are a nicety; the search itself still works.
+            // Suggestions are a nicety; the search itself still works. A
+            // failure still leaves history and the "See all results" row.
+            if (!cancel.IsCancellationRequested && TitleSearch.Text == text)
+            {
+                ShowSuggestions(TitleSearch, MatchingRecentRows(text.Trim()));
+            }
         }
+    }
+
+    private static void ShowSuggestions(AutoSuggestBox box, List<SuggestionRow> rows)
+    {
+        box.ItemsSource = rows;
+        box.IsSuggestionListOpen = rows.Count > 0;
+    }
+
+    private static List<SuggestionRow> RecentRows() =>
+        [.. App.Library.Searches.Take(8).Select(SuggestionRow.Recent)];
+
+    private static List<SuggestionRow> MatchingRecentRows(string text)
+    {
+        var normalized = SuggestionRanking.Normalize(text);
+        var rows = App.Library.Searches
+            .Where(query => normalized.Length == 0
+                || SuggestionRanking.Normalize(query).StartsWith(normalized, StringComparison.Ordinal))
+            .Take(normalized.Length == 0 ? 8 : 7)
+            .Select(SuggestionRow.Recent)
+            .ToList();
+
+        if (normalized.Length > 0)
+        {
+            rows.Add(SuggestionRow.SeeAll(text));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Turns the endpoint's two groups into one keyboard list: confident music
+    /// rows first, then YouTube's query expansions, then the full-results row.
+    /// The exact query and any expansion that merely repeats a promoted title
+    /// are dropped so the list does not say the same thing twice.
+    /// </summary>
+    private static List<SuggestionRow> BuildSuggestions(string query, SearchSuggestions suggestions)
+    {
+        var rows = suggestions.Entities
+            .Select(entity => entity.Item)
+            .OfType<MusicItem>()
+            .Select(item => SuggestionRow.From(item, query))
+            .ToList();
+
+        var titles = rows
+            .Select(row => SuggestionRanking.Normalize(row.Title))
+            .ToHashSet(StringComparer.Ordinal);
+        var typed = SuggestionRanking.Normalize(query);
+
+        var expansions = new List<SuggestionRow>();
+        foreach (var candidate in suggestions.Queries)
+        {
+            if (expansions.Count == 4)
+            {
+                break;
+            }
+
+            var normalized = SuggestionRanking.Normalize(candidate);
+            if (normalized.Length == 0 || normalized == typed || titles.Contains(normalized))
+            {
+                continue;
+            }
+
+            expansions.Add(SuggestionRow.QueryRow(candidate));
+        }
+
+        if (rows.Count > 0 && expansions.Count > 0)
+        {
+            expansions[0] = expansions[0].WithDivider();
+        }
+
+        rows.AddRange(expansions);
+        if (query.Length > 0)
+        {
+            rows.Add(SuggestionRow.SeeAll(query));
+        }
+
+        return rows;
     }
 
     private void OnSearchSubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
-        var chosen = args.ChosenSuggestion as string;
-        var query = (chosen ?? args.QueryText).Trim();
-        var link = chosen is not null && _linkSuggestion is { } pending && chosen == pending.OpenTitle
-            ? pending
-            : YouTubeLink.Parse(args.QueryText);
+        var chosen = args.ChosenSuggestion as SuggestionRow;
         _suggestTimer?.Stop();
         _suggestCancel?.Cancel();
         sender.ItemsSource = null;
+        sender.IsSuggestionListOpen = false;
+
+        // A rich row is not a query: selecting it plays the track or opens the
+        // album/artist page. The "See all results" row is the way to the page.
+        if (chosen?.Item is { } item)
+        {
+            OpenSuggestedItem(item);
+            return;
+        }
+
+        if (chosen?.Link is { } chosenLink)
+        {
+            sender.Text = "";
+            OpenLink(chosenLink);
+            return;
+        }
+
+        var query = (chosen?.Query ?? chosen?.Title ?? args.QueryText).Trim();
 
         // A pasted YouTube or YouTube Music link plays (or opens) what it points at.
-        if (link is not null)
+        if (YouTubeLink.Parse(args.QueryText) is { } link)
         {
-            _linkSuggestion = null;
             sender.Text = "";
             OpenLink(link);
             return;
@@ -965,6 +1069,20 @@ public sealed partial class MainWindow : Window
         }
 
         SearchFor(query);
+    }
+
+    private void OpenSuggestedItem(MusicItem item)
+    {
+        // On a video page a video suggestion belongs in the video player; a
+        // track still goes through the audio queue.
+        if (item is MusicItem.SongRecord { Value.IsVideo: true } video
+            && ContentFrame.Content is IVideoPage)
+        {
+            OpenVideo(new Koda.Core.Video.Video(video.Value.Id, video.Value.Title));
+            return;
+        }
+
+        Navigator.Open(item);
     }
 
     /// <summary>A link from search: a song plays with its radio, anything else opens its page.</summary>

@@ -214,10 +214,10 @@ public sealed partial class YouTubeMusic : IDisposable
 
     // MARK: Search
 
-    public async Task<string[]> SuggestionsAsync(string query, CancellationToken cancellation = default)
+    public async Task<SearchSuggestions> SuggestionsAsync(string query, CancellationToken cancellation = default)
     {
         var root = await _api.MusicAsync("music/get_search_suggestions", new JsonObject { ["input"] = query }, cancellation);
-        return [.. root.Objects("searchSuggestionRenderer").Select(s => s["suggestion"].Text()).Where(s => s.Length > 0)];
+        return Pages.Suggestions(root, query);
     }
 
     public async Task<SearchResults> SearchAsync(string query, SearchFilter filter = SearchFilter.All,

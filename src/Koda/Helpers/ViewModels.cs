@@ -38,6 +38,178 @@ public sealed record CardItem(MusicItem Item, string Title, string Subtitle, Art
     }
 }
 
+/// <summary>
+/// One row in the title bar's search suggestions. Query rows and rich music
+/// rows share one template so their titles line up; the glyph, detail line and
+/// trailing action tell them apart.
+/// </summary>
+public sealed record SuggestionRow(
+    string Text,
+    string Title,
+    string Detail,
+    string KindGlyph,
+    Artwork? Artwork,
+    CornerRadius ArtRadius,
+    string TrailingGlyph,
+    MusicItem? Item,
+    YouTubeLink? Link,
+    string? Query,
+    bool ShowsDivider,
+    string AutomationName,
+    string HelpText)
+{
+    private const string SearchGlyph = "\uE721";
+    private const string ClockGlyph = "\uE81C";
+    private const string LinkGlyph = "\uE71B";
+    private const string PlayGlyph = "\uE768";
+    private const string ForwardGlyph = "\uE72A";
+    private const string ChevronGlyph = "\uE76C";
+    private const string SongGlyph = "\uE8D6";
+    private const string AlbumGlyph = "\uE93C";
+    private const string ArtistGlyph = "\uE77B";
+    private const string VideoGlyph = "\uE714";
+
+    public bool HasDetail => Detail.Length > 0;
+
+    public bool HasTrailing => TrailingGlyph.Length > 0;
+
+    public Thickness DividerThickness => ShowsDivider ? new Thickness(0, 1, 0, 0) : new Thickness(0);
+
+    public string ToolTip => Detail.Length > 0 ? $"{Title} · {Detail}" : Title;
+
+    /// <summary>A confident search result: a track, album, artist or playlist.</summary>
+    public static SuggestionRow From(MusicItem item, string query)
+    {
+        var title = item.Title;
+        var detail = DetailOf(item);
+        var action = item switch
+        {
+            MusicItem.SongRecord { Value.IsVideo: true } => "Press Enter to play the video",
+            MusicItem.SongRecord => "Press Enter to play",
+            _ => "Press Enter to open",
+        };
+
+        return new SuggestionRow(
+            Text: title,
+            Title: title,
+            Detail: detail,
+            KindGlyph: GlyphOf(item),
+            Artwork: item.Artwork,
+            ArtRadius: item is MusicItem.ArtistRecord ? new CornerRadius(20) : new CornerRadius(6),
+            TrailingGlyph: item is MusicItem.SongRecord ? PlayGlyph : ChevronGlyph,
+            Item: item,
+            Link: null,
+            Query: query,
+            ShowsDivider: false,
+            AutomationName: Automation(title, detail, action),
+            HelpText: action);
+    }
+
+    /// <summary>A query expansion from YouTube.</summary>
+    public static SuggestionRow QueryRow(string query) => new(
+        Text: query,
+        Title: query,
+        Detail: "",
+        KindGlyph: SearchGlyph,
+        Artwork: null,
+        ArtRadius: new CornerRadius(20),
+        TrailingGlyph: "",
+        Item: null,
+        Link: null,
+        Query: query,
+        ShowsDivider: false,
+        AutomationName: Automation(query, "", "Press Enter to search"),
+        HelpText: "Press Enter to search");
+
+    /// <summary>A recent search, shown when the field is empty.</summary>
+    public static SuggestionRow Recent(string query) => new(
+        Text: query,
+        Title: query,
+        Detail: "",
+        KindGlyph: ClockGlyph,
+        Artwork: null,
+        ArtRadius: new CornerRadius(20),
+        TrailingGlyph: "",
+        Item: null,
+        Link: null,
+        Query: query,
+        ShowsDivider: false,
+        AutomationName: Automation(query, "", "Press Enter to search again"),
+        HelpText: "Press Enter to search again");
+
+    /// <summary>The way out of the quick answers and into the full result page.</summary>
+    public static SuggestionRow SeeAll(string query) => new(
+        Text: "See all results",
+        Title: "See all results",
+        Detail: $"“{query}”",
+        KindGlyph: SearchGlyph,
+        Artwork: null,
+        ArtRadius: new CornerRadius(20),
+        TrailingGlyph: ForwardGlyph,
+        Item: null,
+        Link: null,
+        Query: query,
+        ShowsDivider: false,
+        AutomationName: Automation("See all results", $"“{query}”", "Press Enter to open the full results"),
+        HelpText: "Press Enter to open the full results");
+
+    /// <summary>A pasted YouTube or YouTube Music link.</summary>
+    public static SuggestionRow LinkRow(YouTubeLink link) => new(
+        Text: link.OpenTitle,
+        Title: link.OpenTitle,
+        Detail: "YouTube or YouTube Music link",
+        KindGlyph: LinkGlyph,
+        Artwork: null,
+        ArtRadius: new CornerRadius(20),
+        TrailingGlyph: ChevronGlyph,
+        Item: null,
+        Link: link,
+        Query: null,
+        ShowsDivider: false,
+        AutomationName: Automation(link.OpenTitle, "YouTube or YouTube Music link", "Press Enter to open"),
+        HelpText: "Press Enter to open");
+
+    public SuggestionRow WithDivider() => this with { ShowsDivider = true };
+
+    private static string GlyphOf(MusicItem item) => item switch
+    {
+        MusicItem.SongRecord { Value.IsVideo: true } => VideoGlyph,
+        MusicItem.SongRecord => SongGlyph,
+        MusicItem.AlbumRecord => AlbumGlyph,
+        MusicItem.ArtistRecord => ArtistGlyph,
+        _ => AlbumGlyph,
+    };
+
+    private static string DetailOf(MusicItem item) => item switch
+    {
+        MusicItem.SongRecord song => Join(
+            song.Value.IsVideo ? "Video" : "Song",
+            song.Value.ArtistLine,
+            song.Value.Album?.Title),
+        MusicItem.AlbumRecord album => Join(
+            album.Value.Kind switch
+            {
+                ReleaseKind.Ep => "EP",
+                ReleaseKind.Single => "Single",
+                _ => "Album",
+            },
+            album.Value.ArtistLine,
+            album.Value.Year?.ToString()),
+        MusicItem.ArtistRecord artist => Join("Artist", artist.Value.Subtitle ?? ""),
+        MusicItem.PlaylistRecord playlist => Join("Playlist", playlist.Value.Subtitle ?? ""),
+        MusicItem.UserPlaylistRecord playlist => Join(
+            "Your playlist",
+            playlist.Value.Songs.Length == 1 ? "1 song" : $"{playlist.Value.Songs.Length} songs"),
+        _ => "",
+    };
+
+    private static string Join(params string?[] parts) =>
+        string.Join(" · ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
+
+    private static string Automation(string title, string detail, string action) =>
+        detail.Length > 0 ? $"{title}. {detail}. {action}." : $"{title}. {action}.";
+}
+
 /// <summary>One shelf as drawn: its cards, and its songs as the queue a song card plays into.</summary>
 public sealed record ShelfView(string Title, string? Strapline, CardItem[] Cards)
 {

@@ -244,6 +244,47 @@ public record SearchResults(
         && Playlists.Length == 0 && Videos.Length == 0;
 }
 
+/// <summary>What a search-bar suggestion points at.</summary>
+public enum SuggestionKind
+{
+    Query,
+    Song,
+    Video,
+    Album,
+    Artist,
+    Playlist,
+}
+
+/// <summary>
+/// One row in the search field's suggestion list: either a query to run, or a
+/// music item promoted because its title matched the typed query closely.
+/// </summary>
+public sealed record SearchSuggestion(
+    string Text,
+    SuggestionKind Kind,
+    MusicItem? Item,
+    double Confidence)
+{
+    public bool IsEntity => Item is not null;
+
+    public static SearchSuggestion ForQuery(string text) =>
+        new(text, SuggestionKind.Query, null, 0);
+}
+
+/// <summary>
+/// The suggestion endpoint's two groups: items YouTube ranked highly enough to
+/// show as results, and the plain query expansions. The entities are already
+/// scored, gated and deduped by <see cref="SuggestionRanking"/>.
+/// </summary>
+public sealed record SearchSuggestions(
+    SearchSuggestion[] Entities,
+    string[] Queries)
+{
+    public static readonly SearchSuggestions Empty = new([], []);
+
+    public bool IsEmpty => Entities.Length == 0 && Queries.Length == 0;
+}
+
 /// <summary>The YouTube Music search chips. <see cref="Params"/> values are pinned to the fixtures. [verified October 2026]</summary>
 public enum SearchFilter
 {
