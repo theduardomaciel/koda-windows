@@ -22,7 +22,14 @@ public sealed class MiniPlayerWindow : Window
 {
     private const double CardWidth = 450;
     private const double CardHeight = 200;
-    private const double ExpandedCardHeight = 620;
+
+    /// <summary>The expanded card keeps the reference player's portrait 6:11 shape.</summary>
+    private const double ExpandedAspectWidth = 6;
+    private const double ExpandedAspectHeight = 11;
+    private const double ExpandedCardHeight = CardWidth * ExpandedAspectHeight / ExpandedAspectWidth;
+
+    /// <summary>Narrower than this, the transport and the two side clusters would collide.</summary>
+    private const double MinExpandedWidth = 360;
 
     private readonly MiniPlayerPage _page;
     private bool _customTitleBar;
@@ -125,7 +132,15 @@ public sealed class MiniPlayerWindow : Window
     /// the taller overlay, the panel opens in the full player instead, as it used to.</summary>
     private void OnExpandedChanged(bool expanded)
     {
-        if (TryResizeCard(expanded) || !expanded)
+        if (TryResizeCard(expanded))
+        {
+            // A narrower expanded card moves the caption group and the passthrough area
+            // beside it; the title bar re-reads them once the new size has laid out.
+            DispatcherQueue.TryEnqueue(() => _page.TitleBarControl.RecomputeDragRegions());
+            return;
+        }
+
+        if (!expanded)
         {
             return;
         }
@@ -144,7 +159,7 @@ public sealed class MiniPlayerWindow : Window
         {
             var scale = DpiScale();
             var width = (int)Math.Round(CardWidth * scale);
-            var height = (int)Math.Round((expanded ? ExpandedCardHeight : CardHeight) * scale);
+            var targetHeight = (int)Math.Round((expanded ? ExpandedCardHeight : CardHeight) * scale);
 
             if (DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest) is not { } area)
             {
@@ -152,7 +167,14 @@ public sealed class MiniPlayerWindow : Window
             }
 
             var work = area.WorkArea;
-            height = Math.Min(height, work.Height);
+            var height = Math.Min(targetHeight, work.Height);
+            if (expanded && height < targetHeight)
+            {
+                // The screen cannot give the card its full height. Narrow it instead of
+                // flattening it, so the 6:11 shape the panel is laid out for survives.
+                width = (int)Math.Round(height * ExpandedAspectWidth / ExpandedAspectHeight);
+                width = Math.Max(width, (int)Math.Round(MinExpandedWidth * scale));
+            }
 
             int x;
             int y;
