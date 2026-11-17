@@ -110,7 +110,9 @@
                     PanePlacement="Right"
                     OpenPaneLength="380"
                     CompactPaneLength="0"
-                    IsPaneOpen="False">
+                    IsPaneOpen="False"
+                    PaneClosing="OnLyricsPaneClosing"
+                    PaneClosed="OnLyricsPaneClosed">
                     <SplitView.Pane>
                         <controls:InlineLyricsPane
                             x:Name="InlineLyrics"

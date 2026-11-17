@@ -95,6 +95,10 @@ public sealed partial class MainWindow : Window
     /// player hides the drawer without forgetting the choice; leaving restores it.</summary>
     private bool _lyricsOpen;
 
+    /// <summary>Set while the drawer is closed on purpose, so the pane's light-dismiss
+    /// guard knows this close is not a tap outside.</summary>
+    private bool _closingLyricsDrawer;
+
     /// <summary>Below this width the search takes its smallest step and the sidebar folds
     /// to its icons; above it both open up again.</summary>
     private const double NarrowWindowWidth = 860;
@@ -1278,7 +1282,7 @@ public sealed partial class MainWindow : Window
             && Playback.CurrentSong is not null
             && LyricsDrawerAllowed;
         var changed = LyricsDrawer.IsPaneOpen != show;
-        LyricsDrawer.IsPaneOpen = show;
+        SetLyricsPaneOpen(show);
 
         if (show)
         {
@@ -1296,6 +1300,39 @@ public sealed partial class MainWindow : Window
 
         UpdateLyricsChrome();
     }
+
+    /// <summary>Changes the pane without the light-dismiss guard mistaking a deliberate
+    /// close for a tap outside it.</summary>
+    private void SetLyricsPaneOpen(bool open)
+    {
+        if (LyricsDrawer.IsPaneOpen == open)
+        {
+            return;
+        }
+
+        _closingLyricsDrawer = true;
+        try
+        {
+            LyricsDrawer.IsPaneOpen = open;
+        }
+        finally
+        {
+            _closingLyricsDrawer = false;
+        }
+    }
+
+    /// <summary>SplitView closes an Overlay pane when the listener taps anywhere outside
+    /// it. The lyrics drawer is a surface, not a flyout: it stays until its close button,
+    /// the bar toggle, or Esc puts it away.</summary>
+    private void OnLyricsPaneClosing(SplitView sender, SplitViewPaneClosingEventArgs args)
+    {
+        if (!_closingLyricsDrawer && _lyricsOpen)
+        {
+            args.Cancel = true;
+        }
+    }
+
+    private void OnLyricsPaneClosed(SplitView sender, object args) => _closingLyricsDrawer = false;
 
     private void UpdateLyricsChrome()
     {
@@ -1330,7 +1367,7 @@ public sealed partial class MainWindow : Window
         LyricsDrawer.DisplayMode = mode;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            LyricsDrawer.IsPaneOpen = false;
+            SetLyricsPaneOpen(false);
             ApplyLyricsDrawer();
         });
     }
