@@ -86,6 +86,14 @@ public sealed partial class MainWindow : Window
     /// <summary>The sidebar collapsed to icons, as MainWindow.xaml sets it.</summary>
     private const double CompactPaneWidth = 52;
 
+    /// <summary>The width the page keeps beside an inline lyrics drawer; below it the
+    /// drawer floats above the page instead of squeezing it.</summary>
+    private const double InlineLyricsPageWidth = 520;
+
+    /// <summary>Whether the listener asked for the inline lyrics drawer. A whole-window
+    /// player hides the drawer without forgetting the choice; leaving restores it.</summary>
+    private bool _lyricsOpen;
+
     /// <summary>Below this width the search takes its smallest step and the sidebar folds
     /// to its icons; above it both open up again.</summary>
     private const double NarrowWindowWidth = 860;
@@ -212,6 +220,7 @@ public sealed partial class MainWindow : Window
         _zoomTimer.Tick += (_, _) => ZoomBadge.Visibility = Visibility.Collapsed;
 
         ZoomHost.SizeChanged += (_, _) => ApplyZoom();
+        LyricsDrawer.SizeChanged += (_, _) => ApplyLyricsLayout();
         Root.Loaded += (_, _) =>
         {
             if (Root.XamlRoot is { } root)
@@ -229,8 +238,16 @@ public sealed partial class MainWindow : Window
         ContentFrame.Navigated += OnContentNavigated;
         // The pane's width is part of the content's room: after it opens or closes, measure
         // the page again. Without this a page laid out at the old width stays cropped.
-        Nav.PaneOpened += (_, _) => RelayoutContent();
-        Nav.PaneClosed += (_, _) => RelayoutContent();
+        Nav.PaneOpened += (_, _) =>
+        {
+            RelayoutContent();
+            ApplyLyricsLayout();
+        };
+        Nav.PaneClosed += (_, _) =>
+        {
+            RelayoutContent();
+            ApplyLyricsLayout();
+        };
         Nav.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) =>
         {
             // Opening the pane while the window is narrow is the listener's choice;
@@ -247,6 +264,7 @@ public sealed partial class MainWindow : Window
 
         OnTrackChanged();
         OnPlayStateChanged();
+        ApplyLyricsLayout();
 
         Closed += (_, _) =>
         {
@@ -256,6 +274,7 @@ public sealed partial class MainWindow : Window
             // clean up once, then end the process.
             try
             {
+                InlineLyrics.Dispose();
                 Shutdown();
             }
             catch (Exception error)
@@ -602,6 +621,10 @@ public sealed partial class MainWindow : Window
         UpdateBackButton();
         // Now Playing and the watch page are whole players: the bars step aside while they're open.
         UpdateVideoBar();
+        ApplyLyricsDrawer();
+        // The frame can still report the outgoing whole-window player for a tick; ask
+        // again once it has settled, so the drawer comes back after Now Playing.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ApplyLyricsDrawer);
         TitleSearch.PlaceholderText = args.Content is IVideoPage ? "Search YouTube" : "Songs, albums, artists or a link";
         if (args.SourcePageType == typeof(SearchPage))
         {
@@ -1002,6 +1025,19 @@ public sealed partial class MainWindow : Window
             args.Handled = true;
         }), true);
 
+        // Escape closes the inline lyrics drawer before it reaches the page.
+        Root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, args) =>
+        {
+            if (args.Key != VirtualKey.Escape || !LyricsDrawer.IsPaneOpen)
+            {
+                return;
+            }
+
+            _lyricsOpen = false;
+            ApplyLyricsDrawer();
+            args.Handled = true;
+        }), true);
+
         // The watch page's keys, unless something that types has focus; arrows stay with a
         // focused slider, which they move. Space is handled above.
         Root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, args) =>
@@ -1141,6 +1177,7 @@ public sealed partial class MainWindow : Window
         NextButton.IsEnabled = Playback.CanNext;
         PreviousButton.IsEnabled = song is not null;
         QueueButton.IsEnabled = MiniButton.IsEnabled = ShuffleButton.IsEnabled = RepeatButton.IsEnabled = song is not null;
+        LyricsButton.IsEnabled = song is not null;
         SkipBackButton.IsEnabled = SkipForwardButton.IsEnabled = song is not null && !Playback.IsLoading;
         _smtc.SetTransport(Playback.CanPrev, Playback.CanNext);
         Scrubber.Maximum = Math.Max(1, Playback.DurationSeconds);
@@ -1149,6 +1186,7 @@ public sealed partial class MainWindow : Window
         TotalText.Text = Playback.DurationSeconds > 0 ? FormatTime(Playback.DurationSeconds) : "";
         OnQueueModesChanged();
         UpdateTaskbar();
+        ApplyLyricsDrawer();
 
         // One toast per song, and only when the track really changed: TrackChanged also
         // fires when the queue modes or the known duration change.
@@ -1212,6 +1250,90 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // MARK: inline lyrics
+
+    /// <summary>The drawer has no place on a whole-window player or while a video is on.</summary>
+    private bool LyricsDrawerAllowed =>
+        ContentFrame.Content is not (NowPlayingPage or VideoWatchPage)
+        && !Video.HasVideo;
+
+    private void OnLyricsClick(object sender, RoutedEventArgs e)
+    {
+        _lyricsOpen = LyricsButton.IsChecked == true;
+        ApplyLyricsDrawer();
+    }
+
+    private void OnLyricsCloseRequested()
+    {
+        _lyricsOpen = false;
+        ApplyLyricsDrawer();
+    }
+
+    /// <summary>Opens or closes the drawer for the current page, keeping the listener's
+    /// choice when a player or a video is what keeps it off screen.</summary>
+    private void ApplyLyricsDrawer()
+    {
+        var show = _lyricsOpen
+            && Playback.CurrentSong is not null
+            && LyricsDrawerAllowed;
+        var changed = LyricsDrawer.IsPaneOpen != show;
+        LyricsDrawer.IsPaneOpen = show;
+
+        if (show)
+        {
+            InlineLyrics.Activate();
+        }
+        else
+        {
+            InlineLyrics.Deactivate();
+        }
+
+        if (changed)
+        {
+            RelayoutContent();
+        }
+
+        UpdateLyricsChrome();
+    }
+
+    private void UpdateLyricsChrome()
+    {
+        LyricsButton.IsEnabled = Playback.CurrentSong is not null;
+        LyricsButton.IsChecked = _lyricsOpen;
+        var label = _lyricsOpen ? "Hide lyrics" : "Lyrics";
+        ToolTipService.SetToolTip(LyricsButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(LyricsButton, label);
+    }
+
+    /// <summary>Wide enough for the page to keep its room with the drawer beside it, the
+    /// drawer pushes the page; otherwise it floats above it so the page is not crushed.</summary>
+    private void ApplyLyricsLayout()
+    {
+        var width = LyricsDrawer.ActualWidth;
+        if (width <= 0)
+        {
+            return;
+        }
+
+        var sidebar = Nav.IsPaneOpen ? Nav.OpenPaneLength : Nav.CompactPaneLength;
+        var inline = width - sidebar - LyricsDrawer.OpenPaneLength >= InlineLyricsPageWidth;
+        var mode = inline ? SplitViewDisplayMode.Inline : SplitViewDisplayMode.Overlay;
+        if (LyricsDrawer.DisplayMode == mode)
+        {
+            return;
+        }
+
+        // SplitView drops the open pane when it changes display mode, and a plain
+        // IsPaneOpen = true is a no-op while the property still says it is open.
+        // Re-assert the listener's state once the mode change has settled.
+        LyricsDrawer.DisplayMode = mode;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            LyricsDrawer.IsPaneOpen = false;
+            ApplyLyricsDrawer();
+        });
+    }
+
     private void UpdateLike()
     {
         var liked = Playback.CurrentSong is { } song && App.Library.IsLiked(song);
@@ -1232,7 +1354,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>The cover or title opens Now Playing, drilling in; tapped again it closes.</summary>
+    /// <summary>The cover opens Now Playing, drilling in; tapped again it closes.</summary>
     private void OnNowPlayingTapped(object sender, TappedRoutedEventArgs e)
     {
         if (ContentFrame.Content is NowPlayingPage)
@@ -1359,8 +1481,11 @@ public sealed partial class MainWindow : Window
 
     private void OnPlayerBarSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // Under 760 the volume goes speaker-only.
-        VolumeSlider.Visibility = e.NewSize.Width < 760 ? Visibility.Collapsed : Visibility.Visible;
+        // The bar carries five buttons, the volume and the lyrics toggle. Under 1000 the
+        // volume goes speaker-only; at the smallest widths the mini player follows, so the
+        // lyrics and queue stay in reach instead of being pushed under the transport.
+        VolumeSlider.Visibility = e.NewSize.Width < 1000 ? Visibility.Collapsed : Visibility.Visible;
+        MiniButton.Visibility = e.NewSize.Width < 760 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>The title and artist take the room the cover, the gaps and the heart leave;
@@ -1664,6 +1789,8 @@ public sealed partial class MainWindow : Window
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(VideoPlayButton, label);
             UpdateVideoBarTime();
         }
+
+        ApplyLyricsDrawer();
     }
 
     private void UpdateVideoBarTime()

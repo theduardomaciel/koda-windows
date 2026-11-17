@@ -1,17 +1,14 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Numerics;
 using Koda.Core;
 using Koda.Helpers;
 using Koda.Playback;
 using Koda.Services;
 using Microsoft.UI;
-using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
-using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
@@ -366,38 +363,7 @@ public sealed partial class NowPlayingPage : Page
     /// </summary>
     private void EnsureLyricsMask()
     {
-        if (_lyricsMasked || LyricsView.XamlRoot is null)
-        {
-            return;
-        }
-
-        _lyricsMasked = true;
-        var compositor = ElementCompositionPreview.GetElementVisual(LyricsView).Compositor;
-
-        CompositionSurfaceBrush Capture(UIElement element)
-        {
-            var visual = ElementCompositionPreview.GetElementVisual(element);
-            var surface = compositor.CreateVisualSurface();
-            surface.SourceVisual = visual;
-            var size = compositor.CreateExpressionAnimation($"{nameof(visual)}.Size");
-            size.SetReferenceParameter(nameof(visual), visual);
-            surface.StartAnimation(nameof(surface.SourceSize), size);
-
-            // The surface keeps the element's rendered pixels; the element itself is
-            // hidden, so its copy is only ever seen through the mask.
-            var brush = compositor.CreateSurfaceBrush(surface);
-            visual.Opacity = 0;
-            return brush;
-        }
-
-        var mask = compositor.CreateMaskBrush();
-        mask.Source = Capture(LyricsMaskedContent);
-        mask.Mask = Capture(LyricsMask);
-
-        var sprite = compositor.CreateSpriteVisual();
-        sprite.RelativeSizeAdjustment = Vector2.One;
-        sprite.Brush = mask;
-        ElementCompositionPreview.SetElementChildVisual(LyricsView, sprite);
+        LyricsFade.Apply(LyricsView, LyricsMaskedContent, LyricsMask, ref _lyricsMasked);
     }
 
     /// <summary>The background takes the cover's three strongest colours.</summary>

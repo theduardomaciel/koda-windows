@@ -99,191 +99,210 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <muxc:NavigationView
-                    x:Name="Nav"
+                <!-- The page area and its lyrics drawer. SplitView pushes the page aside
+                     when there is room and floats the drawer above it when the window is
+                     narrow; the player bar below stays the full width either way, so the
+                     transport never loses its controls to the panel. -->
+                <SplitView
+                    x:Name="LyricsDrawer"
                     Grid.Row="0"
-                    PaneDisplayMode="Left"
-                    OpenPaneLength="264"
-                    CompactPaneLength="52"
-                    IsBackButtonVisible="Collapsed"
-                    IsSettingsVisible="True"
-                    IsTitleBarAutoPaddingEnabled="False"
-                    ItemInvoked="OnNavItemInvoked">
-                    <muxc:NavigationView.MenuItems>
-                        <muxc:NavigationViewItem Content="Home" Tag="home" ToolTipService.ToolTip="Home">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE80F;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem Content="Browse" Tag="browse" ToolTipService.ToolTip="Browse moods and genres">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE8A9;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="SearchResultsItem" Content="Search Results" Tag="search" Visibility="Collapsed" ToolTipService.ToolTip="Search results">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE721;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
+                    DisplayMode="Inline"
+                    PanePlacement="Right"
+                    OpenPaneLength="380"
+                    CompactPaneLength="0"
+                    IsPaneOpen="False">
+                    <SplitView.Pane>
+                        <controls:InlineLyricsPane
+                            x:Name="InlineLyrics"
+                            CloseRequested="OnLyricsCloseRequested" />
+                    </SplitView.Pane>
+                    <SplitView.Content>
+                        <muxc:NavigationView
+                            x:Name="Nav"
+                            PaneDisplayMode="Left"
+                            OpenPaneLength="264"
+                            CompactPaneLength="52"
+                            IsBackButtonVisible="Collapsed"
+                            IsSettingsVisible="True"
+                            IsTitleBarAutoPaddingEnabled="False"
+                            ItemInvoked="OnNavItemInvoked">
+                            <muxc:NavigationView.MenuItems>
+                                <muxc:NavigationViewItem Content="Home" Tag="home" ToolTipService.ToolTip="Home">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE80F;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem Content="Browse" Tag="browse" ToolTipService.ToolTip="Browse moods and genres">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE8A9;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="SearchResultsItem" Content="Search Results" Tag="search" Visibility="Collapsed" ToolTipService.ToolTip="Search results">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE721;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
 
-                        <muxc:NavigationViewItemHeader x:Name="VideosHeader" Content="Videos" />
-                        <muxc:NavigationViewItem x:Name="VideoHomeItem" Content="Videos" Tag="video-home" ToolTipService.ToolTip="Videos for you">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE714;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="VideoSubscriptionsItem" Content="Subscriptions" Tag="video-subscriptions" ToolTipService.ToolTip="The latest from your channels">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE8F2;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="VideoExploreItem" Content="Explore" Tag="video-explore" ToolTipService.ToolTip="Music, news, sports and learning">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE7C3;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="VideoChannelsItem" Content="Channels" Tag="video-channels" ToolTipService.ToolTip="Channels you subscribe to">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE716;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="VideoLaterItem" Content="Watch Later" Tag="video-later" ToolTipService.ToolTip="Watch Later">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE728;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="VideoLikedItem" Content="Liked Videos" Tag="video-liked" ToolTipService.ToolTip="Liked Videos">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE8E1;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="VideoHistoryItem" Content="Watch History" Tag="video-history" ToolTipService.ToolTip="Videos you've watched">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE81C;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItemHeader x:Name="VideosHeader" Content="Videos" />
+                                <muxc:NavigationViewItem x:Name="VideoHomeItem" Content="Videos" Tag="video-home" ToolTipService.ToolTip="Videos for you">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE714;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="VideoSubscriptionsItem" Content="Subscriptions" Tag="video-subscriptions" ToolTipService.ToolTip="The latest from your channels">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE8F2;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="VideoExploreItem" Content="Explore" Tag="video-explore" ToolTipService.ToolTip="Music, news, sports and learning">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE7C3;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="VideoChannelsItem" Content="Channels" Tag="video-channels" ToolTipService.ToolTip="Channels you subscribe to">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE716;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="VideoLaterItem" Content="Watch Later" Tag="video-later" ToolTipService.ToolTip="Watch Later">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE728;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="VideoLikedItem" Content="Liked Videos" Tag="video-liked" ToolTipService.ToolTip="Liked Videos">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE8E1;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="VideoHistoryItem" Content="Watch History" Tag="video-history" ToolTipService.ToolTip="Videos you've watched">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE81C;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
 
-                        <muxc:NavigationViewItemHeader Content="Library" />
-                        <muxc:NavigationViewItem Content="Recently Played" Tag="recent" ToolTipService.ToolTip="Recently Played">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE823;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem Content="History" Tag="history" ToolTipService.ToolTip="Every play, by the day">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE81C;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="LikedItem" Content="Liked Songs" Tag="liked" ToolTipService.ToolTip="Liked Songs">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xEB52;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem Content="Albums" Tag="albums" ToolTipService.ToolTip="Saved albums">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE93C;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem Content="Playlists" Tag="playlists" ToolTipService.ToolTip="Saved playlists">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE8FD;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem Content="Artists" Tag="artists" ToolTipService.ToolTip="Followed artists">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE77B;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem x:Name="DownloadsItem" Content="Downloads" Tag="downloads" ToolTipService.ToolTip="Downloads">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE896;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem Content="Ready Offline" Tag="offline" ToolTipService.ToolTip="Songs kept on this PC">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE709;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem Content="Listening Stats" Tag="stats" ToolTipService.ToolTip="Listening Stats">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE9D9;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                        <muxc:NavigationViewItem Content="Last.fm" Tag="lastfm" ToolTipService.ToolTip="Scrobble what you play to Last.fm">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xEC05;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItemHeader Content="Library" />
+                                <muxc:NavigationViewItem Content="Recently Played" Tag="recent" ToolTipService.ToolTip="Recently Played">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE823;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem Content="History" Tag="history" ToolTipService.ToolTip="Every play, by the day">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE81C;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="LikedItem" Content="Liked Songs" Tag="liked" ToolTipService.ToolTip="Liked Songs">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xEB52;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem Content="Albums" Tag="albums" ToolTipService.ToolTip="Saved albums">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE93C;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem Content="Playlists" Tag="playlists" ToolTipService.ToolTip="Saved playlists">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE8FD;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem Content="Artists" Tag="artists" ToolTipService.ToolTip="Followed artists">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE77B;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem x:Name="DownloadsItem" Content="Downloads" Tag="downloads" ToolTipService.ToolTip="Downloads">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE896;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem Content="Ready Offline" Tag="offline" ToolTipService.ToolTip="Songs kept on this PC">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE709;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem Content="Listening Stats" Tag="stats" ToolTipService.ToolTip="Listening Stats">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE9D9;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                                <muxc:NavigationViewItem Content="Last.fm" Tag="lastfm" ToolTipService.ToolTip="Scrobble what you play to Last.fm">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xEC05;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
 
-                        <muxc:NavigationViewItemHeader Content="Your playlists" />
-                        <muxc:NavigationViewItem x:Name="NewPlaylistItem" Content="New Playlist" Tag="new-playlist" SelectsOnInvoked="False" ToolTipService.ToolTip="Make a new playlist">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE710;" />
-                            </muxc:NavigationViewItem.Icon>
-                        </muxc:NavigationViewItem>
-                    </muxc:NavigationView.MenuItems>
+                                <muxc:NavigationViewItemHeader Content="Your playlists" />
+                                <muxc:NavigationViewItem x:Name="NewPlaylistItem" Content="New Playlist" Tag="new-playlist" SelectsOnInvoked="False" ToolTipService.ToolTip="Make a new playlist">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE710;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                </muxc:NavigationViewItem>
+                            </muxc:NavigationView.MenuItems>
 
-                    <muxc:NavigationView.FooterMenuItems>
-                        <!-- What plays next and today's listening, as ordinary two-line rows: they line up
-                             with the rest of the pane, keep its hover and focus, and shrink to their icon
-                             when the pane is compact. -->
-                        <muxc:NavigationViewItem
-                            x:Name="UpNextItem"
-                            Tag="up-next"
-                            SelectsOnInvoked="False"
-                            Visibility="Collapsed">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE8D6;" />
-                            </muxc:NavigationViewItem.Icon>
-                            <StackPanel VerticalAlignment="Center" Margin="0,5">
-                                <TextBlock x:Name="UpNextTitle" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                <TextBlock
-                                    x:Name="UpNextArtist"
-                                    Style="{ThemeResource CaptionTextBlockStyle}"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    TextTrimming="CharacterEllipsis"
-                                    TextWrapping="NoWrap" />
-                            </StackPanel>
-                        </muxc:NavigationViewItem>
+                            <muxc:NavigationView.FooterMenuItems>
+                                <!-- What plays next and today's listening, as ordinary two-line rows: they line up
+                                     with the rest of the pane, keep its hover and focus, and shrink to their icon
+                                     when the pane is compact. -->
+                                <muxc:NavigationViewItem
+                                    x:Name="UpNextItem"
+                                    Tag="up-next"
+                                    SelectsOnInvoked="False"
+                                    Visibility="Collapsed">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE8D6;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                    <StackPanel VerticalAlignment="Center" Margin="0,5">
+                                        <TextBlock x:Name="UpNextTitle" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                        <TextBlock
+                                            x:Name="UpNextArtist"
+                                            Style="{ThemeResource CaptionTextBlockStyle}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="NoWrap" />
+                                    </StackPanel>
+                                </muxc:NavigationViewItem>
 
-                        <muxc:NavigationViewItem
-                            x:Name="GlanceItem"
-                            Tag="glance"
-                            SelectsOnInvoked="False">
-                            <muxc:NavigationViewItem.Icon>
-                                <FontIcon Glyph="&#xE7F6;" />
-                            </muxc:NavigationViewItem.Icon>
-                            <StackPanel VerticalAlignment="Center" Margin="0,5">
-                                <TextBlock x:Name="GlanceListened" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                                <TextBlock
-                                    x:Name="GlanceStreak"
-                                    Style="{ThemeResource CaptionTextBlockStyle}"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    TextTrimming="CharacterEllipsis"
-                                    TextWrapping="NoWrap" />
-                            </StackPanel>
-                        </muxc:NavigationViewItem>
-                    </muxc:NavigationView.FooterMenuItems>
+                                <muxc:NavigationViewItem
+                                    x:Name="GlanceItem"
+                                    Tag="glance"
+                                    SelectsOnInvoked="False">
+                                    <muxc:NavigationViewItem.Icon>
+                                        <FontIcon Glyph="&#xE7F6;" />
+                                    </muxc:NavigationViewItem.Icon>
+                                    <StackPanel VerticalAlignment="Center" Margin="0,5">
+                                        <TextBlock x:Name="GlanceListened" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                        <TextBlock
+                                            x:Name="GlanceStreak"
+                                            Style="{ThemeResource CaptionTextBlockStyle}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="NoWrap" />
+                                    </StackPanel>
+                                </muxc:NavigationViewItem>
+                            </muxc:NavigationView.FooterMenuItems>
 
-                    <Grid>
-                        <Frame x:Name="ContentFrame" />
-                        <!-- Non-blocking notes and faults: never a dialog. -->
-                        <muxc:InfoBar
-                            x:Name="StatusRibbon"
-                            MaxWidth="640"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Bottom"
-                            Margin="0,0,0,12"
-                            Padding="12,8"
-                            CornerRadius="8"
-                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            IsOpen="False"
-                            IsClosable="True"
-                            CloseButtonClick="OnStatusClosed" />
-                    </Grid>
-                </muxc:NavigationView>
+                            <Grid>
+                                <Frame x:Name="ContentFrame" />
+                                <!-- Non-blocking notes and faults: never a dialog. -->
+                                <muxc:InfoBar
+                                    x:Name="StatusRibbon"
+                                    MaxWidth="640"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Bottom"
+                                    Margin="0,0,0,12"
+                                    Padding="12,8"
+                                    CornerRadius="8"
+                                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    IsOpen="False"
+                                    IsClosable="True"
+                                    CloseButtonClick="OnStatusClosed" />
+                            </Grid>
+                        </muxc:NavigationView>
+                    </SplitView.Content>
+                </SplitView>
 
                 <!-- Player bar on the window's Mica, a hairline above it:
                      now playing (left) | transport over the scrubber (center) | volume (right). -->
@@ -308,7 +327,7 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border Width="56" Height="56" CornerRadius="8" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Tapped="OnNowPlayingTapped" ToolTipService.ToolTip="Now Playing">
+                        <Border Width="56" Height="56" CornerRadius="8" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Tapped="OnNowPlayingTapped" ToolTipService.ToolTip="Open Now Playing" AutomationProperties.Name="Open Now Playing">
                             <Grid>
                                 <FontIcon x:Name="CoverGlyph" Glyph="&#xE8D6;" FontSize="18" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                 <Image x:Name="CoverImage" helpers:Art.Pixels="56" Stretch="UniformToFill" />
@@ -321,7 +340,6 @@
                                 Style="{ThemeResource BodyStrongTextBlockStyle}"
                                 TextTrimming="CharacterEllipsis"
                                 TextWrapping="NoWrap"
-                                Tapped="OnNowPlayingTapped"
                                 AutomationProperties.Name="Track title" />
                             <TextBlock
                                 x:Name="TrackArtistText"
@@ -486,6 +504,19 @@
                             AutomationProperties.Name="Mini player">
                             <FontIcon Glyph="&#xE9A6;" FontSize="16" />
                         </Button>
+                        <ToggleButton
+                            x:Name="LyricsButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            IsEnabled="False"
+                            Click="OnLyricsClick"
+                            ToolTipService.ToolTip="Lyrics"
+                            AutomationProperties.Name="Lyrics">
+                            <FontIcon Glyph="&#xE8F2;" FontSize="16" />
+                        </ToggleButton>
                         <Button
                             x:Name="QueueButton"
                             Width="36"

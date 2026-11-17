@@ -75,22 +75,28 @@ internal sealed class LyricsPanel : IDisposable
     /// than the Display cut, which is what made the lyrics look thin.</summary>
     private static readonly FontFamily LyricFont = new("Segoe UI Variable Text");
 
-    /// <summary>The two ends of a word's fill: the sung white and the waiting grey.</summary>
-    private static readonly Color SungColor = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
-    private static readonly Color UnsungColor = Color.FromArgb(0x61, 0xFF, 0xFF, 0xFF);
+    /// <summary>The two ends of a word's fill: the sung colour and the waiting one. They
+    /// start dark, as Now Playing is, and are re-read from the panel's theme when it fills.</summary>
+    private Color _sung = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+    private Color _unsung = Color.FromArgb(0x61, 0xFF, 0xFF, 0xFF);
 
-    /// <summary>Spicy's colors: 85% white once sung, 50% white while waiting.</summary>
-    private static readonly Color ExpressiveSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
+    /// <summary>Spicy's colors: 85% white once sung, 50% white while waiting, in dark.</summary>
+    private Color _expressiveSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
 
-    /// <summary>The static mask twin's fill: fully opaque white, the reference alpha for
-    /// the mask; the shadow's own opacity still scales the visible glow.</summary>
-    private static readonly Color MaskTwinColor = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
-    private static readonly Color ExpressiveUnsung = Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF);
-    private static readonly Color ExpressiveHoverSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
-    private static readonly Color ExpressiveHoverUnsung = Color.FromArgb(0xBF, 0xFF, 0xFF, 0xFF);
-    private static readonly Color ExpressiveActiveHoverSung = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
-    private static readonly Color ExpressiveActiveHoverUnsung = Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF);
-    private static readonly Color HoverBoxColor = Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF);
+    /// <summary>The static mask twin's fill: the reference alpha for the mask; the
+    /// shadow's own opacity still scales the visible glow. It stays white in both
+    /// themes because only its alpha is read.</summary>
+    private readonly Color _maskTwinColor = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+    private Color _expressiveUnsung = Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF);
+    private Color _expressiveHoverSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
+    private Color _expressiveHoverUnsung = Color.FromArgb(0xBF, 0xFF, 0xFF, 0xFF);
+    private Color _expressiveActiveHoverSung = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+    private Color _expressiveActiveHoverUnsung = Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF);
+    private Color _hoverBoxColor = Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF);
+
+    /// <summary>The theme the palette was read under, so a palette left over from the
+    /// other theme is rebuilt when the panel is shown again.</summary>
+    private ElementTheme _paletteTheme = ElementTheme.Dark;
 
     /// <summary>How long after a line's end its springs may keep painting.</summary>
     private const double ExpressiveTailSeconds = 2.6;
@@ -410,6 +416,20 @@ internal sealed class LyricsPanel : IDisposable
         // viewer at a different size without a SizeChanged reaching us; every layout pass
         // checks, and does nothing when the size is the same.
         _scroll.LayoutUpdated += (_, _) => RefreshLayout();
+        // Now Playing is always dark; the inline drawer follows the app's theme.
+        _scroll.ActualThemeChanged += OnActualThemeChanged;
+    }
+
+    /// <summary>A light/dark switch repaints the words with the other palette. The song
+    /// and its timings stay; only the rows are rebuilt. A closed panel records the new
+    /// palette the next time it opens.</summary>
+    private void OnActualThemeChanged(FrameworkElement sender, object args)
+    {
+        if (_pendingLyrics is not null)
+        {
+            Load(_pendingLyrics);
+            Follow();
+        }
     }
 
     /// <summary>Re-reads the panel's size and reflows. Called when the window moved to
@@ -647,10 +667,42 @@ internal sealed class LyricsPanel : IDisposable
         _position = next;
     }
 
+    /// <summary>The words are white on Now Playing's dark surface and near-black in the
+    /// light theme's inline drawer. The mask twin stays opaque white in both themes,
+    /// because the glow reads only its alpha.</summary>
+    private void ReadPalette()
+    {
+        _paletteTheme = _scroll.ActualTheme;
+        if (_scroll.ActualTheme == ElementTheme.Light)
+        {
+            _sung = Color.FromArgb(0xFF, 0x00, 0x00, 0x00);
+            _unsung = Color.FromArgb(0x61, 0x00, 0x00, 0x00);
+            _expressiveSung = Color.FromArgb(0xD9, 0x00, 0x00, 0x00);
+            _expressiveUnsung = Color.FromArgb(0x80, 0x00, 0x00, 0x00);
+            _expressiveHoverSung = Color.FromArgb(0xD9, 0x00, 0x00, 0x00);
+            _expressiveHoverUnsung = Color.FromArgb(0xBF, 0x00, 0x00, 0x00);
+            _expressiveActiveHoverSung = Color.FromArgb(0xFF, 0x00, 0x00, 0x00);
+            _expressiveActiveHoverUnsung = Color.FromArgb(0xF2, 0x00, 0x00, 0x00);
+            _hoverBoxColor = Color.FromArgb(0x1A, 0x00, 0x00, 0x00);
+            return;
+        }
+
+        _sung = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+        _unsung = Color.FromArgb(0x61, 0xFF, 0xFF, 0xFF);
+        _expressiveSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
+        _expressiveUnsung = Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF);
+        _expressiveHoverSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
+        _expressiveHoverUnsung = Color.FromArgb(0xBF, 0xFF, 0xFF, 0xFF);
+        _expressiveActiveHoverSung = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+        _expressiveActiveHoverUnsung = Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF);
+        _hoverBoxColor = Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF);
+    }
+
     /// <summary>The appearance settings, read once per fill so a song never changes look
     /// halfway through.</summary>
     private void ReadLook()
     {
+        ReadPalette();
         var settings = Koda.Core.Settings.Current;
         _font = string.IsNullOrWhiteSpace(settings.LyricsFont) ? LyricFont : new FontFamily(settings.LyricsFont);
         _lineHeightFactor = LineHeightFactor * settings.LyricsLineSpacing;
@@ -1004,7 +1056,7 @@ internal sealed class LyricsPanel : IDisposable
 
     /// <summary>The provider and people to credit, as the last thing with the words.
     /// Spicy's community syncs and Unison require it; other sources have no credit.</summary>
-    private static TextBlock? MakeCredits(Lyrics lyrics)
+    private TextBlock? MakeCredits(Lyrics lyrics)
     {
         if (lyrics.Credits.Count == 0)
         {
@@ -1017,7 +1069,7 @@ internal sealed class LyricsPanel : IDisposable
             TextAlignment = TextAlignment.Center,
             FontSize = 12,
             Margin = new Thickness(0, 28, 0, 8),
-            Foreground = new SolidColorBrush(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF)),
+            Foreground = Brush(0x99),
         };
 
         for (var index = 0; index < lyrics.Credits.Count; index++)
@@ -1054,7 +1106,7 @@ internal sealed class LyricsPanel : IDisposable
     private TextBlock MakeRowPlaceholder(LyricLine line, double fontSize, TextAlignment textSide)
     {
         var brush = new SolidColorBrush(
-            _renderer == LyricsRenderer.Expressive ? ExpressiveUnsung : UnsungColor);
+            _renderer == LyricsRenderer.Expressive ? _expressiveUnsung : _unsung);
         var placeholder = new TextBlock
         {
             Text = line.Text.Length == 0 ? "♪" : line.Text,
@@ -1095,7 +1147,7 @@ internal sealed class LyricsPanel : IDisposable
         }
 
         var brush = new SolidColorBrush(
-            _renderer == LyricsRenderer.Expressive ? ExpressiveUnsung : UnsungColor);
+            _renderer == LyricsRenderer.Expressive ? _expressiveUnsung : _unsung);
         var placeholder = new TextBlock
         {
             Text = string.Join(" ", parts),
@@ -1329,11 +1381,11 @@ internal sealed class LyricsPanel : IDisposable
 
     /// <summary>The rounded, translucent box that grows in behind a line under the pointer.
     /// It sits in its own layer, so it never changes the line's measure.</summary>
-    private static Border MakeHoverBox(double fontSize)
+    private Border MakeHoverBox(double fontSize)
     {
         var box = new Border
         {
-            Background = new SolidColorBrush(HoverBoxColor),
+            Background = new SolidColorBrush(_hoverBoxColor),
             CornerRadius = new CornerRadius(HoverBoxRadius(fontSize)),
             Margin = new Thickness(-fontSize * HoverBoxPad, -2, -fontSize * HoverBoxPad, -2),
             Opacity = 0,
@@ -1411,7 +1463,7 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Three dots that fill in turn through an instrumental gap; they grow with
     /// the words so the pause reads at any size. They sit in the flow at half opacity even
     /// when their gap is not playing, so the interlude is already placed.</summary>
-    private static StackPanel MakeDots(List<Ellipse> dots, double fontSize, double verticalMargin)
+    private StackPanel MakeDots(List<Ellipse> dots, double fontSize, double verticalMargin)
     {
         var host = new StackPanel
         {
@@ -1758,7 +1810,7 @@ internal sealed class LyricsPanel : IDisposable
 
     private void ResetFill(LinearGradientBrush fill)
     {
-        var unsung = _renderer == LyricsRenderer.Expressive ? ExpressiveUnsung : UnsungColor;
+        var unsung = _renderer == LyricsRenderer.Expressive ? _expressiveUnsung : _unsung;
         var stops = fill.GradientStops;
         stops[0].Color = unsung;
         stops[1].Color = unsung;
@@ -1913,7 +1965,7 @@ internal sealed class LyricsPanel : IDisposable
         var maskText = new TextBlock
         {
             Text = text,
-            Foreground = new SolidColorBrush(MaskTwinColor),
+            Foreground = new SolidColorBrush(_maskTwinColor),
             IsHitTestVisible = false,
             Opacity = _maskHide.Length > 0 ? 1 : _maskTwinOpacity,
             TextWrapping = TextWrapping.NoWrap,
@@ -1956,15 +2008,15 @@ internal sealed class LyricsPanel : IDisposable
         return (maskText, wrapper);
     }
 
-    private static LinearGradientBrush NewFill() => new()
+    private LinearGradientBrush NewFill() => new()
     {
         StartPoint = new Windows.Foundation.Point(0, 0),
         EndPoint = new Windows.Foundation.Point(1, 0),
         GradientStops =
         {
-            new GradientStop { Color = UnsungColor, Offset = 0 },
-            new GradientStop { Color = UnsungColor, Offset = 0 },
-            new GradientStop { Color = UnsungColor, Offset = 0.0001 },
+            new GradientStop { Color = _unsung, Offset = 0 },
+            new GradientStop { Color = _unsung, Offset = 0 },
+            new GradientStop { Color = _unsung, Offset = 0.0001 },
         },
     };
 
@@ -2188,6 +2240,13 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Puts the panel on screen with a short fade, and starts it following the song.</summary>
     public void PlayEntrance()
     {
+        // A closed panel may have kept the other theme's palette: rebuild the words
+        // before they are shown rather than lighting them in the wrong colour.
+        if (_pendingLyrics is not null && _paletteTheme != _scroll.ActualTheme)
+        {
+            Load(_pendingLyrics);
+        }
+
         _visible = true;
         UserScrolled = false;
         if (!_rowsBuilt)
@@ -2409,11 +2468,11 @@ internal sealed class LyricsPanel : IDisposable
             {
                 var color = sung
                     ? expressive
-                        ? ExpressiveSung
-                        : SungColor
+                        ? _expressiveSung
+                        : _sung
                     : expressive
-                        ? ExpressiveUnsung
-                        : UnsungColor;
+                        ? _expressiveUnsung
+                        : _unsung;
                 if (row.PlaceholderBrush is { } placeholderBrush && placeholderBrush.Color != color)
                 {
                     placeholderBrush.Color = color;
@@ -2849,25 +2908,25 @@ internal sealed class LyricsPanel : IDisposable
             var stops = word.Fill!.GradientStops;
             if (fill <= 0)
             {
-                stops[0].Color = UnsungColor;
-                stops[1].Color = UnsungColor;
-                stops[2].Color = UnsungColor;
+                stops[0].Color = _unsung;
+                stops[1].Color = _unsung;
+                stops[2].Color = _unsung;
                 stops[1].Offset = 0;
                 stops[2].Offset = 1;
             }
             else if (fill >= 1)
             {
-                stops[0].Color = SungColor;
-                stops[1].Color = SungColor;
-                stops[2].Color = SungColor;
+                stops[0].Color = _sung;
+                stops[1].Color = _sung;
+                stops[2].Color = _sung;
                 stops[1].Offset = 1;
                 stops[2].Offset = 1;
             }
             else
             {
-                stops[0].Color = SungColor;
-                stops[1].Color = SungColor;
-                stops[2].Color = UnsungColor;
+                stops[0].Color = _sung;
+                stops[1].Color = _sung;
+                stops[2].Color = _unsung;
                 stops[1].Offset = Math.Max(0, front - feather);
                 stops[2].Offset = Math.Min(1, Math.Max(front, 0.0001));
             }
@@ -2907,14 +2966,14 @@ internal sealed class LyricsPanel : IDisposable
 
         var sung = hovered
             ? active
-                ? ExpressiveActiveHoverSung
-                : ExpressiveHoverSung
-            : ExpressiveSung;
+                ? _expressiveActiveHoverSung
+                : _expressiveHoverSung
+            : _expressiveSung;
         var unsung = hovered
             ? active
-                ? ExpressiveActiveHoverUnsung
-                : ExpressiveHoverUnsung
-            : ExpressiveUnsung;
+                ? _expressiveActiveHoverUnsung
+                : _expressiveHoverUnsung
+            : _expressiveUnsung;
 
         var wordMotion = motion
             ? LyricsMotion.Word(elapsed, duration, word.PushX)
@@ -3353,7 +3412,7 @@ internal sealed class LyricsPanel : IDisposable
         var visual = ElementCompositionPreview.GetElementVisual(letter.GlowHost);
         var compositor = visual.Compositor;
         var shadow = compositor.CreateDropShadow();
-        shadow.Color = SungColor;
+        shadow.Color = _sung;
         shadow.Offset = Vector3.Zero;
         shadow.Opacity = 0;
         shadow.BlurRadius = _glowBlurFixed ? 12 : 0;
@@ -3928,8 +3987,10 @@ internal sealed class LyricsPanel : IDisposable
         return 1 - x * x * x;
     }
 
-    private static SolidColorBrush Brush(byte alpha) =>
-        new(Windows.UI.Color.FromArgb(alpha, 0xFF, 0xFF, 0xFF));
+    /// <summary>The sung colour at another alpha, for the unlit text that has no word masks:
+    /// plain lyrics, line-timed lines, credits and the interlude dots.</summary>
+    private SolidColorBrush Brush(byte alpha) =>
+        new(Windows.UI.Color.FromArgb(alpha, _sung.R, _sung.G, _sung.B));
 
     /// <summary>The layout gap used after a word. With compensation on, it is the font's
     /// own space and the per-word shift keeps it proportional. With compensation off, the
@@ -4000,6 +4061,7 @@ internal sealed class LyricsPanel : IDisposable
 
     public void Dispose()
     {
+        _scroll.ActualThemeChanged -= OnActualThemeChanged;
         ReleaseGlows();
         _hoverOpacityIn?.Dispose();
         _hoverOpacityOut?.Dispose();
