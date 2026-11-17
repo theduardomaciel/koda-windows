@@ -57,7 +57,7 @@
                     <Grid x:Name="LyricsMaskedContent">
                         <ScrollViewer
                             x:Name="LyricsScroll"
-                            Margin="10,0"
+                            Margin="4,0"
                             VerticalScrollBarVisibility="Auto"
                             VerticalScrollMode="Auto"
                             HorizontalScrollMode="Disabled"

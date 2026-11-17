@@ -45,8 +45,10 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         InitializeComponent();
         _lyrics = new LyricsPanel(LyricsScroll, LyricsLines, DispatcherQueue);
         // The drawer and the expanded mini player both keep the lines close to their
-        // gutter; the 18/24 glow pads are for Now Playing's wide panel.
+        // gutter; the 18/24 glow pads are for Now Playing's wide panel. The header's
+        // padding is the drawer's gutter; the mini overrides it with the card's padding.
         _lyrics.TightInsets = true;
+        _lyrics.Gutter = Header.Padding.Left;
         _activationTimer = DispatcherQueue.CreateTimer();
         _activationTimer.Interval = TimeSpan.FromMilliseconds(220);
         _activationTimer.IsRepeating = false;
@@ -116,14 +118,13 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         HeaderRow.Height = new GridLength(0);
         Header.Visibility = Visibility.Collapsed;
         // The card's own padding is the gutter: the words line up with the cover above.
-        // With a bleed the pane spans the gutter and the scrollbar keeps the card edge.
+        // The pane spans the gutter and the scrollbar keeps its small inset.
         Surface.Margin = new Thickness(-bleedLeft, 0, -bleedRight, 0);
-        LyricsScroll.Margin = new Thickness(0, 0, bleedRight, 0);
         // The drawer's loading wash is solid; over Mica it reads as a gray block.
         Preparing.Background = null;
-        // The lines keep only the room the hover box needs; the left bleed is added back
-        // so the glow has the card gutter to paint in.
-        _lyrics.LeftBleed = bleedLeft;
+        // The hover box sits on the card's gutter; the ScrollViewer margin is the
+        // scrollbar inset. Symmetric, so duet lines share the same gutter.
+        _lyrics.Gutter = bleedLeft;
     }
 
     /// <summary>Puts the words on screen and starts them following the song. Called when

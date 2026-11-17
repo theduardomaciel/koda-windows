@@ -582,10 +582,11 @@ internal sealed class LyricsPanel : IDisposable
     /// The host supplies the rest of the room with a margin or a bleed.</summary>
     public bool TightInsets { get; set; }
 
-    /// <summary>How far a compact host's pane reaches into its side padding. The lines add
-    /// it to the left inset, so the words' glow paints in the gutter without moving the
-    /// hover box off the host's content edge.</summary>
-    public double LeftBleed { get; set; }
+    /// <summary>How far the hover box's outer edge sits from the pane's edge in a tight
+    /// host: the drawer's header padding, or the mini card's padding. The line inset becomes
+    /// this minus the ScrollViewer margin (the scrollbar inset) plus the hover box's reach,
+    /// so duet lines get the same gutter on both sides.</summary>
+    public double Gutter { get; set; }
 
     /// <summary>The listener's correction for this song, in seconds.</summary>
     public double Offset
@@ -2210,11 +2211,13 @@ internal sealed class LyricsPanel : IDisposable
     {
         if (TightInsets)
         {
-            // The hover box's outer edge lands on the host's gutter; the left bleed is the
-            // room the glow has to paint in. The right keeps 24 DIP so the glow clears the
-            // scrollbar.
+            // The hover box's outer edge lands on the host's gutter; the ScrollViewer
+            // margin is the scrollbar inset. Both sides use the same gutter, so a duet's
+            // left- and right-aligned lines sit symmetrically.
             var pad = _fontSize * HoverBoxPad;
-            return (LeftBleed + pad, Math.Max(24, pad));
+            return (
+                Math.Max(pad, Gutter - _scroll.Margin.Left + pad),
+                Math.Max(pad, Gutter - _scroll.Margin.Right + pad));
         }
 
         var side = Math.Max(18, _fontSize * 0.5);

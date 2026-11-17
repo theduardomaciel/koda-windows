@@ -22,7 +22,7 @@ on. The short version:
 | `FitCardWidth` | Same | Picks the width for the display (see the formula below). |
 | `_widthFit` timer | Same | Re-fits the card 250 ms after a move to another display settles. |
 | Track strip, panel, seek bar, controls | `src/Koda/Pages/MiniPlayerPage.xaml` | Row heights add up to the window size; the panel row is `0` until expanded. |
-| `TightInsets` | `src/Koda/Pages/LyricsPanel.cs` | The drawer and the mini replace the 18/24 DIP glow pads with the hover box's reach plus the host's bleed. |
+| `TightInsets` | `src/Koda/Pages/LyricsPanel.cs` | The drawer and the mini use the host's gutter and the hover box's reach instead of the 18/24 DIP glow pads; both sides match. |
 
 In the mini card the panes drop their own horizontal insets: the queue starts at
 the card's 16 DIP padding and the lyrics pane bleeds into it, so the lines and
@@ -148,16 +148,16 @@ The method drops the surface, divider, header/tabs/close row and the horizontal
 insets. The queue swaps `CatalogRowStyle` for its local
 `CompactQueueRowStyle` (`Padding="0"`).
 
-The lyrics pane uses `TightInsets` in both hosts. In the drawer, the
-`ScrollViewer`'s 10 DIP margin is the glow gutter and the lines start about
-17 DIP in, level with the Lyrics header. In the mini, the pane takes the card's
-side padding as a bleed (`UseCompactChrome(Card.Padding.Left, Card.Padding.Right)`):
-the pane extends into the gutter while the `ScrollViewer`'s right edge stays on
-the card's content edge. `TightInsets` replaces the 18/24 DIP glow pads with the
-hover box's reach plus the left bleed (`LeftBleed + fontSize × 0.35`, and 24 DIP
-on the right). The box's outer edge sits on the card gutter, the glow has the
-gutter to paint in, and the scrollbar stays where the card's content edge is.
-Both panes therefore start near the card's 16 DIP gutter, in line with the cover.
+The lyrics pane uses `TightInsets` in both hosts. The host supplies a `Gutter`: the
+drawer's header padding (16 DIP) and the mini card's padding (16 DIP). The pane's
+`ScrollViewer` keeps a 4 DIP inset on both sides (the scrollbar's resting edge),
+and the line inset is `gutter − 4 + fontSize × 0.35`, so the hover box's outer edge
+lands on the gutter and the left and right match. The drawer's lines start about
+24 DIP in, level with its Lyrics header, with roughly 20 DIP of glow room on each
+side. In the mini, `UseCompactChrome(Card.Padding.Left, Card.Padding.Right)`
+extends the pane into the card's side padding; the same gutter and symmetric
+insets put the hover box on the cover's edge and leave the glow the card gutter
+to paint in. The scrollbar stays 4 DIP inside the pane in both hosts.
 
 The loading overlay's (`Preparing`) solid surface background is cleared only for
 the mini. The drawer uses that wash to hide the panel behind it, but over the mini
