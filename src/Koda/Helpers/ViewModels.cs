@@ -50,6 +50,8 @@ public sealed record SuggestionRow(
     string KindGlyph,
     Artwork? Artwork,
     CornerRadius ArtRadius,
+    int ArtSize,
+    int RowHeight,
     string TrailingGlyph,
     MusicItem? Item,
     YouTubeLink? Link,
@@ -73,8 +75,6 @@ public sealed record SuggestionRow(
 
     public bool HasTrailing => TrailingGlyph.Length > 0;
 
-    public Thickness DividerThickness => ShowsDivider ? new Thickness(0, 1, 0, 0) : new Thickness(0);
-
     public string ToolTip => Detail.Length > 0 ? $"{Title} · {Detail}" : Title;
 
     /// <summary>A confident search result: a track, album, artist or playlist.</summary>
@@ -96,6 +96,8 @@ public sealed record SuggestionRow(
             KindGlyph: GlyphOf(item),
             Artwork: item.Artwork,
             ArtRadius: item is MusicItem.ArtistRecord ? new CornerRadius(20) : new CornerRadius(6),
+            ArtSize: 40,
+            RowHeight: 56,
             TrailingGlyph: item is MusicItem.SongRecord ? PlayGlyph : ChevronGlyph,
             Item: item,
             Link: null,
@@ -112,7 +114,9 @@ public sealed record SuggestionRow(
         Detail: "",
         KindGlyph: SearchGlyph,
         Artwork: null,
-        ArtRadius: new CornerRadius(20),
+        ArtRadius: new CornerRadius(6),
+        ArtSize: 28,
+        RowHeight: 44,
         TrailingGlyph: "",
         Item: null,
         Link: null,
@@ -128,7 +132,9 @@ public sealed record SuggestionRow(
         Detail: "",
         KindGlyph: ClockGlyph,
         Artwork: null,
-        ArtRadius: new CornerRadius(20),
+        ArtRadius: new CornerRadius(6),
+        ArtSize: 28,
+        RowHeight: 44,
         TrailingGlyph: "",
         Item: null,
         Link: null,
@@ -144,7 +150,9 @@ public sealed record SuggestionRow(
         Detail: $"“{query}”",
         KindGlyph: SearchGlyph,
         Artwork: null,
-        ArtRadius: new CornerRadius(20),
+        ArtRadius: new CornerRadius(6),
+        ArtSize: 28,
+        RowHeight: 44,
         TrailingGlyph: ForwardGlyph,
         Item: null,
         Link: null,
@@ -160,7 +168,9 @@ public sealed record SuggestionRow(
         Detail: "YouTube or YouTube Music link",
         KindGlyph: LinkGlyph,
         Artwork: null,
-        ArtRadius: new CornerRadius(20),
+        ArtRadius: new CornerRadius(6),
+        ArtSize: 28,
+        RowHeight: 44,
         TrailingGlyph: ChevronGlyph,
         Item: null,
         Link: link,
