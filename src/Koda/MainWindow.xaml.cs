@@ -1596,11 +1596,16 @@ public sealed partial class MainWindow : Window
     /// past that they trim with an ellipsis, so the heart stays beside the words instead of
     /// at the cell's edge. The text column is a fixed width, not Auto: an Auto column
     /// measures its child with unlimited width, which lets the text paint past its slot and
-    /// be clipped without an ellipsis.</summary>
+    /// be clipped without an ellipsis. A little of that width is reserved for the ellipsis
+    /// itself, which WinUI otherwise lets the last word crowd out of the slot.</summary>
     private void OnTrackInfoSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var width = Math.Clamp(e.NewSize.Width - 56 - 36 - 36, 80, 280);
+        var reserve = Math.Max(10, Math.Round(TrackTitleText.FontSize * 0.8));
+        var width = Math.Clamp(e.NewSize.Width - 56 - 36 - 36 - reserve, 80, 280);
         TrackTextColumn.Width = new GridLength(width);
+        TrackTitleText.Width = width;
+        TrackArtistText.Width = width;
+        NextUpText.Width = width;
 
         // Writing the lines again makes the text measure and trim at the new room; WinUI
         // otherwise keeps the truncation it decided at the old width.
