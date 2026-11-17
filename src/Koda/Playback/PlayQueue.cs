@@ -42,6 +42,10 @@ public sealed class PlayQueue
     /// <summary>What plays after the current song, in order.</summary>
     public IReadOnlyList<QueueItem> Upcoming => CurrentIndex is { } i ? _items.Skip(i + 1).ToArray() : _items.ToArray();
 
+    /// <summary>What already played, most recent first.</summary>
+    public IReadOnlyList<QueueItem> History =>
+        CurrentIndex is { } i ? _items.Take(i).Reverse().ToArray() : [];
+
     // MARK: Replacing
 
     /// <summary>Play <paramref name="songs"/> from <paramref name="start"/>; shuffled, the start song plays

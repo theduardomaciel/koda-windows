@@ -89,15 +89,18 @@ public sealed partial class MainWindow : Window
 
     /// <summary>The width the page keeps beside an inline lyrics drawer; below it the
     /// drawer floats above the page instead of squeezing it.</summary>
-    private const double InlineLyricsPageWidth = 520;
+    private const double InlinePanelPageWidth = 520;
 
     /// <summary>Whether the listener asked for the inline lyrics drawer. A whole-window
     /// player hides the drawer without forgetting the choice; leaving restores it.</summary>
     private bool _lyricsOpen;
 
+    /// <summary>The queue drawer's open state, kept across pages like the lyrics'.</summary>
+    private bool _queueOpen;
+
     /// <summary>Set while the drawer is closed on purpose, so the pane's light-dismiss
     /// guard knows this close is not a tap outside.</summary>
-    private bool _closingLyricsDrawer;
+    private bool _closingSidePanel;
 
     /// <summary>Below this width the search takes its smallest step and the sidebar folds
     /// to its icons; above it both open up again.</summary>
@@ -225,7 +228,7 @@ public sealed partial class MainWindow : Window
         _zoomTimer.Tick += (_, _) => ZoomBadge.Visibility = Visibility.Collapsed;
 
         ZoomHost.SizeChanged += (_, _) => ApplyZoom();
-        LyricsDrawer.SizeChanged += (_, _) => ApplyLyricsLayout();
+        SidePanel.SizeChanged += (_, _) => ApplySidePanelLayout();
         Root.Loaded += (_, _) =>
         {
             if (Root.XamlRoot is { } root)
@@ -246,12 +249,12 @@ public sealed partial class MainWindow : Window
         Nav.PaneOpened += (_, _) =>
         {
             RelayoutContent();
-            ApplyLyricsLayout();
+            ApplySidePanelLayout();
         };
         Nav.PaneClosed += (_, _) =>
         {
             RelayoutContent();
-            ApplyLyricsLayout();
+            ApplySidePanelLayout();
         };
         Nav.RegisterPropertyChangedCallback(NavigationView.IsPaneOpenProperty, (_, _) =>
         {
@@ -269,7 +272,7 @@ public sealed partial class MainWindow : Window
 
         OnTrackChanged();
         OnPlayStateChanged();
-        ApplyLyricsLayout();
+        ApplySidePanelLayout();
 
         Closed += (_, _) =>
         {
@@ -626,10 +629,10 @@ public sealed partial class MainWindow : Window
         UpdateBackButton();
         // Now Playing and the watch page are whole players: the bars step aside while they're open.
         UpdateVideoBar();
-        ApplyLyricsDrawer();
+        ApplySidePanel();
         // The frame can still report the outgoing whole-window player for a tick; ask
         // again once it has settled, so the drawer comes back after Now Playing.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ApplyLyricsDrawer);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ApplySidePanel);
         TitleSearch.PlaceholderText = args.Content is IVideoPage ? "Search YouTube" : "Songs, albums, artists or a link";
         if (args.SourcePageType == typeof(SearchPage))
         {
@@ -851,10 +854,14 @@ public sealed partial class MainWindow : Window
 
     private void ShowQueue()
     {
-        if (Playback.CurrentSong is not null && ContentFrame.Content is not NowPlayingPage)
+        if (Playback.CurrentSong is null)
         {
-            ContentFrame.Navigate(typeof(NowPlayingPage), "queue", new Microsoft.UI.Xaml.Media.Animation.DrillInNavigationTransitionInfo());
+            return;
         }
+
+        _queueOpen = true;
+        _lyricsOpen = false;
+        ApplySidePanel();
     }
 
     // MARK: search in the title bar
@@ -1033,13 +1040,14 @@ public sealed partial class MainWindow : Window
         // Escape closes the inline lyrics drawer before it reaches the page.
         Root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, args) =>
         {
-            if (args.Key != VirtualKey.Escape || !LyricsDrawer.IsPaneOpen)
+            if (args.Key != VirtualKey.Escape || !SidePanel.IsPaneOpen)
             {
                 return;
             }
 
             _lyricsOpen = false;
-            ApplyLyricsDrawer();
+            _queueOpen = false;
+            ApplySidePanel();
             args.Handled = true;
         }), true);
 
@@ -1191,7 +1199,7 @@ public sealed partial class MainWindow : Window
         TotalText.Text = Playback.DurationSeconds > 0 ? FormatTime(Playback.DurationSeconds) : "";
         OnQueueModesChanged();
         UpdateTaskbar();
-        ApplyLyricsDrawer();
+        ApplySidePanel();
 
         // One toast per song, and only when the track really changed: TrackChanged also
         // fires when the queue modes or the known duration change.
@@ -1245,46 +1253,67 @@ public sealed partial class MainWindow : Window
 
     private void OnQueueClick(object sender, RoutedEventArgs e)
     {
-        if (ContentFrame.Content is NowPlayingPage)
+        _queueOpen = QueueButton.IsChecked == true;
+        if (_queueOpen)
         {
-            GoBack();
+            _lyricsOpen = false;
         }
-        else if (Playback.CurrentSong is not null)
-        {
-            ContentFrame.Navigate(typeof(NowPlayingPage), "queue", new Microsoft.UI.Xaml.Media.Animation.DrillInNavigationTransitionInfo());
-        }
+
+        ApplySidePanel();
     }
 
-    // MARK: inline lyrics
+    // MARK: side panels
 
-    /// <summary>The drawer has no place on a whole-window player or while a video is on.</summary>
-    private bool LyricsDrawerAllowed =>
+    /// <summary>The side panel has no place on a whole-window player or while a video is on.</summary>
+    private bool SidePanelAllowed =>
         ContentFrame.Content is not (NowPlayingPage or VideoWatchPage)
         && !Video.HasVideo;
 
     private void OnLyricsClick(object sender, RoutedEventArgs e)
     {
         _lyricsOpen = LyricsButton.IsChecked == true;
-        ApplyLyricsDrawer();
+        if (_lyricsOpen)
+        {
+            _queueOpen = false;
+        }
+
+        ApplySidePanel();
     }
 
     private void OnLyricsCloseRequested()
     {
         _lyricsOpen = false;
-        ApplyLyricsDrawer();
+        ApplySidePanel();
     }
 
-    /// <summary>Opens or closes the drawer for the current page, keeping the listener's
-    /// choice when a player or a video is what keeps it off screen.</summary>
-    private void ApplyLyricsDrawer()
+    private void OnQueueCloseRequested()
     {
-        var show = _lyricsOpen
-            && Playback.CurrentSong is not null
-            && LyricsDrawerAllowed;
-        var changed = LyricsDrawer.IsPaneOpen != show;
-        SetLyricsPaneOpen(show);
+        _queueOpen = false;
+        ApplySidePanel();
+    }
 
-        if (show)
+    /// <summary>Opens one drawer for the current page — the lyrics or the queue — keeping
+    /// the listener's choice when a player or a video is what keeps it off screen.</summary>
+    private void ApplySidePanel()
+    {
+        var allowed = Playback.CurrentSong is not null && SidePanelAllowed;
+        var showLyrics = allowed && _lyricsOpen;
+        var showQueue = allowed && _queueOpen;
+        if (showLyrics && showQueue)
+        {
+            // One surface, one panel: the queue wins if both were left set.
+            showLyrics = false;
+            _lyricsOpen = false;
+        }
+
+        var show = showLyrics || showQueue;
+        var changed = SidePanel.IsPaneOpen != show;
+        SetSidePanelOpen(show);
+
+        InlineLyrics.Visibility = showLyrics ? Visibility.Visible : Visibility.Collapsed;
+        InlineQueue.Visibility = showQueue ? Visibility.Visible : Visibility.Collapsed;
+
+        if (showLyrics)
         {
             InlineLyrics.Activate();
         }
@@ -1293,73 +1322,91 @@ public sealed partial class MainWindow : Window
             InlineLyrics.Deactivate();
         }
 
+        if (showQueue)
+        {
+            InlineQueue.Activate();
+        }
+        else
+        {
+            InlineQueue.Deactivate();
+        }
+
         if (changed)
         {
             RelayoutContent();
         }
 
-        UpdateLyricsChrome();
+        UpdateSidePanelChrome();
     }
 
     /// <summary>Changes the pane without the light-dismiss guard mistaking a deliberate
     /// close for a tap outside it.</summary>
-    private void SetLyricsPaneOpen(bool open)
+    private void SetSidePanelOpen(bool open)
     {
-        if (LyricsDrawer.IsPaneOpen == open)
+        if (SidePanel.IsPaneOpen == open)
         {
             return;
         }
 
-        _closingLyricsDrawer = true;
+        _closingSidePanel = true;
         try
         {
-            LyricsDrawer.IsPaneOpen = open;
+            SidePanel.IsPaneOpen = open;
         }
         finally
         {
-            _closingLyricsDrawer = false;
+            _closingSidePanel = false;
         }
     }
 
     /// <summary>SplitView closes an Overlay pane when the listener taps anywhere outside
-    /// it. That dismissal is theirs: the drawer goes away and the bar's toggle follows,
+    /// it. That dismissal is theirs: the drawer goes away and the bar's toggles follow,
     /// rather than staying checked for a panel that is no longer on screen.</summary>
-    private void OnLyricsPaneClosing(SplitView sender, SplitViewPaneClosingEventArgs args)
+    private void OnSidePaneClosing(SplitView sender, SplitViewPaneClosingEventArgs args)
     {
-        if (_closingLyricsDrawer)
+        if (_closingSidePanel)
         {
             return;
         }
 
         _lyricsOpen = false;
-        UpdateLyricsChrome();
+        _queueOpen = false;
+        UpdateSidePanelChrome();
     }
 
-    private void OnLyricsPaneClosed(SplitView sender, object args) => _closingLyricsDrawer = false;
+    private void OnSidePaneClosed(SplitView sender, object args) => _closingSidePanel = false;
 
-    private void UpdateLyricsChrome()
+    private void UpdateSidePanelChrome()
     {
-        LyricsButton.IsEnabled = Playback.CurrentSong is not null;
+        var hasSong = Playback.CurrentSong is not null;
+
+        LyricsButton.IsEnabled = hasSong;
         LyricsButton.IsChecked = _lyricsOpen;
-        var label = _lyricsOpen ? "Hide lyrics" : "Lyrics";
-        ToolTipService.SetToolTip(LyricsButton, label);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(LyricsButton, label);
+        var lyricsLabel = _lyricsOpen ? "Hide lyrics" : "Lyrics";
+        ToolTipService.SetToolTip(LyricsButton, lyricsLabel);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(LyricsButton, lyricsLabel);
+
+        QueueButton.IsEnabled = hasSong;
+        QueueButton.IsChecked = _queueOpen;
+        var queueLabel = _queueOpen ? "Hide queue" : "Queue";
+        ToolTipService.SetToolTip(QueueButton, queueLabel);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(QueueButton, queueLabel);
     }
 
     /// <summary>Wide enough for the page to keep its room with the drawer beside it, the
     /// drawer pushes the page; otherwise it floats above it so the page is not crushed.</summary>
-    private void ApplyLyricsLayout()
+    private void ApplySidePanelLayout()
     {
-        var width = LyricsDrawer.ActualWidth;
+        var width = SidePanel.ActualWidth;
         if (width <= 0)
         {
             return;
         }
 
         var sidebar = Nav.IsPaneOpen ? Nav.OpenPaneLength : Nav.CompactPaneLength;
-        var inline = width - sidebar - LyricsDrawer.OpenPaneLength >= InlineLyricsPageWidth;
+        var inline = width - sidebar - SidePanel.OpenPaneLength >= InlinePanelPageWidth;
         var mode = inline ? SplitViewDisplayMode.CompactInline : SplitViewDisplayMode.Overlay;
-        if (LyricsDrawer.DisplayMode == mode)
+        if (SidePanel.DisplayMode == mode)
         {
             return;
         }
@@ -1367,11 +1414,11 @@ public sealed partial class MainWindow : Window
         // SplitView drops the open pane when it changes display mode, and a plain
         // IsPaneOpen = true is a no-op while the property still says it is open.
         // Re-assert the listener's state once the mode change has settled.
-        LyricsDrawer.DisplayMode = mode;
+        SidePanel.DisplayMode = mode;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            SetLyricsPaneOpen(false);
-            ApplyLyricsDrawer();
+            SetSidePanelOpen(false);
+            ApplySidePanel();
         });
     }
 
@@ -1558,7 +1605,8 @@ public sealed partial class MainWindow : Window
             // The compact drawer is a surface that closes on the next tap outside it,
             // so this menu is only an opener; it never carries a checked state.
             _lyricsOpen = true;
-            ApplyLyricsDrawer();
+            _queueOpen = false;
+            ApplySidePanel();
         };
         menu.Items.Add(lyrics);
 
@@ -1951,7 +1999,7 @@ public sealed partial class MainWindow : Window
             UpdateVideoBarTime();
         }
 
-        ApplyLyricsDrawer();
+        ApplySidePanel();
     }
 
     private void UpdateVideoBarTime()

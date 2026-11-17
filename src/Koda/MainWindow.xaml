@@ -107,19 +107,25 @@
                      page takes its new width at once and only the pane's clip animates,
                      unlike Inline-right, which slides the whole page sideways first. -->
                 <SplitView
-                    x:Name="LyricsDrawer"
+                    x:Name="SidePanel"
                     Grid.Row="0"
                     DisplayMode="CompactInline"
                     PanePlacement="Right"
                     OpenPaneLength="380"
                     CompactPaneLength="0"
                     IsPaneOpen="False"
-                    PaneClosing="OnLyricsPaneClosing"
-                    PaneClosed="OnLyricsPaneClosed">
+                    PaneClosing="OnSidePaneClosing"
+                    PaneClosed="OnSidePaneClosed">
                     <SplitView.Pane>
-                        <controls:InlineLyricsPane
-                            x:Name="InlineLyrics"
-                            CloseRequested="OnLyricsCloseRequested" />
+                        <Grid>
+                            <controls:InlineLyricsPane
+                                x:Name="InlineLyrics"
+                                CloseRequested="OnLyricsCloseRequested" />
+                            <controls:InlineQueuePane
+                                x:Name="InlineQueue"
+                                Visibility="Collapsed"
+                                CloseRequested="OnQueueCloseRequested" />
+                        </Grid>
                     </SplitView.Pane>
                     <SplitView.Content>
                         <muxc:NavigationView
@@ -524,7 +530,7 @@
                             AutomationProperties.Name="Lyrics">
                             <FontIcon Glyph="&#xE8F2;" FontSize="16" />
                         </ToggleButton>
-                        <Button
+                        <ToggleButton
                             x:Name="QueueButton"
                             Width="36"
                             Height="36"
@@ -536,7 +542,7 @@
                             ToolTipService.ToolTip="Queue"
                             AutomationProperties.Name="Queue">
                             <FontIcon Glyph="&#xE8FD;" FontSize="16" />
-                        </Button>
+                        </ToggleButton>
                         <Button
                             x:Name="OutputButton"
                             Width="36"
