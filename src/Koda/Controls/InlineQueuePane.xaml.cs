@@ -47,6 +47,15 @@ public sealed partial class InlineQueuePane : UserControl
         Tabs.Visibility = Visibility.Collapsed;
         TabsRow.Height = new GridLength(0);
         CloseButton.Visibility = Visibility.Collapsed;
+
+        // The card's own padding is the gutter; drop the drawer's insets so the Playing
+        // Next title and rows line up with the cover above them.
+        SectionRow.Padding = new Thickness(0, 4, 0, 6);
+        if (Resources["CompactQueueRowStyle"] is Style compactRows)
+        {
+            UpNext.ItemContainerStyle = compactRows;
+            HistoryList.ItemContainerStyle = compactRows;
+        }
     }
 
     public void Activate()

@@ -23,6 +23,10 @@ on. The short version:
 | `_widthFit` timer | Same | Re-fits the card 250 ms after a move to another display settles. |
 | Track strip, panel, seek bar, controls | `src/Koda/Pages/MiniPlayerPage.xaml` | Row heights add up to the window size; the panel row is `0` until expanded. |
 
+In compact chrome the panes drop their own horizontal insets: the card's 16 DIP
+padding is the gutter, so lyric lines and queue rows start at the same x as the
+cover.
+
 ## How the width is chosen
 
 ```text

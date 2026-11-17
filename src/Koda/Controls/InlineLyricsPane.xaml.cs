@@ -109,6 +109,8 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         Surface.BorderThickness = new Thickness(0);
         HeaderRow.Height = new GridLength(0);
         Header.Visibility = Visibility.Collapsed;
+        // The card's own padding is the gutter: the words line up with the cover above.
+        LyricsScroll.Margin = new Thickness(0);
     }
 
     /// <summary>Puts the words on screen and starts them following the song. Called when

@@ -26,6 +26,12 @@
             <Setter Property="CornerRadius" Value="16" />
         </Style>
 
+        <!-- Compact hosts (the expanded mini player) put the card's own padding to work,
+             so rows line up with the cover instead of adding a second inset. -->
+        <Style x:Key="CompactQueueRowStyle" TargetType="ListViewItem" BasedOn="{StaticResource CatalogRowStyle}">
+            <Setter Property="Padding" Value="0" />
+        </Style>
+
         <DataTemplate x:Key="QueueRowTemplate">
             <Grid Height="56" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -89,7 +95,7 @@
                     AutomationProperties.Name="History" />
             </Grid>
 
-            <Grid Grid.Row="1" Padding="12,4,8,6" MinHeight="40">
+            <Grid x:Name="SectionRow" Grid.Row="1" Padding="12,4,8,6" MinHeight="40">
                 <TextBlock
                     x:Name="SectionTitle"
                     Text="Playing Next"
