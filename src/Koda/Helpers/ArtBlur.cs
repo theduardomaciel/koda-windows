@@ -10,9 +10,9 @@ using Windows.Storage.Streams;
 namespace Koda.Helpers;
 
 /// <summary>
-/// The blurred cover behind Now Playing. The old backdrop decoded the art at 24
-/// pixels and stretched it, which on a large monitor reads as a flat wash: there
-/// is no structure left to see. This decodes a real thumbnail, runs a three-pass
+/// The blurred cover behind Now Playing and the artist header. Decoding the art at
+/// 24 pixels and stretching it only reads as a pixelated wash: the blocks are visible
+/// and nothing is actually soft. This decodes a real thumbnail, runs a three-pass
 /// box blur (a Gaussian to the eye) and hands XAML a 384px source, so the cover's
 /// shapes and colours survive the softening.
 ///

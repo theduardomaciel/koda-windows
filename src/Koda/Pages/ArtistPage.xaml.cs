@@ -73,7 +73,7 @@ public sealed partial class ArtistPage : Page
     {
         NameText.Text = page.Artist.Name;
         AudienceText.Text = page.Artist.Subtitle ?? "";
-        Art.SetSource(Backdrop, page.Banner);
+        _ = SetBackdropAsync(page.Banner, page.Artist.Id);
         Art.SetSource(Portrait, page.Banner);
 
         _top = page.TopSongs;
@@ -94,6 +94,31 @@ public sealed partial class ArtistPage : Page
         AboutSection.Visibility = page.Description is null ? Visibility.Collapsed : Visibility.Visible;
         UpdateSave();
         Scroll.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>The banner behind the portrait, softened with a real blur. Decoding it tiny
+    /// and stretching it left the pixels visible, so this runs the ArtBlur passes instead.
+    /// A late result for an artist already gone is dropped.</summary>
+    private async Task SetBackdropAsync(Artwork? banner, string artistId)
+    {
+        var source = await ArtBlur.FromAsync(banner);
+        if (source is null || _artist?.Artist.Id != artistId)
+        {
+            return;
+        }
+
+        Backdrop.Source = source;
+        Backdrop.Opacity = 0;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_artist?.Artist.Id != artistId)
+            {
+                return;
+            }
+
+            Backdrop.OpacityTransition ??= new ScalarTransition { Duration = TimeSpan.FromMilliseconds(240) };
+            Backdrop.Opacity = 1;
+        });
     }
 
     private void OnLibraryChanged() => DispatcherQueue.TryEnqueue(UpdateSave);

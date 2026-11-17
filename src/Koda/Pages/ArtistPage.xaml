@@ -10,7 +10,7 @@
             <StackPanel Margin="26,16,26,32" Spacing="28">
                 <!-- The photo softened behind, the portrait sharp in front (Mac sibling's blurred square). -->
                 <Grid Height="260" CornerRadius="20" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
-                    <Image x:Name="Backdrop" helpers:Art.Soft="True" Stretch="UniformToFill" />
+                    <Image x:Name="Backdrop" Stretch="UniformToFill" />
                     <Rectangle>
                         <Rectangle.Fill>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">

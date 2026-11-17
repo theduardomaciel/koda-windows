@@ -13,8 +13,7 @@ namespace Koda.Helpers;
 /// that belongs to the row's previous item.
 ///
 /// <c>helpers:Art.Source="{Binding Artwork}"</c>, optional <c>helpers:Art.Pixels</c>
-/// (drawn size in DIPs) and <c>helpers:Art.Soft</c> (decoded tiny and stretched: the
-/// blurred backdrop of an artist header, with no effects library).
+/// (drawn size in DIPs). Soft backdrops that need real blur use <see cref="ArtBlur"/>.
 /// </summary>
 public static class Art
 {
@@ -24,15 +23,10 @@ public static class Art
     public static readonly DependencyProperty PixelsProperty = DependencyProperty.RegisterAttached(
         "Pixels", typeof(int), typeof(Art), new PropertyMetadata(96));
 
-    public static readonly DependencyProperty SoftProperty = DependencyProperty.RegisterAttached(
-        "Soft", typeof(bool), typeof(Art), new PropertyMetadata(false));
-
     public static object? GetSource(DependencyObject d) => d.GetValue(SourceProperty);
     public static void SetSource(DependencyObject d, object? value) => d.SetValue(SourceProperty, value);
     public static int GetPixels(DependencyObject d) => (int)d.GetValue(PixelsProperty);
     public static void SetPixels(DependencyObject d, int value) => d.SetValue(PixelsProperty, value);
-    public static bool GetSoft(DependencyObject d) => (bool)d.GetValue(SoftProperty);
-    public static void SetSoft(DependencyObject d, bool value) => d.SetValue(SoftProperty, value);
 
     private static void OnSourceChanged(DependencyObject d, DependencyPropertyChangedEventArgs args)
     {
@@ -56,8 +50,7 @@ public static class Art
             return;
         }
 
-        var soft = GetSoft(image);
-        var pixels = soft ? 24 : Math.Max(24, GetPixels(image));
+        var pixels = Math.Max(24, GetPixels(image));
         var bitmap = new BitmapImage
         {
             DecodePixelType = DecodePixelType.Logical,
@@ -71,7 +64,7 @@ public static class Art
             }
         };
         // Twice the drawn size for high-DPI screens; Google scales on its side.
-        bitmap.UriSource = artwork.Resized(soft ? 60 : pixels * 2);
+        bitmap.UriSource = artwork.Resized(pixels * 2);
         image.Source = bitmap;
     }
 }
