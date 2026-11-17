@@ -1053,7 +1053,10 @@ public sealed class VideoPlaybackService
     {
         _generation++;
         SaveProgress(force: true);
-        _player.Pause();
+        // The clock, not the player, when picture and sound share a timeline controller:
+        // Windows refuses Pause on a player that has one attached.
+        PauseCore();
+        _shouldPlay = false;
         StopAudio();
         _player.Source = null;
         Current = null;
