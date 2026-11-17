@@ -109,15 +109,8 @@ public sealed partial class InlineQueuePane : UserControl
 
     private void UpdateTabs()
     {
-        var accent = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
-        var onAccent = (Brush)Application.Current.Resources["TextOnAccentFillColorPrimaryBrush"];
-        var normal = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
-        var clear = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-
-        PlayingNextTab.Background = _historyTab ? clear : accent;
-        PlayingNextTab.Foreground = _historyTab ? normal : onAccent;
-        HistoryTab.Background = _historyTab ? accent : clear;
-        HistoryTab.Foreground = _historyTab ? onAccent : normal;
+        PlayingNextTab.IsChecked = !_historyTab;
+        HistoryTab.IsChecked = _historyTab;
     }
 
     private void OnPlayingNextClick(object sender, RoutedEventArgs e)

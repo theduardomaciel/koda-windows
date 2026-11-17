@@ -5,6 +5,7 @@ using Koda.Helpers;
 using Koda.Pages;
 using Koda.Playback;
 using Koda.Services;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -20,6 +21,9 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
 {
     private readonly LyricsPanel _lyrics;
 
+    /// <summary>Lets the panel and spinner render one frame before the rows are built.</summary>
+    private readonly DispatcherQueueTimer _activationTimer;
+
     /// <summary>The song whose words were asked for last; guards a second request.</summary>
     private string? _requestedFor;
 
@@ -27,6 +31,8 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
     private string? _shownFor;
 
     private bool _active;
+    private bool _suspended;
+    private bool _animateEntrance = true;
     private bool _masked;
     private bool _followPillShown;
 
@@ -38,6 +44,14 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
     {
         InitializeComponent();
         _lyrics = new LyricsPanel(LyricsScroll, LyricsLines, DispatcherQueue);
+        _activationTimer = DispatcherQueue.CreateTimer();
+        _activationTimer.Interval = TimeSpan.FromMilliseconds(220);
+        _activationTimer.IsRepeating = false;
+        _activationTimer.Tick += (_, _) =>
+        {
+            _activationTimer.Stop();
+            Begin(_animateEntrance);
+        };
         _lyrics.Seek = seconds =>
         {
             Playback.SeekSeconds(seconds);
@@ -88,23 +102,45 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
 
     /// <summary>Puts the words on screen and starts them following the song. Called when
     /// the drawer opens, and again when it is shown after Now Playing or a video.</summary>
-    public void Activate()
+    public void Activate(bool animate = true)
     {
         if (_active)
         {
+            if (_suspended)
+            {
+                Resume(animate);
+            }
+
             return;
         }
 
         _active = true;
+        _suspended = false;
+        _animateEntrance = animate;
         Playback.TrackChanged += OnTrackChanged;
         Playback.PlayStateChanged += OnPlayStateChanged;
+
+        // Show the panel and its spinner now, then build the text surfaces after the
+        // switch has painted. The switch is immediate; the heavy rows load behind it.
+        Preparing.Visibility = Visibility.Visible;
+        _activationTimer.Stop();
+        _activationTimer.Start();
+    }
+
+    private void Begin(bool animate)
+    {
+        if (!_active || _suspended)
+        {
+            Preparing.Visibility = Visibility.Collapsed;
+            return;
+        }
 
         // A song whose answer is already in the panel was left paused with its words
         // intact; PlayEntrance rebuilds the released rows and follows again.
         if (Playback.CurrentSong is { } song && _shownFor == song.Id)
         {
             _lyrics.Offset = App.Library.LyricsOffset(song.Id);
-            _lyrics.PlayEntrance();
+            _lyrics.PlayEntrance(animate);
         }
         else
         {
@@ -114,6 +150,58 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         _lyrics.SetPlaying(Playback.IsPlaying);
         _lyrics.SetPosition(Playback.PositionSeconds);
         _lyrics.Follow();
+        Preparing.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Brings back a panel that was only swapped behind the other side panel.
+    /// Its rows were kept, so this does not rebuild them.</summary>
+    public void Resume(bool animate)
+    {
+        if (!_active)
+        {
+            Activate(animate);
+            return;
+        }
+
+        if (!_suspended)
+        {
+            return;
+        }
+
+        _suspended = false;
+        _animateEntrance = animate;
+        if (Playback.CurrentSong is { } song && _shownFor == song.Id && _lyrics.HasRows)
+        {
+            Preparing.Visibility = Visibility.Collapsed;
+            _lyrics.Offset = App.Library.LyricsOffset(song.Id);
+            _lyrics.PlayEntrance(animate);
+            _lyrics.SetPlaying(Playback.IsPlaying);
+            _lyrics.SetPosition(Playback.PositionSeconds);
+            _lyrics.Follow();
+            return;
+        }
+
+        // The song changed while the panel was behind the queue, or the rows were
+        // released: show the spinner and build after the switch has painted.
+        Preparing.Visibility = Visibility.Visible;
+        _activationTimer.Stop();
+        _activationTimer.Start();
+    }
+
+    /// <summary>Swapped behind the queue while the drawer stays open: stop following and
+    /// painting, but keep the rows so coming back is instant.</summary>
+    public void Suspend()
+    {
+        if (!_active)
+        {
+            return;
+        }
+
+        _suspended = true;
+        _activationTimer.Stop();
+        _lyrics.Suspend();
+        Preparing.Visibility = Visibility.Collapsed;
+        ShowFollowPill(false);
     }
 
     /// <summary>The drawer closed: it stops reading the song and releases the text
@@ -126,9 +214,12 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         }
 
         _active = false;
+        _suspended = false;
+        _activationTimer.Stop();
         Playback.TrackChanged -= OnTrackChanged;
         Playback.PlayStateChanged -= OnPlayStateChanged;
         _lyrics.Pause();
+        Preparing.Visibility = Visibility.Collapsed;
         ShowFollowPill(false);
         // A request that never landed is asked again the next time the drawer opens.
         if (_requestedFor != _shownFor)
@@ -145,6 +236,7 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         {
             _requestedFor = _shownFor = null;
             _lyrics.Load(null);
+            Preparing.Visibility = Visibility.Collapsed;
             LyricsLoading.Visibility = Visibility.Collapsed;
             LyricsEmpty.Text = "Nothing playing.";
             LyricsEmpty.Visibility = Visibility.Visible;
@@ -177,6 +269,7 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         }
 
         LyricsLoading.Visibility = Visibility.Collapsed;
+        Preparing.Visibility = Visibility.Collapsed;
         _lyrics.Load(lyrics);
         _lyrics.Offset = App.Library.LyricsOffset(song.Id);
         _shownFor = song.Id;
@@ -189,8 +282,13 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         }
 
         // Timed or plain, the words arrived while the drawer was on screen: show and
-        // follow them now. Plain lyrics are a single block with no timing to follow.
-        _lyrics.PlayEntrance();
+        // follow them now. A suspended panel keeps them for Resume.
+        if (_suspended)
+        {
+            return;
+        }
+
+        _lyrics.PlayEntrance(_animateEntrance);
         _lyrics.SetPosition(Playback.PositionSeconds);
         _lyrics.Follow();
     }

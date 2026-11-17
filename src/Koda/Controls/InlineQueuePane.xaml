@@ -6,7 +6,7 @@
     xmlns:helpers="using:Koda.Helpers">
 
     <UserControl.Resources>
-        <Style x:Key="QueueTabButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+        <Style x:Key="QueueTabButton" TargetType="ToggleButton" BasedOn="{StaticResource DefaultToggleButtonStyle}">
             <Setter Property="Height" Value="36" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -73,13 +73,13 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Button
+                <ToggleButton
                     x:Name="PlayingNextTab"
                     Content="Playing Next"
                     Style="{StaticResource QueueTabButton}"
                     Click="OnPlayingNextClick"
                     AutomationProperties.Name="Playing Next" />
-                <Button
+                <ToggleButton
                     x:Name="HistoryTab"
                     Grid.Column="1"
                     Content="History"
@@ -88,14 +88,14 @@
                     AutomationProperties.Name="History" />
             </Grid>
 
-            <Grid Grid.Row="1" Padding="16,4,8,6" MinHeight="40">
+            <Grid Grid.Row="1" Padding="12,4,8,6" MinHeight="40">
                 <TextBlock
                     x:Name="SectionTitle"
                     Text="Playing Next"
-                    FontSize="18"
+                    FontSize="16"
                     FontWeight="SemiBold"
                     VerticalAlignment="Center" />
-                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="2">
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
                     <HyperlinkButton
                         x:Name="ClearButton"
                         Content="Clear"

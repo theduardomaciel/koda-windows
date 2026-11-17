@@ -436,6 +436,12 @@ internal sealed class LyricsPanel : IDisposable
     /// another display or zoom, where the ScrollViewer's own SizeChanged can be missed.</summary>
     public void RefreshLayout()
     {
+        // A suspended panel keeps its rows but is not on screen; nothing to reflow.
+        if (!_visible)
+        {
+            return;
+        }
+
         // A layout pass is the moment the ScrollViewer can report a stale slot after a
         // pane, display or zoom change, so this is the one place that pays for the
         // TransformToVisual probe.
@@ -535,6 +541,9 @@ internal sealed class LyricsPanel : IDisposable
 
     /// <summary>The line being sung, or the first one before it starts.</summary>
     public int CurrentIndex => Math.Max(0, Lyrics.IndexOf(_position, _lyricLines) ?? 0);
+
+    /// <summary>Whether the rows are built and can be shown without a rebuild.</summary>
+    public bool HasRows => _rowsBuilt;
 
     /// <summary>Whether the line being sung sits above the middle of the panel: the follow
     /// pill's chevron points at it, so the listener knows which way the words are.</summary>
@@ -2237,8 +2246,9 @@ internal sealed class LyricsPanel : IDisposable
         _spacer.Height = Math.Max(0, _scroll.ViewportHeight);
     }
 
-    /// <summary>Puts the panel on screen with a short fade, and starts it following the song.</summary>
-    public void PlayEntrance()
+    /// <summary>Puts the panel on screen and starts it following the song. The fade is
+    /// skipped when the drawer is already open and the panel is merely swapping in.</summary>
+    public void PlayEntrance(bool animate = true)
     {
         // A closed panel may have kept the other theme's palette: rebuild the words
         // before they are shown rather than lighting them in the wrong colour.
@@ -2281,6 +2291,12 @@ internal sealed class LyricsPanel : IDisposable
         // The fade is the app's own pattern: a storyboard on the element's Opacity.
         // (A transform created in code cannot be a storyboard's target - only a
         // named one, declared in XAML, can.)
+        if (!animate)
+        {
+            _lines.Opacity = 1;
+            return;
+        }
+
         var fade = new DoubleAnimation
         {
             From = 0,
@@ -2303,6 +2319,16 @@ internal sealed class LyricsPanel : IDisposable
     {
         _visible = false;
         ReleaseRowsForClosedPanel();
+        UpdateFrame();
+    }
+
+    /// <summary>Stops following and painting without releasing the rows, for a panel that
+    /// is only swapped out behind the other side panel. Coming back does not rebuild it.</summary>
+    public void Suspend()
+    {
+        _visible = false;
+        _tween.Stop();
+        _needsGlide = false;
         UpdateFrame();
     }
 

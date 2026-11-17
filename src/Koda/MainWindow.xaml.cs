@@ -18,6 +18,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
 using Windows.Media;
@@ -97,6 +98,10 @@ public sealed partial class MainWindow : Window
 
     /// <summary>The queue drawer's open state, kept across pages like the lyrics'.</summary>
     private bool _queueOpen;
+
+    /// <summary>The crossfade between the two panels while the drawer stays open.</summary>
+    private Storyboard? _panelCrossfade;
+    private int _panelCrossfadeVersion;
 
     /// <summary>Set while the drawer is closed on purpose, so the pane's light-dismiss
     /// guard knows this close is not a tap outside.</summary>
@@ -1307,17 +1312,50 @@ public sealed partial class MainWindow : Window
         }
 
         var show = showLyrics || showQueue;
-        var changed = SidePanel.IsPaneOpen != show;
+        var wasOpen = SidePanel.IsPaneOpen;
+        var wasLyrics = InlineLyrics.Visibility == Visibility.Visible;
+        var wasQueue = InlineQueue.Visibility == Visibility.Visible;
+        var switching = wasOpen && show
+            && ((showLyrics && !wasLyrics) || (showQueue && !wasQueue));
+
         SetSidePanelOpen(show);
 
-        InlineLyrics.Visibility = showLyrics ? Visibility.Visible : Visibility.Collapsed;
-        InlineQueue.Visibility = showQueue ? Visibility.Visible : Visibility.Collapsed;
+        if (switching)
+        {
+            // Keep both surfaces on screen for the crossfade; the incoming one is
+            // brought to the front so it can fade over the one leaving.
+            if (showLyrics)
+            {
+                InlineLyrics.Opacity = 0;
+                InlineLyrics.Visibility = Visibility.Visible;
+                Canvas.SetZIndex(InlineLyrics, 1);
+                Canvas.SetZIndex(InlineQueue, 0);
+            }
+            else
+            {
+                InlineQueue.Opacity = 0;
+                InlineQueue.Visibility = Visibility.Visible;
+                Canvas.SetZIndex(InlineQueue, 1);
+                Canvas.SetZIndex(InlineLyrics, 0);
+            }
+        }
+        else
+        {
+            _panelCrossfade?.Stop();
+            _panelCrossfadeVersion++;
+            InlineLyrics.Opacity = 1;
+            InlineQueue.Opacity = 1;
+            InlineLyrics.Visibility = showLyrics ? Visibility.Visible : Visibility.Collapsed;
+            InlineQueue.Visibility = showQueue ? Visibility.Visible : Visibility.Collapsed;
+        }
 
         if (showLyrics)
         {
-            InlineLyrics.Activate();
+            // A switch uses the drawer's crossfade; only an entrance from a closed
+            // drawer should fade the words in on their own.
+            InlineLyrics.Activate(animate: !wasOpen);
         }
-        else
+        else if (!switching)
         {
             InlineLyrics.Deactivate();
         }
@@ -1326,17 +1364,92 @@ public sealed partial class MainWindow : Window
         {
             InlineQueue.Activate();
         }
-        else
+        else if (!switching)
         {
             InlineQueue.Deactivate();
         }
 
-        if (changed)
+        if (switching)
         {
-            RelayoutContent();
+            CrossfadePanels(toLyrics: showLyrics);
         }
 
         UpdateSidePanelChrome();
+    }
+
+    /// <summary>A short native storyboard crossfade between the lyrics and the queue; the
+    /// drawer itself never closes or moves.</summary>
+    private void CrossfadePanels(bool toLyrics)
+    {
+        var version = ++_panelCrossfadeVersion;
+        _panelCrossfade?.Stop();
+
+        var incoming = toLyrics ? (FrameworkElement)InlineLyrics : InlineQueue;
+        var outgoing = toLyrics ? (FrameworkElement)InlineQueue : InlineLyrics;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var storyboard = new Storyboard();
+
+        var fadeIn = new DoubleAnimation
+        {
+            To = 1,
+            Duration = TimeSpan.FromMilliseconds(200),
+            EasingFunction = ease,
+        };
+        Storyboard.SetTarget(fadeIn, incoming);
+        Storyboard.SetTargetProperty(fadeIn, "Opacity");
+        storyboard.Children.Add(fadeIn);
+
+        if (outgoing.Visibility == Visibility.Visible)
+        {
+            var fadeOut = new DoubleAnimation
+            {
+                To = 0,
+                Duration = TimeSpan.FromMilliseconds(200),
+                EasingFunction = ease,
+            };
+            Storyboard.SetTarget(fadeOut, outgoing);
+            Storyboard.SetTargetProperty(fadeOut, "Opacity");
+            storyboard.Children.Add(fadeOut);
+        }
+
+        storyboard.Completed += (_, _) =>
+        {
+            if (version != _panelCrossfadeVersion)
+            {
+                return;
+            }
+
+            InlineLyrics.Opacity = 1;
+            InlineQueue.Opacity = 1;
+            InlineLyrics.Visibility = SidePanel.IsPaneOpen && _lyricsOpen
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            InlineQueue.Visibility = SidePanel.IsPaneOpen && _queueOpen
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+            if (InlineLyrics.Visibility != Visibility.Visible)
+            {
+                // The drawer is still open with the queue showing: keep the rows so
+                // coming back to the lyrics does not rebuild them.
+                if (SidePanel.IsPaneOpen)
+                {
+                    InlineLyrics.Suspend();
+                }
+                else
+                {
+                    InlineLyrics.Deactivate();
+                }
+            }
+
+            if (InlineQueue.Visibility != Visibility.Visible)
+            {
+                InlineQueue.Deactivate();
+            }
+        };
+
+        _panelCrossfade = storyboard;
+        storyboard.Begin();
     }
 
     /// <summary>Changes the pane without the light-dismiss guard mistaking a deliberate

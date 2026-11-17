@@ -99,6 +99,22 @@
                     </Border>
                 </Grid>
 
+                <!-- Shown immediately when the drawer swaps to the lyrics, before the
+                     text surfaces are built; the build happens on the next dispatcher turn. -->
+                <Border
+                    x:Name="Preparing"
+                    Visibility="Collapsed"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    IsHitTestVisible="False">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                        <ProgressRing Width="20" Height="20" IsActive="True" />
+                        <TextBlock
+                            Text="Finding lyrics…"
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Border>
+
                 <!-- Shown when the listener scrolls away: hands the panel back to the song. -->
                 <Button
                     x:Name="FollowLyricsButton"
