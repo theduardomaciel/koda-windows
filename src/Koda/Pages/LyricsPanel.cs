@@ -2205,7 +2205,9 @@ internal sealed class LyricsPanel : IDisposable
     {
         if (CompactInsets)
         {
-            var pad = Math.Max(10, _fontSize * HoverBoxPad);
+            // Exactly the hover box's reach: the box's outer edge lands on the card's
+            // gutter, in line with the cover, and the words move in with it.
+            var pad = _fontSize * HoverBoxPad;
             return (pad, pad);
         }
 

@@ -148,8 +148,9 @@ The method drops the surface, divider, header/tabs/close row and the horizontal
 insets. The queue swaps `CatalogRowStyle` for its local
 `CompactQueueRowStyle` (`Padding="0"`). The lyrics `ScrollViewer` drops its 10 DIP
 margin and the panel's `CompactInsets` flag replaces the 18/24 DIP glow pads with
-the hover box's reach (`max(10, fontSize × 0.35)`). Both panes therefore start
-near the card's 16 DIP gutter, in line with the cover.
+the hover box's reach (`fontSize × 0.35`), so the box's outer edge sits on the
+card's gutter. Both panes therefore start near the card's 16 DIP gutter, in line
+with the cover.
 
 It also clears the loading overlay's (`Preparing`) solid surface background. The
 drawer uses that wash to hide the panel behind it, but over the mini player's Mica
