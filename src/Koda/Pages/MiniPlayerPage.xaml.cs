@@ -60,10 +60,8 @@ public sealed partial class MiniPlayerPage : Page
         InitializeComponent();
         Attach();
 
-        // The panel bodies normally draw the main window's drawer chrome: a surface and a
-        // header of their own. In the card that chrome is the card's, so they give it up.
-        LyricsPane.UseCompactChrome();
-        QueuePane.UseCompactChrome();
+        // The panel bodies normally draw the main window's drawer chrome; the card provides
+        // it, and the panes are declared compact in this page's markup.
         LyricsPane.CloseRequested += OnPanelCloseRequested;
         QueuePane.CloseRequested += OnPanelCloseRequested;
 

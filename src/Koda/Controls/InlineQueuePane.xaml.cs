@@ -16,8 +16,24 @@ namespace Koda.Controls;
 /// </summary>
 public sealed partial class InlineQueuePane : UserControl
 {
+    /// <summary>Whether the pane gives up the drawer chrome for a host that provides its
+    /// own, like the expanded mini player. Set it in the host's markup; it is not expected
+    /// to change after the pane is shown.</summary>
+    public static readonly DependencyProperty CompactChromeProperty = DependencyProperty.Register(
+        nameof(CompactChrome),
+        typeof(bool),
+        typeof(InlineQueuePane),
+        new PropertyMetadata(false, OnCompactChromeChanged));
+
     private readonly ObservableCollection<QueueItem> _upcoming = [];
     private readonly ObservableCollection<QueueItem> _history = [];
+
+    /// <summary>The drawer chrome, captured before a host switches the pane to compact.</summary>
+    private readonly Brush? _drawerBackground;
+    private readonly Thickness _drawerBorder;
+    private readonly GridLength _drawerTabsHeight;
+    private readonly Thickness _drawerSectionPadding;
+    private readonly Style? _drawerRowStyle;
 
     private bool _active;
     private bool _historyTab;
@@ -32,29 +48,47 @@ public sealed partial class InlineQueuePane : UserControl
     public InlineQueuePane()
     {
         InitializeComponent();
+        _drawerBackground = Surface.Background;
+        _drawerBorder = Surface.BorderThickness;
+        _drawerTabsHeight = TabsRow.Height;
+        _drawerSectionPadding = SectionRow.Padding;
+        _drawerRowStyle = UpNext.ItemContainerStyle;
+
         UpNext.ItemsSource = _upcoming;
         HistoryList.ItemsSource = _history;
         Loaded += OnLoaded;
     }
 
+    /// <summary>The drawer's chrome is the main window's; the expanded mini player provides
+    /// its own and sets this in the host markup.</summary>
+    public bool CompactChrome
+    {
+        get => (bool)GetValue(CompactChromeProperty);
+        set => SetValue(CompactChromeProperty, value);
+    }
+
+    private static void OnCompactChromeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
+        ((InlineQueuePane)d).ApplyChrome((bool)e.NewValue);
+
     /// <summary>Drops the drawer's own chrome for a host that provides it: no side divider,
     /// no surface of its own, and no tab or close rows, leaving the Playing Next list under
     /// a slim Clear/Autoplay bar. History stays a drawer-only view.</summary>
-    public void UseCompactChrome()
+    private void ApplyChrome(bool compact)
     {
-        Surface.Background = null;
-        Surface.BorderThickness = new Thickness(0);
-        Tabs.Visibility = Visibility.Collapsed;
-        TabsRow.Height = new GridLength(0);
-        CloseButton.Visibility = Visibility.Collapsed;
+        Surface.Background = compact ? null : _drawerBackground;
+        Surface.BorderThickness = compact ? new Thickness(0) : _drawerBorder;
+        Tabs.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        TabsRow.Height = compact ? new GridLength(0) : _drawerTabsHeight;
+        CloseButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
 
         // The card's own padding is the gutter; drop the drawer's insets so the Playing
         // Next title and rows line up with the cover above them.
-        SectionRow.Padding = new Thickness(0, 4, 0, 6);
+        SectionRow.Padding = compact ? new Thickness(0, 4, 0, 6) : _drawerSectionPadding;
         if (Resources["CompactQueueRowStyle"] is Style compactRows)
         {
-            UpNext.ItemContainerStyle = compactRows;
-            HistoryList.ItemContainerStyle = compactRows;
+            var rows = compact ? compactRows : _drawerRowStyle;
+            UpNext.ItemContainerStyle = rows;
+            HistoryList.ItemContainerStyle = rows;
         }
     }
 

@@ -9,6 +9,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 
 namespace Koda.Controls;
 
@@ -19,7 +20,22 @@ namespace Koda.Controls;
 /// </summary>
 public sealed partial class InlineLyricsPane : UserControl, IDisposable
 {
+    /// <summary>Whether the pane gives up the drawer chrome for a host that provides its
+    /// own, like the expanded mini player. Set it in the host's markup; it is not expected
+    /// to change after the pane is shown.</summary>
+    public static readonly DependencyProperty CompactChromeProperty = DependencyProperty.Register(
+        nameof(CompactChrome),
+        typeof(bool),
+        typeof(InlineLyricsPane),
+        new PropertyMetadata(false, OnCompactChromeChanged));
+
     private readonly LyricsPanel _lyrics;
+
+    /// <summary>The drawer chrome, captured before a host switches the pane to compact.</summary>
+    private readonly Brush? _drawerBackground;
+    private readonly Thickness _drawerBorder;
+    private readonly GridLength _drawerHeaderHeight;
+    private readonly Thickness _drawerScrollMargin;
 
     /// <summary>Lets the panel and spinner render one frame before the rows are built.</summary>
     private readonly DispatcherQueueTimer _activationTimer;
@@ -43,6 +59,11 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
     public InlineLyricsPane()
     {
         InitializeComponent();
+        _drawerBackground = Surface.Background;
+        _drawerBorder = Surface.BorderThickness;
+        _drawerHeaderHeight = HeaderRow.Height;
+        _drawerScrollMargin = LyricsScroll.Margin;
+
         _lyrics = new LyricsPanel(LyricsScroll, LyricsLines, DispatcherQueue);
         _activationTimer = DispatcherQueue.CreateTimer();
         _activationTimer.Interval = TimeSpan.FromMilliseconds(220);
@@ -100,17 +121,28 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         Loaded += (_, _) => LyricsFade.Apply(LyricsView, LyricsMaskedContent, LyricsMask, ref _masked);
     }
 
+    /// <summary>The drawer's chrome is the main window's; the expanded mini player provides
+    /// its own and sets this in the host markup.</summary>
+    public bool CompactChrome
+    {
+        get => (bool)GetValue(CompactChromeProperty);
+        set => SetValue(CompactChromeProperty, value);
+    }
+
+    private static void OnCompactChromeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
+        ((InlineLyricsPane)d).ApplyChrome((bool)e.NewValue);
+
     /// <summary>Drops the drawer's own chrome for a host that provides it: no side divider,
     /// no surface of its own, and no header, so the words fill the whole panel. The expanded
     /// mini player hosts the body under its own track strip and controls.</summary>
-    public void UseCompactChrome()
+    private void ApplyChrome(bool compact)
     {
-        Surface.Background = null;
-        Surface.BorderThickness = new Thickness(0);
-        HeaderRow.Height = new GridLength(0);
-        Header.Visibility = Visibility.Collapsed;
+        Surface.Background = compact ? null : _drawerBackground;
+        Surface.BorderThickness = compact ? new Thickness(0) : _drawerBorder;
+        HeaderRow.Height = compact ? new GridLength(0) : _drawerHeaderHeight;
+        Header.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         // The card's own padding is the gutter: the words line up with the cover above.
-        LyricsScroll.Margin = new Thickness(0);
+        LyricsScroll.Margin = compact ? new Thickness(0) : _drawerScrollMargin;
     }
 
     /// <summary>Puts the words on screen and starts them following the song. Called when

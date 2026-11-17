@@ -1,7 +1,12 @@
-# Mini player sizing
+# Mini player
 
-How the compact overlay picks its size, and why the width follows the screen it is
-on. The short version:
+How the compact overlay picks its size, why the width follows the screen it is on,
+and how the shared lyrics and queue panes drop their drawer chrome when the card
+hosts them.
+
+## Sizing
+
+The short version:
 
 - The compact card is **425 DIP wide** when the screen has room for it.
 - The expanded card keeps a **6:11 portrait shape** (the Apple Music mini player's
@@ -22,10 +27,49 @@ on. The short version:
 | `FitCardWidth` | Same | Picks the width for the display (see the formula below). |
 | `_widthFit` timer | Same | Re-fits the card 250 ms after a move to another display settles. |
 | Track strip, panel, seek bar, controls | `src/Koda/Pages/MiniPlayerPage.xaml` | Row heights add up to the window size; the panel row is `0` until expanded. |
+| `CompactChrome` | `src/Koda/Controls/InlineLyricsPane.xaml.cs`, `InlineQueuePane.xaml.cs` | Drops the drawer surface, divider, header/tabs and row insets when a host provides its own. |
 
 In compact chrome the panes drop their own horizontal insets: the card's 16 DIP
 padding is the gutter, so lyric lines and queue rows start at the same x as the
 cover.
+
+## Compact chrome
+
+The inline lyrics and queue panes normally draw the main window's drawer chrome:
+a solid surface, a left divider, a header or tabs, and a 12 DIP row inset. The
+expanded mini player provides that chrome itself, so both panes expose a
+`CompactChrome` dependency property and the host declares the mode:
+
+```xml
+<controls:InlineLyricsPane x:Name="LyricsPane" CompactChrome="True" />
+<controls:InlineQueuePane x:Name="QueuePane" CompactChrome="True" />
+```
+
+When it is set, the pane drops its surface, divider, header/tabs/close row and
+horizontal insets. The queue swaps `CatalogRowStyle` for a local
+`CompactQueueRowStyle` with `Padding="0"`; the lyrics `ScrollViewer` drops its
+10 DIP margin.
+
+Why a dependency property instead of a `UseCompactChrome()` call:
+
+- The mode is declared where the pane is hosted, not hidden in the page
+  constructor.
+- It is part of the control's public surface and visible in the designer.
+- It can be toggled at runtime: the drawer values (background, border, header
+  row height, insets and row style) are captured when the control is
+  constructed. The mini player sets it once and never toggles it, so its restore
+  path is not exercised there; a background restored after a later theme switch
+  would be the brush captured at construction.
+
+Alternatives considered:
+
+- A templated `Control` with `Drawer`/`Compact` visual states: the fully
+  declarative WinUI route, but heavier; `RowDefinition.Height` and
+  `ItemContainerStyle` are awkward in visual states, and these panes are one-off
+  compositions rather than generally themed controls.
+- Extracting `LyricsBody` / `QueueBody` and having the drawer and the mini player
+  compose them: the cleanest separation, but a real refactor that only pays off
+  when a third host appears.
 
 ## How the width is chosen
 
