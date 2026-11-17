@@ -16,5 +16,5 @@ public static class ForkConfig
     /// <summary>The publishable Spicy Lyrics key (<c>sl_pk_…</c>). It ships in the app
     /// and is public by design; the Spicy application must allow requests with no origin
     /// header for native clients. Leave it empty to skip Spicy until the key is issued.</summary>
-    public const string SpicyLyricsKey = "";
+    public const string SpicyLyricsKey = "sl_pk_wot6V6SY5BcKmxaLHaO_BwOyGCmR4kpgth4NZGd2suE";
 }
