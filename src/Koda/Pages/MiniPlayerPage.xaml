@@ -341,7 +341,7 @@
             Loaded="OnTitleBarLoaded">
             <TitleBar.Resources>
                 <!-- The compact overlay's caption buttons are 32 DIP tall, and the card is
-                     only 400 DIP wide. Keep the control's internal layout compact too;
+                     only 425 DIP wide. Keep the control's internal layout compact too;
                      a right header alone would otherwise make it 48 tall and clip the
                      button against the card. The default 48 DIP drag strip between the
                      header and Close would also leave the expand button floating far from

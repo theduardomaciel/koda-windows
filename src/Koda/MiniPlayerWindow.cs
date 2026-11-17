@@ -4,6 +4,7 @@ using Koda.Helpers;
 using Koda.Interop;
 using Koda.Pages;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
@@ -20,20 +21,22 @@ namespace Koda;
 /// </summary>
 public sealed class MiniPlayerWindow : Window
 {
-    private const double CardWidth = 400;
-    private const double CardHeight = 200;
+    private const double PreferredCardWidth = 425;
+    private const double CompactCardHeight = 200;
 
     /// <summary>The expanded card keeps the reference player's portrait 6:11 shape.</summary>
     private const double ExpandedAspectWidth = 6;
     private const double ExpandedAspectHeight = 11;
-    private const double ExpandedCardHeight = CardWidth * ExpandedAspectHeight / ExpandedAspectWidth;
 
     /// <summary>Narrower than this, the transport and the two side clusters would collide.</summary>
-    private const double MinExpandedWidth = 360;
+    private const double MinCardWidth = 360;
 
     private readonly MiniPlayerPage _page;
     private bool _customTitleBar;
     private bool _frameApplied;
+
+    /// <summary>Re-fits the compact card once a move to another display has settled.</summary>
+    private readonly DispatcherQueueTimer _widthFit;
 
     /// <summary>Where the compact card sat before it grew, so collapsing puts it back.</summary>
     private PointInt32 _compactPosition;
@@ -56,6 +59,14 @@ public sealed class MiniPlayerWindow : Window
         var presenter = CompactOverlayPresenter.Create();
         presenter.InitialSize = CompactOverlaySize.Small;
         appWindow.SetPresenter(presenter);
+
+        // A move to another display can change the width the 6:11 expanded card needs;
+        // the compact card re-fits once the move has settled.
+        _widthFit = DispatcherQueue.CreateTimer();
+        _widthFit.Interval = TimeSpan.FromMilliseconds(250);
+        _widthFit.IsRepeating = false;
+        _widthFit.Tick += (_, _) => ResizeCard();
+        appWindow.Changed += OnAppWindowChanged;
 
         // No system title bar over the card: the page reaches the window's top edge and
         // its first strip is the drag region, so the artwork and Mica run edge to edge
@@ -97,6 +108,8 @@ public sealed class MiniPlayerWindow : Window
         _page.FullPlayerRequested += OnFullPlayerRequested;
         Closed += (_, _) =>
         {
+            AppWindow.Changed -= OnAppWindowChanged;
+            _widthFit.Stop();
             _page.ExpandedChanged -= OnExpandedChanged;
             _page.FullPlayerRequested -= OnFullPlayerRequested;
             _page.Detach();
@@ -106,20 +119,63 @@ public sealed class MiniPlayerWindow : Window
     /// <summary>The window handle, for the DPI-aware size.</summary>
     private nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
 
-    /// <summary>The card's compact size in effective pixels, scaled to the monitor's DPI.</summary>
+    /// <summary>The compact card, fitted to its display: it takes the width the 6:11
+    /// expanded card needs there even before a panel opens, so expanding never changes the
+    /// card's width.</summary>
     private void ResizeCard()
     {
-        var scale = DpiScale();
+        if (_page.OpenPanel is not null)
+        {
+            return; // the expanded size owns the window
+        }
+
         try
         {
-            AppWindow.Resize(new SizeInt32(
-                (int)Math.Round(CardWidth * scale),
-                (int)Math.Round(CardHeight * scale)));
+            var scale = DpiScale();
+            if (DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest) is not { } area)
+            {
+                return;
+            }
+
+            var size = CompactSize(area.WorkArea, scale);
+            if (AppWindow.Size.Width == size.Width && AppWindow.Size.Height == size.Height)
+            {
+                return;
+            }
+
+            AppWindow.Resize(size);
         }
         catch (Exception)
         {
             // The preset is a perfectly good mini player if the shell refuses the size.
         }
+    }
+
+    private static SizeInt32 CompactSize(RectInt32 work, double scale) => new(
+        (int)Math.Round(FitCardWidth(work, scale) * scale),
+        (int)Math.Round(CompactCardHeight * scale));
+
+    /// <summary>The width the card uses on a display: the preferred width, unless the
+    /// screen is too short to hold the 6:11 expanded card at it. Fitting it from the start
+    /// means the card is already the right width before a panel opens.</summary>
+    private static double FitCardWidth(RectInt32 work, double scale)
+    {
+        var workHeight = work.Height / scale;
+        var fit = workHeight * ExpandedAspectWidth / ExpandedAspectHeight;
+        return Math.Clamp(Math.Min(PreferredCardWidth, fit), MinCardWidth, PreferredCardWidth);
+    }
+
+    /// <summary>A moved card may have crossed to a display that cannot hold the expanded
+    /// card at the current width; once the drag settles, the compact card re-fits.</summary>
+    private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (!args.DidPositionChange || _page.OpenPanel is not null)
+        {
+            return;
+        }
+
+        _widthFit.Stop();
+        _widthFit.Start();
     }
 
     private double DpiScale()
@@ -134,8 +190,8 @@ public sealed class MiniPlayerWindow : Window
     {
         if (TryResizeCard(expanded))
         {
-            // A narrower expanded card moves the caption group and the passthrough area
-            // beside it; the title bar re-reads them once the new size has laid out.
+            // A resized card moves the caption group and the passthrough area beside it;
+            // the title bar re-reads them once the new size has laid out.
             DispatcherQueue.TryEnqueue(() => _page.TitleBarControl.RecomputeDragRegions());
             return;
         }
@@ -151,6 +207,7 @@ public sealed class MiniPlayerWindow : Window
     }
 
     /// <summary>Resizes the card for the expanded panel, keeping the window on its screen.
+    /// The compact and expanded cards share one width, so opening a panel only adds height.
     /// The card grows upward when the taller version would run past the work area, so an
     /// overlay parked near the taskbar keeps its panel in view.</summary>
     private bool TryResizeCard(bool expanded)
@@ -158,22 +215,25 @@ public sealed class MiniPlayerWindow : Window
         try
         {
             var scale = DpiScale();
-            var width = (int)Math.Round(CardWidth * scale);
-            var targetHeight = (int)Math.Round((expanded ? ExpandedCardHeight : CardHeight) * scale);
-
             if (DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest) is not { } area)
             {
                 return false;
             }
 
             var work = area.WorkArea;
-            var height = Math.Min(targetHeight, work.Height);
-            if (expanded && height < targetHeight)
+            var width = (int)Math.Round(FitCardWidth(work, scale) * scale);
+            var height = expanded
+                ? (int)Math.Round(width * ExpandedAspectHeight / ExpandedAspectWidth)
+                : (int)Math.Round(CompactCardHeight * scale);
+
+            if (expanded && height > work.Height)
             {
-                // The screen cannot give the card its full height. Narrow it instead of
-                // flattening it, so the 6:11 shape the panel is laid out for survives.
-                width = (int)Math.Round(height * ExpandedAspectWidth / ExpandedAspectHeight);
-                width = Math.Max(width, (int)Math.Round(MinExpandedWidth * scale));
+                // The screen is below the width the controls need; the ratio has to give so
+                // that the card stays on screen.
+                height = work.Height;
+                width = Math.Max(
+                    (int)Math.Round(height * ExpandedAspectWidth / ExpandedAspectHeight),
+                    (int)Math.Round(MinCardWidth * scale));
             }
 
             int x;
