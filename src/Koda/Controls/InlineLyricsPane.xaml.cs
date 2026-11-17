@@ -102,19 +102,26 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
 
     /// <summary>Drops the drawer's own chrome for a host that provides it: no side divider,
     /// no surface of its own, and no header, so the words fill the whole panel. The expanded
-    /// mini player hosts the body under its own track strip and controls.</summary>
-    public void UseCompactChrome()
+    /// mini player hosts the body under its own track strip and controls.
+    /// <paramref name="bleedLeft"/> and <paramref name="bleedRight"/> let the pane reach
+    /// into the host's side padding: the words' glow paints in that gutter while the
+    /// scrollbar stays on the card's content edge.</summary>
+    public void UseCompactChrome(double bleedLeft = 0, double bleedRight = 0)
     {
         Surface.Background = null;
         Surface.BorderThickness = new Thickness(0);
         HeaderRow.Height = new GridLength(0);
         Header.Visibility = Visibility.Collapsed;
         // The card's own padding is the gutter: the words line up with the cover above.
-        LyricsScroll.Margin = new Thickness(0);
+        // With a bleed the pane spans the gutter and the scrollbar keeps the card edge.
+        Surface.Margin = new Thickness(-bleedLeft, 0, -bleedRight, 0);
+        LyricsScroll.Margin = new Thickness(0, 0, bleedRight, 0);
         // The drawer's loading wash is solid; over Mica it reads as a gray block.
         Preparing.Background = null;
-        // The lines keep only the room the hover box needs, not the full glow pads.
+        // The lines keep only the room the hover box needs, not the full glow pads. The
+        // left bleed is added back so the glow has the card gutter to paint in.
         _lyrics.CompactInsets = true;
+        _lyrics.CompactLeftBleed = bleedLeft;
     }
 
     /// <summary>Puts the words on screen and starts them following the song. Called when

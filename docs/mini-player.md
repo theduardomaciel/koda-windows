@@ -22,7 +22,7 @@ on. The short version:
 | `FitCardWidth` | Same | Picks the width for the display (see the formula below). |
 | `_widthFit` timer | Same | Re-fits the card 250 ms after a move to another display settles. |
 | Track strip, panel, seek bar, controls | `src/Koda/Pages/MiniPlayerPage.xaml` | Row heights add up to the window size; the panel row is `0` until expanded. |
-| `CompactInsets` | `src/Koda/Pages/LyricsPanel.cs` | Compact hosts replace the 18/24 DIP glow pads with the hover box's reach. |
+| `CompactInsets` | `src/Koda/Pages/LyricsPanel.cs` | Compact hosts replace the 18/24 DIP glow pads with the hover box's reach plus the host's bleed. |
 
 In compact chrome the panes drop their own horizontal insets: the card's 16 DIP
 padding is the gutter, so lyric lines and queue rows start at the same x as the
@@ -146,11 +146,15 @@ they are shown.
 
 The method drops the surface, divider, header/tabs/close row and the horizontal
 insets. The queue swaps `CatalogRowStyle` for its local
-`CompactQueueRowStyle` (`Padding="0"`). The lyrics `ScrollViewer` drops its 10 DIP
-margin and the panel's `CompactInsets` flag replaces the 18/24 DIP glow pads with
-the hover box's reach (`fontSize × 0.35`), so the box's outer edge sits on the
-card's gutter. Both panes therefore start near the card's 16 DIP gutter, in line
-with the cover.
+`CompactQueueRowStyle` (`Padding="0"`). The lyrics pane takes the card's side
+padding as a bleed (`UseCompactChrome(Card.Padding.Left, Card.Padding.Right)`):
+the pane extends into the gutter while the `ScrollViewer`'s right edge stays on
+the card's content edge. The panel's `CompactInsets` flag then replaces the 18/24
+DIP glow pads with the hover box's reach plus that left bleed
+(`bleedLeft + fontSize × 0.35`, and 24 DIP on the right). The box's outer edge
+sits on the card gutter, the glow has the gutter to paint in, and the scrollbar
+stays where the card's content edge is. Both panes therefore start near the card's
+16 DIP gutter, in line with the cover.
 
 It also clears the loading overlay's (`Preparing`) solid surface background. The
 drawer uses that wash to hide the panel behind it, but over the mini player's Mica

@@ -582,6 +582,11 @@ internal sealed class LyricsPanel : IDisposable
     /// drawer use. Set it before the panel fills.</summary>
     public bool CompactInsets { get; set; }
 
+    /// <summary>How far a compact host's pane reaches into its side padding. The lines add
+    /// it to the left inset, so the words' glow paints in the gutter without moving the
+    /// hover box off the cover.</summary>
+    public double CompactLeftBleed { get; set; }
+
     /// <summary>The listener's correction for this song, in seconds.</summary>
     public double Offset
     {
@@ -2205,10 +2210,11 @@ internal sealed class LyricsPanel : IDisposable
     {
         if (CompactInsets)
         {
-            // Exactly the hover box's reach: the box's outer edge lands on the card's
-            // gutter, in line with the cover, and the words move in with it.
+            // The hover box's outer edge lands on the card's gutter, in line with the
+            // cover; the left bleed is the room the glow has to paint in that gutter. The
+            // right keeps the drawer's 24 DIP so the glow clears the scrollbar.
             var pad = _fontSize * HoverBoxPad;
-            return (pad, pad);
+            return (CompactLeftBleed + pad, Math.Max(24, pad));
         }
 
         var side = Math.Max(18, _fontSize * 0.5);

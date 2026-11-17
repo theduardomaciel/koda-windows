@@ -62,7 +62,9 @@ public sealed partial class MiniPlayerPage : Page
 
         // The panel bodies normally draw the main window's drawer chrome: a surface and a
         // header of their own. In the card that chrome is the card's, so they give it up.
-        LyricsPane.UseCompactChrome();
+        // The lyrics pane reaches into the card's side padding so the glow has a gutter to
+        // paint in; the scrollbar stays on the card's content edge.
+        LyricsPane.UseCompactChrome(Card.Padding.Left, Card.Padding.Right);
         QueuePane.UseCompactChrome();
         LyricsPane.CloseRequested += OnPanelCloseRequested;
         QueuePane.CloseRequested += OnPanelCloseRequested;
