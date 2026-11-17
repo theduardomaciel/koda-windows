@@ -20,7 +20,7 @@ namespace Koda;
 /// </summary>
 public sealed class MiniPlayerWindow : Window
 {
-    private const double CardWidth = 450;
+    private const double CardWidth = 400;
     private const double CardHeight = 200;
 
     /// <summary>The expanded card keeps the reference player's portrait 6:11 shape.</summary>
