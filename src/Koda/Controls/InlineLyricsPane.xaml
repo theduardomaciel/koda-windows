@@ -58,7 +58,7 @@
                         <ScrollViewer
                             x:Name="LyricsScroll"
                             Margin="4,0"
-                            VerticalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Hidden"
                             VerticalScrollMode="Auto"
                             HorizontalScrollMode="Disabled"
                             AutomationProperties.Name="Lyrics">

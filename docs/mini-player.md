@@ -150,14 +150,19 @@ insets. The queue swaps `CatalogRowStyle` for its local
 
 The lyrics pane uses `TightInsets` in both hosts. The host supplies a `Gutter`: the
 drawer's header padding (16 DIP) and the mini card's padding (16 DIP). The pane's
-`ScrollViewer` keeps a 4 DIP inset on both sides (the scrollbar's resting edge),
-and the line inset is `gutter − 4 + fontSize × 0.35`, so the hover box's outer edge
-lands on the gutter and the left and right match. The drawer's lines start about
-24 DIP in, level with its Lyrics header, with roughly 20 DIP of glow room on each
-side. In the mini, `UseCompactChrome(Card.Padding.Left, Card.Padding.Right)`
-extends the pane into the card's side padding; the same gutter and symmetric
-insets put the hover box on the cover's edge and leave the glow the card gutter
-to paint in. The scrollbar stays 4 DIP inside the pane in both hosts.
+`ScrollViewer` keeps a 4 DIP inset on both sides, and the line inset is
+`gutter − 4 + fontSize × 0.35`, so the hover box's outer edge lands on the gutter
+and the left and right match. The drawer's lines start about 24 DIP in, level with
+its Lyrics header, with roughly 20 DIP of glow room on each side. In the mini,
+`UseCompactChrome(Card.Padding.Left, Card.Padding.Right)` extends the pane into the
+card's side padding; the same gutter and symmetric insets put the hover box on the
+cover's edge and leave the glow the card gutter to paint in.
+
+The lyrics `ScrollViewer` hides its scrollbar (`VerticalScrollBarVisibility="Hidden"`).
+A visible WinUI scrollbar is overlaid 16 DIP over the content's right edge, which
+covered the right edge of the hover box and made a duet's right-aligned line look
+offset even though the line insets were symmetric. Wheel, touch and keyboard
+scrolling still work, and Now Playing keeps its own scrollbar.
 
 The loading overlay's (`Preparing`) solid surface background is cleared only for
 the mini. The drawer uses that wash to hide the panel behind it, but over the mini
