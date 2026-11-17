@@ -126,3 +126,7 @@ ratio survived.
   current work area.
 - The caption group and its drag passthrough are re-measured after every card
   resize.
+- Opening a panel freezes the track row at its measured compact height. The
+  collapsed card's star row is a couple of pixels taller than the 80 DIP cover,
+  so using a fixed 80 DIP in the expanded card made the cover and title jump up;
+  carrying the measured height keeps them still.

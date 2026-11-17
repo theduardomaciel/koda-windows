@@ -34,6 +34,11 @@ public sealed partial class MiniPlayerPage : Page
     /// <summary>Whether the card has grown past its compact height.</summary>
     private bool _expanded;
 
+    /// <summary>The compact track row's measured height. The collapsed card leaves a few
+    /// pixels of slack around the cover; the expanded card freezes this height so the cover
+    /// and the title do not move when the panel opens.</summary>
+    private double _trackHeight;
+
     /// <summary>Raised when the card should grow for a side panel, or shrink back. The
     /// window owns the size; the page only decides what is shown in it.</summary>
     public event Action<bool>? ExpandedChanged;
@@ -303,6 +308,14 @@ public sealed partial class MiniPlayerPage : Page
         }
 
         var grow = !_expanded;
+        if (grow)
+        {
+            // Measure before the window grows: the collapsed star row is a few pixels taller
+            // than the 80 DIP cover, and the expanded card has to keep that slack or the
+            // cover and title jump up as the panel opens.
+            _trackHeight = TrackRow.ActualHeight > 0 ? TrackRow.ActualHeight : TrackRow.MinHeight;
+        }
+
         _expanded = true;
         // Set before asking the window to grow: if the shell refuses the taller overlay,
         // the window falls back to the full player and needs to know what to open there.
@@ -339,7 +352,7 @@ public sealed partial class MiniPlayerPage : Page
     {
         var open = _panel is not null;
 
-        TrackRow.Height = open ? new GridLength(80) : new GridLength(1, GridUnitType.Star);
+        TrackRow.Height = open ? new GridLength(_trackHeight) : new GridLength(1, GridUnitType.Star);
         PanelRow.Height = open ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         PanelHost.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
 
