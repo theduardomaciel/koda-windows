@@ -577,15 +577,15 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Where the song is, read live: the panel asks every frame.</summary>
     public Func<double>? PositionSource { get; set; }
 
-    /// <summary>A compact host's tighter horizontal inset. When set, the lines keep just
-    /// enough room for the hover box instead of the 18/24 glow pads Now Playing and the
-    /// drawer use. Set it before the panel fills.</summary>
-    public bool CompactInsets { get; set; }
+    /// <summary>A host with a narrow gutter (the inline drawer, the expanded mini player)
+    /// keeps only the hover box's reach instead of the 18/24 DIP glow pads Now Playing uses.
+    /// The host supplies the rest of the room with a margin or a bleed.</summary>
+    public bool TightInsets { get; set; }
 
     /// <summary>How far a compact host's pane reaches into its side padding. The lines add
     /// it to the left inset, so the words' glow paints in the gutter without moving the
-    /// hover box off the cover.</summary>
-    public double CompactLeftBleed { get; set; }
+    /// hover box off the host's content edge.</summary>
+    public double LeftBleed { get; set; }
 
     /// <summary>The listener's correction for this song, in seconds.</summary>
     public double Offset
@@ -2208,13 +2208,13 @@ internal sealed class LyricsPanel : IDisposable
     /// box's reach in a compact host.</summary>
     private (double Side, double End) TextInsets()
     {
-        if (CompactInsets)
+        if (TightInsets)
         {
-            // The hover box's outer edge lands on the card's gutter, in line with the
-            // cover; the left bleed is the room the glow has to paint in that gutter. The
-            // right keeps the drawer's 24 DIP so the glow clears the scrollbar.
+            // The hover box's outer edge lands on the host's gutter; the left bleed is the
+            // room the glow has to paint in. The right keeps 24 DIP so the glow clears the
+            // scrollbar.
             var pad = _fontSize * HoverBoxPad;
-            return (CompactLeftBleed + pad, Math.Max(24, pad));
+            return (LeftBleed + pad, Math.Max(24, pad));
         }
 
         var side = Math.Max(18, _fontSize * 0.5);
