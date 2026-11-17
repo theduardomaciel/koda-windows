@@ -323,7 +323,7 @@
                     <Grid x:Name="TrackInfo" ColumnSpacing="12" VerticalAlignment="Center" SizeChanged="OnTrackInfoSizeChanged">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="56" />
-                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition x:Name="TrackTextColumn" Width="280" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
@@ -333,20 +333,22 @@
                                 <Image x:Name="CoverImage" helpers:Art.Pixels="56" Stretch="UniformToFill" />
                             </Grid>
                         </Border>
-                        <StackPanel x:Name="TrackInfoText" Grid.Column="1" VerticalAlignment="Center" Spacing="1" MaxWidth="280">
+                        <StackPanel x:Name="TrackInfoText" Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                             <TextBlock
                                 x:Name="TrackTitleText"
                                 Text="Nothing playing"
                                 Style="{ThemeResource BodyStrongTextBlockStyle}"
                                 TextTrimming="CharacterEllipsis"
-                                TextWrapping="NoWrap"
+                                TextWrapping="Wrap"
+                                MaxLines="1"
                                 AutomationProperties.Name="Track title" />
                             <TextBlock
                                 x:Name="TrackArtistText"
                                 Style="{ThemeResource CaptionTextBlockStyle}"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 TextTrimming="CharacterEllipsis"
-                                TextWrapping="NoWrap"
+                                TextWrapping="Wrap"
+                                MaxLines="1"
                                 Tapped="OnArtistTapped"
                                 AutomationProperties.Name="Track artist" />
                             <TextBlock
@@ -554,6 +556,52 @@
                             AutomationProperties.Name="Mute">
                             <FontIcon x:Name="MuteIcon" Glyph="&#xE767;" FontSize="16" />
                         </Button>
+                        <Button
+                            x:Name="BarVolumeButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Visibility="Collapsed"
+                            ToolTipService.ToolTip="Volume"
+                            AutomationProperties.Name="Volume">
+                            <FontIcon x:Name="BarVolumeIcon" Glyph="&#xE767;" FontSize="16" />
+                            <Button.Flyout>
+                                <Flyout Placement="Top" Opening="OnBarVolumeFlyoutOpening">
+                                    <Flyout.FlyoutPresenterStyle>
+                                        <Style TargetType="FlyoutPresenter">
+                                            <Setter Property="Padding" Value="8" />
+                                            <Setter Property="MinWidth" Value="0" />
+                                            <Setter Property="MinHeight" Value="0" />
+                                            <Setter Property="CornerRadius" Value="8" />
+                                        </Style>
+                                    </Flyout.FlyoutPresenterStyle>
+                                    <StackPanel Orientation="Horizontal" Spacing="8" Width="200">
+                                        <Button
+                                            x:Name="BarVolumeMuteButton"
+                                            Width="36"
+                                            Height="36"
+                                            Padding="0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Click="OnMuteClick"
+                                            ToolTipService.ToolTip="Mute"
+                                            AutomationProperties.Name="Mute">
+                                            <FontIcon x:Name="BarVolumeMuteIcon" Glyph="&#xE767;" FontSize="16" />
+                                        </Button>
+                                        <Slider
+                                            x:Name="BarVolumeSlider"
+                                            Width="150"
+                                            Minimum="0"
+                                            Maximum="100"
+                                            Value="100"
+                                            ValueChanged="OnBarVolumeChanged"
+                                            AutomationProperties.Name="Volume" />
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
                         <Slider
                             x:Name="VolumeSlider"
                             Width="110"
@@ -563,6 +611,19 @@
                             Value="100"
                             ValueChanged="OnVolumeChanged"
                             AutomationProperties.Name="Volume" />
+                        <Button
+                            x:Name="BarMoreButton"
+                            Width="36"
+                            Height="36"
+                            Padding="0"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Visibility="Collapsed"
+                            Click="OnBarMoreClick"
+                            ToolTipService.ToolTip="More player actions"
+                            AutomationProperties.Name="More player actions">
+                            <FontIcon Glyph="&#xE712;" FontSize="16" />
+                        </Button>
                     </StackPanel>
                 </Grid>
 

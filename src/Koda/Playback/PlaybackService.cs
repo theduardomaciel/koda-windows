@@ -665,6 +665,9 @@ public sealed class PlaybackService
 
     public void SetVolumePercent(double percent) => _player.Volume = percent;
 
+    /// <summary>The player's volume now, for the bars that kept a slider hidden.</summary>
+    public double VolumePercent => _player.Volume;
+
     public void SetMuted(bool muted)
     {
         IsMuted = muted;

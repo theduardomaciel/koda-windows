@@ -52,6 +52,7 @@ public sealed partial class MainWindow : Window
     private bool _placementApplied;
     private bool _scrubbing;
     private bool _suppressVolumePersistence;
+    private bool _suppressBarVolume;
     private string? _currentTag;
     private string? _notifiedSongId;
     private string _playlistSignature = "";
@@ -1458,11 +1459,97 @@ public sealed partial class MainWindow : Window
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SkipForwardButton, ahead);
     }
 
-    private void OnMuteClick(object sender, RoutedEventArgs e)
+    private void OnMuteClick(object sender, RoutedEventArgs e) => ToggleMute();
+
+    private void ToggleMute()
     {
         Playback.SetMuted(!Playback.IsMuted);
-        MuteIcon.Glyph = Playback.IsMuted ? "" : "";
-        ToolTipService.SetToolTip(MuteButton, Playback.IsMuted ? "Unmute" : "Mute");
+        UpdateMuteChrome();
+    }
+
+    /// <summary>The bar's mute button and the compact bar's volume flyout show the same
+    /// state; both icons and their labels move together.</summary>
+    private void UpdateMuteChrome()
+    {
+        var glyph = Playback.IsMuted ? "" : "";
+        MuteIcon.Glyph = glyph;
+        BarVolumeIcon.Glyph = glyph;
+        BarVolumeMuteIcon.Glyph = glyph;
+        var label = Playback.IsMuted ? "Unmute" : "Mute";
+        ToolTipService.SetToolTip(MuteButton, label);
+        ToolTipService.SetToolTip(BarVolumeMuteButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(MuteButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(BarVolumeMuteButton, label);
+    }
+
+    /// <summary>The compact bar's speaker opens the mini player's volume control: mute
+    /// and the same slider, read from the current volume as the flyout appears.</summary>
+    private void OnBarVolumeFlyoutOpening(object sender, object e)
+    {
+        _suppressBarVolume = true;
+        BarVolumeSlider.Value = Playback.VolumePercent;
+        _suppressBarVolume = false;
+        UpdateMuteChrome();
+    }
+
+    private void OnBarVolumeChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (!_suppressBarVolume)
+        {
+            OnVolumeChanged(sender, e);
+        }
+    }
+
+    /// <summary>The compact bar's one button: the actions that do not fit beside the
+    /// transport, with the lyrics and mute state read at the moment the menu opens.</summary>
+    private void OnBarMoreClick(object sender, RoutedEventArgs e)
+    {
+        var hasSong = Playback.CurrentSong is not null;
+        var menu = new MenuFlyout();
+
+        var lyrics = new ToggleMenuFlyoutItem
+        {
+            Text = _lyricsOpen ? "Hide lyrics" : "Lyrics",
+            IsChecked = _lyricsOpen,
+            Icon = new FontIcon { Glyph = "\uE8F2" },
+            IsEnabled = hasSong,
+        };
+        lyrics.Click += (_, _) =>
+        {
+            _lyricsOpen = lyrics.IsChecked;
+            ApplyLyricsDrawer();
+        };
+        menu.Items.Add(lyrics);
+
+        var queue = new MenuFlyoutItem
+        {
+            Text = "Queue",
+            Icon = new FontIcon { Glyph = "\uE8FD" },
+            IsEnabled = hasSong,
+        };
+        queue.Click += (_, _) => ShowQueue();
+        menu.Items.Add(queue);
+
+        var mini = new MenuFlyoutItem
+        {
+            Text = "Mini player",
+            Icon = new FontIcon { Glyph = "\uE9A6" },
+            IsEnabled = hasSong,
+        };
+        mini.Click += (_, _) => ShowMiniPlayer();
+        menu.Items.Add(mini);
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+
+        var output = new MenuFlyoutItem
+        {
+            Text = "Audio output",
+            Icon = new FontIcon { Glyph = "\uE7F5" },
+        };
+        output.Click += (_, _) => AudioOutputMenu.Show(BarMoreButton);
+        menu.Items.Add(output);
+
+        menu.ShowAt(BarMoreButton, new FlyoutShowOptions { Placement = FlyoutPlacementMode.TopEdgeAlignedRight });
     }
 
     private void OnOutputClick(object sender, RoutedEventArgs e) => AudioOutputMenu.Show(OutputButton);
@@ -1481,18 +1568,46 @@ public sealed partial class MainWindow : Window
 
     private void OnPlayerBarSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // The bar carries five buttons, the volume and the lyrics toggle. Under 1000 the
-        // volume goes speaker-only; at the smallest widths the mini player follows, so the
-        // lyrics and queue stay in reach instead of being pushed under the transport.
-        VolumeSlider.Visibility = e.NewSize.Width < 1000 ? Visibility.Collapsed : Visibility.Visible;
-        MiniButton.Visibility = e.NewSize.Width < 760 ? Visibility.Collapsed : Visibility.Visible;
+        // The bar carries five action buttons, the volume and the lyrics toggle. The
+        // volume goes first, then the actions fold into the more button, so the lyrics,
+        // queue and output never sit under the transport at a small window.
+        var wide = e.NewSize.Width >= 1100;
+        var compact = e.NewSize.Width < 900;
+        // The inline slider needs the whole right side; below it the speaker opens the
+        // mini player's volume flyout, so the bar keeps a volume control without one.
+        VolumeSlider.Visibility = wide ? Visibility.Visible : Visibility.Collapsed;
+        MuteButton.Visibility = wide ? Visibility.Visible : Visibility.Collapsed;
+        BarVolumeButton.Visibility = wide ? Visibility.Collapsed : Visibility.Visible;
+        if (wide)
+        {
+            // The slider was hidden while the compact flyout owned the volume.
+            _suppressVolumePersistence = true;
+            VolumeSlider.Value = Playback.VolumePercent;
+            _suppressVolumePersistence = false;
+        }
+        MiniButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        LyricsButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        QueueButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        OutputButton.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        BarMoreButton.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>The title and artist take the room the cover, the gaps and the heart leave;
-    /// past that they trim, so the heart stays beside the words instead of at the cell's edge.</summary>
+    /// past that they trim with an ellipsis, so the heart stays beside the words instead of
+    /// at the cell's edge. The text column is a fixed width, not Auto: an Auto column
+    /// measures its child with unlimited width, which lets the text paint past its slot and
+    /// be clipped without an ellipsis.</summary>
     private void OnTrackInfoSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        TrackInfoText.MaxWidth = Math.Max(80, e.NewSize.Width - 56 - 36 - 36);
+        var width = Math.Clamp(e.NewSize.Width - 56 - 36 - 36, 80, 280);
+        TrackTextColumn.Width = new GridLength(width);
+
+        // Writing the lines again makes the text measure and trim at the new room; WinUI
+        // otherwise keeps the truncation it decided at the old width.
+        var song = Playback.CurrentSong;
+        TrackTitleText.Text = song?.Title ?? "Nothing playing";
+        TrackArtistText.Text = song?.ArtistLine ?? "";
+        RefreshNextUp();
     }
 
     // MARK: profiles
