@@ -218,6 +218,8 @@ internal sealed class LyricsPanel : IDisposable
     private Vector3KeyFrameAnimation? _hoverScaleIn;
     private Vector3KeyFrameAnimation? _hoverScaleOut;
     private readonly bool _gcProbe = Environment.GetEnvironmentVariable("KODA_LYRICS_GC_PROBE") == "1";
+    private string? _gcProbeRequestPath;
+    private string? _gcProbeLogPath;
     private StackPanel? _leadingDots;
     private List<Ellipse> _leadingDotItems = [];
     private Row? _current;
@@ -791,6 +793,14 @@ internal sealed class LyricsPanel : IDisposable
         ReadPalette();
         var settings = Koda.Core.Settings.Current;
         _font = string.IsNullOrWhiteSpace(settings.LyricsFont) ? LyricFont : new FontFamily(settings.LyricsFont);
+        // A different family shapes every cached width differently; the sizes and the
+        // renderer are part of each key, but the family empties the whole cache.
+        var family = string.IsNullOrWhiteSpace(settings.LyricsFont) ? "" : settings.LyricsFont;
+        if (family != _shapedFont)
+        {
+            _shapedFont = family;
+            _shapedWidths.Clear();
+        }
         _lineHeightFactor = LineHeightFactor * settings.LyricsLineSpacing;
         _feather = 0.08 + 0.55 * settings.LyricsSoftness;
         _baseFontSize = settings.LyricsFontSize;
@@ -1810,6 +1820,36 @@ internal sealed class LyricsPanel : IDisposable
         ResetFill(letter.Fill);
     }
 
+    /// <summary>The shaped width of a text at a size and weight, measured once and
+    /// remembered. Splitting a held syllable asked for a fresh probe TextBlock per word
+    /// on every build; the same words come back song after song, so the probe is paid
+    /// once. The renderer and the soft weight are part of the key because they change
+    /// the shaping; a new font family empties the cache.</summary>
+    private double ShapedWidth(string text, double fontSize, bool soft)
+    {
+        var key = (text, fontSize, soft, _renderer);
+        if (_shapedWidths.TryGetValue(key, out var known))
+        {
+            return known;
+        }
+
+        var probe = new TextBlock { Text = text, TextWrapping = TextWrapping.NoWrap };
+        Shape(probe, fontSize, soft);
+        probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        if (_shapedWidths.Count > 2048)
+        {
+            // A cache that outgrew a song's worth of shapes starts over rather than
+            // walking with the listener; the next build pays for it again.
+            _shapedWidths.Clear();
+        }
+
+        _shapedWidths[key] = probe.DesiredSize.Width;
+        return probe.DesiredSize.Width;
+    }
+
+    private readonly Dictionary<(string Text, double Size, bool Soft, LyricsRenderer Renderer), double> _shapedWidths = [];
+    private string _shapedFont = "";
+
     /// <summary>Separate letter blocks do not shape/kerning together, so their sum can be
     /// wider than the word drawn as one run. Distribute the difference as static gaps between
     /// letters; the word then occupies exactly the placeholder's width at rest and after the
@@ -1828,10 +1868,7 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
-        var probe = new TextBlock { Text = text, TextWrapping = TextWrapping.NoWrap };
-        Shape(probe, fontSize, soft);
-        probe.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-
+        var shaped = ShapedWidth(text, fontSize, soft);
         var total = 0.0;
         for (var i = 0; i < count; i++)
         {
@@ -1840,7 +1877,7 @@ internal sealed class LyricsPanel : IDisposable
             total += element.DesiredSize.Width;
         }
 
-        var gap = (probe.DesiredSize.Width - total) / (count - 1);
+        var gap = (shaped - total) / (count - 1);
         for (var i = 0; i < word.Letters.Count; i++)
         {
             word.Letters[i].Element.Margin = i > 0 && i < count
@@ -2438,13 +2475,18 @@ internal sealed class LyricsPanel : IDisposable
         UpdateFrame();
     }
 
-    /// <summary>Stops following and painting without releasing the rows, for a panel that
+    /// <summary>Stops following and painting and releases the rows, for a panel that
     /// is only swapped out behind the other side panel. Coming back does not rebuild it.</summary>
     public void Suspend()
     {
         _visible = false;
-        _tween.Stop();
-        _needsGlide = false;
+        // A suspended panel keeps its timings (the song, the current line, the
+        // listener's scroll) but not its word surfaces. The drawer, Now Playing and
+        // the mini player each own one of these panels, and every hidden one holding
+        // a full copy of the song's words was the memory floor climbing with every
+        // panel the listener opened. Coming back rebuilds the rows behind the
+        // activation spinner, exactly as a panel whose song changed already does.
+        ReleaseRowsForClosedPanel();
         UpdateFrame();
     }
 
@@ -2459,7 +2501,6 @@ internal sealed class LyricsPanel : IDisposable
         _needsGlide = false;
         ReleaseGlows();
         ReturnAllRowWords();
-        CollectDisposedMasks(force: true);
         // The words just went back to the pool. A closed panel has no use for a whole
         // song's worth of native text surfaces: keep a small working set and let the
         // rest be collected, or every visit leaves the previous song parked in memory.
@@ -2473,6 +2514,11 @@ internal sealed class LyricsPanel : IDisposable
         _repaintFrom = -1;
         _repaintTo = -1;
         _needsFullPaint = true;
+        // Last, and only once everything the panel was holding is unreachable: the
+        // collection that follows the release is the whole point of closing. Running it
+        // earlier collected nothing - the words were still in the pool and the row
+        // hosts still in the tree, and the memory only ever came back much later.
+        CollectDisposedMasks(force: true);
     }
 
     /// <summary>Keeps the word pool from holding the biggest song ever heard for the
@@ -3984,15 +4030,18 @@ internal sealed class LyricsPanel : IDisposable
     /// private bytes before and after. The request file is created by the test script.</summary>
     private void CheckGcProbe()
     {
-        var request = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-gc-request");
-        if (!System.IO.File.Exists(request))
+        // Built once: this runs every frame while the probe is on, and a fresh pair of
+        // path strings plus a file probe per frame is measurement pollution.
+        _gcProbeRequestPath ??= System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), "koda-lyrics-gc-request");
+        if (!System.IO.File.Exists(_gcProbeRequestPath))
         {
             return;
         }
 
         try
         {
-            System.IO.File.Delete(request);
+            System.IO.File.Delete(_gcProbeRequestPath);
         }
         catch (Exception)
         {
@@ -4013,8 +4062,10 @@ internal sealed class LyricsPanel : IDisposable
 
         try
         {
+            _gcProbeLogPath ??= System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), "koda-lyrics-gc.txt");
             System.IO.File.AppendAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-gc.txt"),
+                _gcProbeLogPath,
                 $"{DateTime.Now:HH:mm:ss.fff} private={before / 1048576.0:F1}MB -> " +
                 $"{after / 1048576.0:F1}MB managed={managedBefore / 1048576.0:F1}MB -> " +
                 $"{managedAfter / 1048576.0:F1}MB gc0={GC.CollectionCount(0)} " +
