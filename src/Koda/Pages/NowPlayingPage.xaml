@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:helpers="using:Koda.Helpers"
     xmlns:controls="using:Koda.Controls"
+    NavigationCacheMode="Enabled"
     RequestedTheme="Dark">
     <Page.Resources>
         <!-- The cover breathes back when paused, like a record lifted off (Mac sibling). -->

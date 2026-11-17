@@ -108,6 +108,19 @@ internal sealed class LyricsPanel : IDisposable
     private const int RichRowsAfter = 4;
     private const int RichRowsRelease = 3;
 
+    /// <summary>Disposed masks that may pile up before a mid-playback collection runs.
+    /// The backlog is native surface memory that waits for a collection either way; a
+    /// rare collection costs the glide far less than a frequent one.</summary>
+    private const int MaskCollectionThreshold = 60;
+
+    /// <summary>How far apart mid-playback collections must stay, on the frame clock.</summary>
+    private const long MaskCollectionIntervalMs = 60_000;
+
+    /// <summary>How far apart the layout-pass transform probes may run while the panel
+    /// is otherwise unchanged. A glide arranges the panel every frame; the probe is for
+    /// a size event that never arrived, and a second is soon enough to catch one.</summary>
+    private const long LayoutProbeIntervalMs = 1_000;
+
     /// <summary>How far the hover box reaches past the text, as a part of the text size.</summary>
     private const double HoverBoxPad = 0.35;
 
@@ -196,6 +209,8 @@ internal sealed class LyricsPanel : IDisposable
     private int _masksDisposedSinceCollection;
     private int _collectionsForced;
     private int _masksCreated;
+    private long _lastMaskCollectionMs = -MaskCollectionIntervalMs;
+    private long _lastLayoutProbeMs;
     private int _glowsBuilt;
     private CubicBezierEasingFunction? _hoverEase;
     private ScalarKeyFrameAnimation? _hoverOpacityIn;
@@ -275,6 +290,9 @@ internal sealed class LyricsPanel : IDisposable
         public double MotionY { get; set; }
         /// <summary>The visual shift that keeps word gaps proportional to its scale.</summary>
         public double SpaceX { get; set; }
+        /// <summary>The row the word sits in, so a scale write can mark that row's spacing
+        /// compensation dirty without the caller having to know the row.</summary>
+        public Row? Owner { get; set; }
     }
 
     /// <summary>One letter of a held syllable: its own fill, wave and glow layers.</summary>
@@ -365,7 +383,24 @@ internal sealed class LyricsPanel : IDisposable
         public bool Hovered { get; set; }
         /// <summary>How opaque the row is: the one being sung is full, the rest step back.</summary>
         public double Opacity { get; set; } = 0.36;
+        /// <summary>Whether a word's scale or the row's layout changed since its word gaps
+        /// were last compensated. A resting row's shifts never change, so its compensation
+        /// is computed once instead of on every frame.</summary>
+        public bool SpacingDirty { get; set; } = true;
+        /// <summary>The word placements the spacing compensation reuses, so its pass
+        /// allocates nothing per frame.</summary>
+        public List<PlacedWord>? Placed { get; set; }
     }
+
+    /// <summary>One word's placement, as the spacing compensation reads it: the shift math
+    /// runs per visual row of words, over a buffer the row keeps between frames.</summary>
+    private readonly record struct PlacedWord(
+        Word Word,
+        double X,
+        double Y,
+        double Width,
+        double MarginLeft,
+        double MarginRight);
 
     public LyricsPanel(ScrollViewer scroll, StackPanel lines, DispatcherQueue queue)
     {
@@ -414,8 +449,11 @@ internal sealed class LyricsPanel : IDisposable
         _scroll.SizeChanged += (_, _) => RefreshLayout();
         // The pane collapse, a monitor move and a zoom change can all leave the scroll
         // viewer at a different size without a SizeChanged reaching us; every layout pass
-        // checks, and does nothing when the size is the same.
-        _scroll.LayoutUpdated += (_, _) => RefreshLayout();
+        // checks. The check is cheap, but the transform probe it asks for is not: a glide
+        // scrolls the panel every frame and each frame's arrange raised it, so the probe
+        // itself is throttled to a slow heartbeat. The strong signals (the size events,
+        // the XamlRoot change, the shell's relayout) still probe at once.
+        _scroll.LayoutUpdated += (_, _) => OnLayoutUpdated();
         // Now Playing is always dark; the inline drawer follows the app's theme.
         _scroll.ActualThemeChanged += OnActualThemeChanged;
     }
@@ -449,6 +487,34 @@ internal sealed class LyricsPanel : IDisposable
         {
             Paint();
         }
+    }
+
+    /// <summary>A layout pass ran, which the glide itself does every frame it scrolls.
+    /// The size check is cheap and always runs; the transform probe behind it is not, so
+    /// a missed size event is caught within a second rather than on every frame.</summary>
+    private void OnLayoutUpdated()
+    {
+        if (!_visible)
+        {
+            return;
+        }
+
+        if (Math.Abs(_scroll.ActualWidth - _panelWidth) < 0.5
+            && Math.Abs(_scroll.ActualHeight - _panelHeight) < 0.5)
+        {
+            // The size the panel already knows: nothing any pass can add. This is the
+            // fast path every glide frame takes.
+            return;
+        }
+
+        var now = _frameClock.ElapsedMilliseconds;
+        if (now - _lastLayoutProbeMs < LayoutProbeIntervalMs)
+        {
+            return;
+        }
+
+        _lastLayoutProbeMs = now;
+        RefreshLayout();
     }
 
     /// <summary>Reads the width and height the lyrics are actually given, not the last size
@@ -801,15 +867,19 @@ internal sealed class LyricsPanel : IDisposable
         _loaded = lyrics is { IsSynced: true };
         _pendingLyrics = lyrics;
 
+        if (lyrics is null)
+        {
+            // A clear is not a song change: the hosts empty the panel while the next
+            // song's words are still on their way, and the real load that follows
+            // collects once, after the old song's surfaces are already dropped. A
+            // collection here fired twice per song change for nothing.
+            return;
+        }
+
         // The previous song's rows, words, placeholders and masks were just dropped. Collect
         // after those references are gone, so the new song does not allocate on top of the
         // old song's native text and composition surfaces.
         ForceCollection();
-
-        if (lyrics is null)
-        {
-            return;
-        }
 
         if (lyrics.IsSynced)
         {
@@ -1072,6 +1142,12 @@ internal sealed class LyricsPanel : IDisposable
             : 0;
         start = Math.Clamp(start, 0, Math.Max(0, _rows.Count - 1));
         EnsureRichWindow(start);
+        if (!_allRowsRich)
+        {
+            // A windowed panel's rows collapse back into the pool as the song moves;
+            // the pool must not keep every word of the biggest song for its life.
+            TrimPools(400, 60);
+        }
     }
 
     /// <summary>The provider and people to credit, as the last thing with the words.
@@ -1213,6 +1289,7 @@ internal sealed class LyricsPanel : IDisposable
                 fontSize,
                 soft: false,
                 joinsPrevious: JoinsPrevious(line, wordIndex));
+            item.Owner = row;
             row.WordItems.Add(item);
             wrap.Add(item.Element, item.JoinsPrevious);
         }
@@ -1241,6 +1318,7 @@ internal sealed class LyricsPanel : IDisposable
             // Backing vocals are drawn at 70% of the sung line, a little lighter.
             var spoken = text == word.Text ? word : word with { Text = text };
             var item = TakeWord(spoken, fontSize * 0.7, soft: true, joinsPrevious: false);
+            item.Owner = row;
             row.BackgroundItems.Add(item);
             row.Background.Add(item.Element, joinsPrevious: false);
         }
@@ -1274,8 +1352,9 @@ internal sealed class LyricsPanel : IDisposable
         row.Background.RefreshPlacements();
         if (_renderer == LyricsRenderer.Expressive && _motion && _compensateSpacing)
         {
-            CompensateSpacing(row.WordItems, wrap);
-            CompensateSpacing(row.BackgroundItems, row.Background);
+            CompensateSpacing(row.WordItems, wrap, row);
+            CompensateSpacing(row.BackgroundItems, row.Background, row);
+            row.SpacingDirty = false;
         }
 
         row.Rich = true;
@@ -1685,9 +1764,12 @@ internal sealed class LyricsPanel : IDisposable
         {
             twin.Text = text;
             Shape(twin, fontSize, soft);
-            letter.MaskFontSize = fontSize;
-            letter.MaskSoft = soft;
         }
+
+        // Remembered even when the twin is absent: the twin is built lazily when the
+        // glow is wanted again, and it needs the size and weight the letter has now.
+        letter.MaskFontSize = fontSize;
+        letter.MaskSoft = soft;
 
         letter.Index = index;
         letter.Count = count;
@@ -2064,6 +2146,9 @@ internal sealed class LyricsPanel : IDisposable
         var lineWidth = Math.Max(0, _panelWidth - sidePad - endPad);
         foreach (var row in _rows)
         {
+            // Every word's size and placement just changed: the row's word gaps are
+            // compensated again on the next pass.
+            row.SpacingDirty = true;
             row.Host.Margin = new Thickness(0, _lineGap / 2, 0, _lineGap / 2);
             if (row.HoverBox is { } hoverBox)
             {
@@ -2238,6 +2323,9 @@ internal sealed class LyricsPanel : IDisposable
         var contentWidth = Math.Max(0, _panelWidth - sidePad - endPad);
         foreach (var row in _rows)
         {
+            // The wrap width just changed: every placement moves, so the row's word
+            // gaps are compensated again on the next pass.
+            row.SpacingDirty = true;
             if (row.Words is WordWrapPanel wrap)
             {
                 wrap.WrapWidth = contentWidth;
@@ -2372,6 +2460,10 @@ internal sealed class LyricsPanel : IDisposable
         ReleaseGlows();
         ReturnAllRowWords();
         CollectDisposedMasks(force: true);
+        // The words just went back to the pool. A closed panel has no use for a whole
+        // song's worth of native text surfaces: keep a small working set and let the
+        // rest be collected, or every visit leaves the previous song parked in memory.
+        TrimPools(64, 16);
         _lines.Children.Clear();
         _rows.Clear();
         _rowsBuilt = false;
@@ -2381,6 +2473,23 @@ internal sealed class LyricsPanel : IDisposable
         _repaintFrom = -1;
         _repaintTo = -1;
         _needsFullPaint = true;
+    }
+
+    /// <summary>Keeps the word pool from holding the biggest song ever heard for the
+    /// panel's whole life. The pool's purpose is reuse across songs while the panel is
+    /// open; a closed panel needs no more than a small working set, and the surplus's
+    /// native text surfaces can be collected instead of parked in the pool.</summary>
+    private void TrimPools(int keepPlain, int keepSplit)
+    {
+        if (_plainWordPool.Count > keepPlain)
+        {
+            _plainWordPool.RemoveRange(keepPlain, _plainWordPool.Count - keepPlain);
+        }
+
+        if (_splitWordPool.Count > keepSplit)
+        {
+            _splitWordPool.RemoveRange(keepSplit, _splitWordPool.Count - keepSplit);
+        }
     }
 
     /// <summary>Whether the song is playing. The panel only repaints while it is, so a
@@ -2618,17 +2727,21 @@ internal sealed class LyricsPanel : IDisposable
         {
             foreach (var row in _rows)
             {
-                if (!row.Rich)
+                // Only a row whose word scales (or layout) changed since its last pass
+                // recomputes its gaps. A resting row's shift is a constant; recomputing
+                // every row every frame cost more than the paint itself.
+                if (!row.Rich || !row.SpacingDirty)
                 {
                     continue;
                 }
 
+                row.SpacingDirty = false;
                 if (row.Words is WordWrapPanel words)
                 {
-                    CompensateSpacing(row.WordItems, words);
+                    CompensateSpacing(row.WordItems, words, row);
                 }
 
-                CompensateSpacing(row.BackgroundItems, row.Background);
+                CompensateSpacing(row.BackgroundItems, row.Background, row);
             }
         }
     }
@@ -2644,15 +2757,17 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Keeps the visual gap after each word proportional to its scale. A word's
     /// 0.95 rest scale is a composition transform, so the layout margin would otherwise
     /// stay full size and the spaces would open up. Translate each word to close the
-    /// difference; the layout itself is untouched.</summary>
-    private static void CompensateSpacing(IReadOnlyList<Word> words, WordWrapPanel panel)
+    /// difference; the layout itself is untouched. The placements are read into the row's
+    /// own buffer, so the pass allocates nothing per frame.</summary>
+    private static void CompensateSpacing(IReadOnlyList<Word> words, WordWrapPanel panel, Row row)
     {
         if (words.Count == 0)
         {
             return;
         }
 
-        var placed = new List<(Word Word, double X, double Y, double Width, double MarginLeft, double MarginRight)>(words.Count);
+        var placed = row.Placed ??= new List<PlacedWord>(words.Count);
+        placed.Clear();
         foreach (var word in words)
         {
             if (!panel.TryGetPlacement(word.Element, out var placement))
@@ -2667,7 +2782,7 @@ internal sealed class LyricsPanel : IDisposable
                 width = Math.Max(1, word.Element.DesiredSize.Width - margin.Left - margin.Right);
             }
 
-            placed.Add((word, placement.X + margin.Left, placement.Y, width, margin.Left, margin.Right));
+            placed.Add(new PlacedWord(word, placement.X + margin.Left, placement.Y, width, margin.Left, margin.Right));
         }
 
         var rightAligned = panel.AlignRight;
@@ -3239,6 +3354,9 @@ internal sealed class LyricsPanel : IDisposable
     private static void SetWordScale(Word word, double scale)
     {
         word.PaintedScale = scale;
+        // The spacing compensation is a function of each word's scale: only a row whose
+        // scale actually moved needs its word gaps recomputed this frame.
+        word.Owner?.SpacingDirty = true;
         ApplyScale(word.Visual, word.Element, scale, word.OriginX, word.OriginY);
     }
 
@@ -3399,19 +3517,34 @@ internal sealed class LyricsPanel : IDisposable
         _masksDisposedSinceCollection++;
     }
 
-    /// <summary>Swaps a letter's mask twin for a fresh element. GetAlphaMask may return the
-    /// same brush for the same element, so a disposed mask's twin must never be asked for
-    /// another one: the next mask comes from an element that has never handed one out.</summary>
-    private void ReplaceMaskTwin(Letter letter)
+    /// <summary>Takes a letter's mask twin out of the tree after its mask was disposed.
+    /// The twin is never reused: GetAlphaMask may hand the same, now-disposed brush back
+    /// for the same element. The fresh one is built by <see cref="EnsureMaskTwin"/> only
+    /// when the glow is wanted again - not on every release, which allocated a new native
+    /// text surface per letter each time a line left the glow window.</summary>
+    private void DropMaskTwin(Letter letter)
     {
-        if (letter.GlowHost is not { } host || letter.MaskWrapper is not { } old)
+        if (letter.MaskWrapper is { } old && letter.GlowHost is { } host)
+        {
+            host.Children.Remove(old);
+        }
+
+        letter.MaskText = null;
+        letter.MaskWrapper = null;
+        letter.NeedsMaskRefresh = true;
+    }
+
+    /// <summary>Gives a letter a fresh mask twin when its glow is wanted again. The twin
+    /// needs a layout pass before its alpha can be taken, so it is built one frame ahead
+    /// of the mask - exactly as a letter's first twin was at build time.</summary>
+    private void EnsureMaskTwin(Letter letter)
+    {
+        if (!_glowStaticMask || letter.MaskText is not null || letter.GlowHost is not { } host)
         {
             return;
         }
 
-        host.Children.Remove(old);
-        var (text, wrapper) = MakeMaskTwin(
-            letter.Text.Text, letter.MaskFontSize, letter.MaskSoft);
+        var (text, wrapper) = MakeMaskTwin(letter.Text.Text, letter.MaskFontSize, letter.MaskSoft);
         host.Children.Add(wrapper);
         letter.MaskText = text;
         letter.MaskWrapper = wrapper;
@@ -3449,6 +3582,16 @@ internal sealed class LyricsPanel : IDisposable
             return; // the first paint can run before the letter has a size
         }
 
+        if (_glowStaticMask && !_glowNoMask && letter.MaskText is null)
+        {
+            // The twin went with the mask when the glow was released: a fresh one must
+            // exist before any mask is taken, and it needs a layout pass before its
+            // alpha can be read, so its mask arrives a frame later. (Only the static-twin
+            // mode has twins; the other modes take the mask from the sharp letter.)
+            EnsureMaskTwin(letter);
+            return;
+        }
+
         if (!_glowNoMask && !MaskSourceHasSize(letter))
         {
             return; // a fresh twin is measured on the next layout pass
@@ -3460,7 +3603,8 @@ internal sealed class LyricsPanel : IDisposable
             // The font or size changed. Dispose the stale mask with its twin, then let
             // the layout measure the fresh twin before its alpha is taken.
             DisposeMask(letter);
-            ReplaceMaskTwin(letter);
+            DropMaskTwin(letter);
+            EnsureMaskTwin(letter);
             return;
         }
 
@@ -3528,9 +3672,11 @@ internal sealed class LyricsPanel : IDisposable
             // The font or size changed: the old mask is stale, and it may only be
             // disposed together with the twin that produced it.
             DisposeMask(letter);
-            ReplaceMaskTwin(letter);
+            DropMaskTwin(letter);
+            EnsureMaskTwin(letter);
         }
 
+        EnsureMaskTwin(letter);
         if (!MaskSourceHasSize(letter))
         {
             return; // the fresh twin is measured on the next layout pass
@@ -3574,11 +3720,12 @@ internal sealed class LyricsPanel : IDisposable
             if (letter.MaskWrapper is not null)
             {
                 // The letter is leaving the live window: dispose the mask together with
-                // the twin that produced it, then replace the twin. GetAlphaMask may hand
-                // the same brush back for the same element, and a closed brush breaks the
-                // glow; the next mask is taken from a new element.
+                // the twin that produced it, and drop the twin rather than replacing it.
+                // GetAlphaMask may hand the same brush back for the same element, so the
+                // next mask must come from a fresh element - built lazily when the glow
+                // is wanted again, not eagerly on every release.
                 DisposeMask(letter);
-                ReplaceMaskTwin(letter);
+                DropMaskTwin(letter);
             }
             else
             {
@@ -3667,10 +3814,13 @@ internal sealed class LyricsPanel : IDisposable
 
     /// <summary>Native text/composition surfaces are released by dropping their references,
     /// not by Dispose, so they wait for a collection a small managed heap rarely provokes.
-    /// After a seek's hold, a song change, or a few collapsed lyric rows, collect once.</summary>
+    /// Collect at most once a minute while playing, and only when a real backlog of masks
+    /// has piled up; the song change's own collection and the natural collections take the
+    /// rest. A mid-playback collection stalls the follow glide for a frame or two, so a
+    /// skip burst must not be able to fire one per few seconds.</summary>
     private void CollectDisposedMasks(bool force = false)
     {
-        if (!force && _masksDisposedSinceCollection < 30)
+        if (!force && _masksDisposedSinceCollection < MaskCollectionThreshold)
         {
             return;
         }
@@ -3678,6 +3828,17 @@ internal sealed class LyricsPanel : IDisposable
         if (_masksDisposedSinceCollection == 0)
         {
             return;
+        }
+
+        if (!force)
+        {
+            var now = _frameClock.ElapsedMilliseconds;
+            if (now - _lastMaskCollectionMs < MaskCollectionIntervalMs)
+            {
+                return;
+            }
+
+            _lastMaskCollectionMs = now;
         }
 
         ForceCollection();
@@ -3790,13 +3951,31 @@ internal sealed class LyricsPanel : IDisposable
                 continue;
             }
 
-            if (letter.Text.ActualWidth < 0.5 || letter.Text.ActualHeight < 0.5
-                || !MaskSourceHasSize(letter))
+            if (letter.Text.ActualWidth < 0.5 || letter.Text.ActualHeight < 0.5)
+            {
+                continue;
+            }
+
+            // A letter with no twin yet goes straight to EnsureGlow, which builds the
+            // twin and waits a layout pass; the mask follows on a later warmup tick or
+            // the first painted frame, exactly as a fresh letter's first glow did.
+            if (letter.MaskText is not null && !MaskSourceHasSize(letter))
             {
                 continue;
             }
 
             EnsureGlow(letter);
+            if (letter.GlowVisual is null && letter.GlowWanted && !letter.GlowDone)
+            {
+                // The pass only built the letter's fresh mask twin; its alpha needs a
+                // layout pass first. Come back next frame for the mask itself, or a
+                // glow that was freed and re-armed pops in at the frame it starts.
+                if (_glowWarmupSet.Add(letter))
+                {
+                    _glowWarmup.Enqueue(letter);
+                }
+            }
+
             return;
         }
     }
