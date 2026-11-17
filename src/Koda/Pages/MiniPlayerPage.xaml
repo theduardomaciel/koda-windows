@@ -156,12 +156,10 @@
             </Grid>
 
             <!-- The expanded card: the words or the queue, between the track strip and the
-                 transport. Zero height and hidden while the card is compact. The panes give
-                 up the drawer chrome (surface, header, row insets) because the card provides
-                 it, so their content lines up with the cover. -->
+                 transport. Zero height and hidden while the card is compact. -->
             <Grid x:Name="PanelHost" Grid.Row="1" Margin="0,6,0,0" Visibility="Collapsed">
-                <controls:InlineLyricsPane x:Name="LyricsPane" CompactChrome="True" />
-                <controls:InlineQueuePane x:Name="QueuePane" CompactChrome="True" Visibility="Collapsed" />
+                <controls:InlineLyricsPane x:Name="LyricsPane" />
+                <controls:InlineQueuePane x:Name="QueuePane" Visibility="Collapsed" />
             </Grid>
 
             <!-- Current time, the same default Slider the player bar uses,
