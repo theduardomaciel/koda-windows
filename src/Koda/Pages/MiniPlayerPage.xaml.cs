@@ -95,6 +95,19 @@ public sealed partial class MiniPlayerPage : Page
 
         Scrubbing.Attach(Progress, on => _scrubbing = on, Playback.SeekSeconds);
 
+        // The default thumb paints a 22 DIP circle out of an 18 DIP box with a -2 DIP
+        // margin, and WinUI clips that overflow at the thumb's own bounds
+        // (microsoft/microsoft-ui-xaml#11142): the knob reads as a rounded square, flat
+        // where it meets the track's ends. Drawing the circle inside the box removes it.
+        Progress.Loaded += (_, _) =>
+        {
+            if (Descendant<Thumb>(Progress) is { } thumb
+                && VisualTreeHelper.GetChild(thumb, 0) is Border knob)
+            {
+                knob.Margin = new Thickness(0);
+            }
+        };
+
         RenderTrack();
         RenderPlayState();
         RenderPosition();
@@ -424,5 +437,26 @@ public sealed partial class MiniPlayerPage : Page
         var minutes = total % 3600 / 60;
         var secs = total % 60;
         return hours > 0 ? $"{hours}:{minutes:D2}:{secs:D2}" : $"{minutes}:{secs:D2}";
+    }
+
+    /// <summary>The first descendant of a type, depth first: the slider's thumb is a
+    /// template part, so this is how the page reaches into it.</summary>
+    private static T? Descendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match)
+            {
+                return match;
+            }
+
+            if (Descendant<T>(child) is { } deeper)
+            {
+                return deeper;
+            }
+        }
+
+        return null;
     }
 }

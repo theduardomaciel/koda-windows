@@ -180,14 +180,10 @@
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     AutomationProperties.Name="Elapsed time" />
 
-                <!-- The default thumb paints a 2 DIP halo past its 18 DIP box. With the
-                     slider flush to its column, that halo was clipped at 0:00 and at the
-                     end of the song; the padding keeps the whole circle inside. -->
                 <Slider
                     x:Name="Progress"
                     Grid.Column="1"
                     VerticalAlignment="Center"
-                    Padding="2,0"
                     Minimum="0"
                     Maximum="1"
                     IsThumbToolTipEnabled="False"

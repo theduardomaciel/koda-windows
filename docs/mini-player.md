@@ -219,3 +219,17 @@ pane and the mini player compose the body with their own chrome.
 The current `UseCompactChrome()` is the smallest thing that works for two hosts.
 If the mode ever needs to be toggled, the property in **A** is the next step; if a
 third host needs a different composition, **C** is the one to take.
+
+## Slider thumb
+
+The default WinUI slider thumb paints a 22 DIP circle out of an 18 DIP box using a
+-2 DIP margin, and WinUI clips that overflow at the thumb's own bounds
+([microsoft-ui-xaml#11142](https://github.com/microsoft/microsoft-ui-xaml/issues/11142)).
+The clip is layout-rounding dependent, so it appears at some widths and DPIs and
+not at others — it showed at the mini card's fitted widths even though the same
+slider looked fine when the card was 450 DIP wide.
+
+`MiniPlayerPage` removes the overflow once the template has loaded: the thumb's
+outer border loses its -2 DIP margin, so the knob is drawn inside its box and
+there is nothing to clip at any width. The knob is 18 DIP instead of 22 — the
+price of staying inside the bounds WinUI clips to.
