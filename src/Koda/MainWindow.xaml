@@ -102,11 +102,14 @@
                 <!-- The page area and its lyrics drawer. SplitView pushes the page aside
                      when there is room and floats the drawer above it when the window is
                      narrow; the player bar below stays the full width either way, so the
-                     transport never loses its controls to the panel. -->
+                     transport never loses its controls to the panel. CompactInline with a
+                     zero compact length uses the framework's compact-right transition: the
+                     page takes its new width at once and only the pane's clip animates,
+                     unlike Inline-right, which slides the whole page sideways first. -->
                 <SplitView
                     x:Name="LyricsDrawer"
                     Grid.Row="0"
-                    DisplayMode="Inline"
+                    DisplayMode="CompactInline"
                     PanePlacement="Right"
                     OpenPaneLength="380"
                     CompactPaneLength="0"

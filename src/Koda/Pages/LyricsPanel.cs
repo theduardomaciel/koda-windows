@@ -2779,7 +2779,8 @@ internal sealed class LyricsPanel : IDisposable
         else
         {
             var index = current.Value;
-            if (index + 1 < _lyricLines.Count &&
+            if (index >= 0 && index < _rows.Count &&
+                index + 1 < _lyricLines.Count &&
                 _lyricLines[index].End is { } end &&
                 _lyricLines[index + 1].Time - end >= InterludeSeconds &&
                 time > end + 0.3)

@@ -1358,7 +1358,7 @@ public sealed partial class MainWindow : Window
 
         var sidebar = Nav.IsPaneOpen ? Nav.OpenPaneLength : Nav.CompactPaneLength;
         var inline = width - sidebar - LyricsDrawer.OpenPaneLength >= InlineLyricsPageWidth;
-        var mode = inline ? SplitViewDisplayMode.Inline : SplitViewDisplayMode.Overlay;
+        var mode = inline ? SplitViewDisplayMode.CompactInline : SplitViewDisplayMode.Overlay;
         if (LyricsDrawer.DisplayMode == mode)
         {
             return;
