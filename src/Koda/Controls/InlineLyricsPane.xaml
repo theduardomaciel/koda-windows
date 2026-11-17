@@ -35,8 +35,8 @@
                 <Button
                     x:Name="CloseButton"
                     Style="{StaticResource PaneGlyphButton}"
-                    Width="40"
-                    Height="40"
+                    Width="36"
+                    Height="36"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
                     Click="OnCloseClick"
