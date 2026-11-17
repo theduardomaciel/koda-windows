@@ -34,6 +34,11 @@ public sealed partial class MiniPlayerPage : Page
     /// <summary>Whether the card has grown past its compact height.</summary>
     private bool _expanded;
 
+    /// <summary>The seek knob's size, in DIP: between the default thumb's clipped 22 DIP
+    /// halo and the 18 DIP box WinUI clips to. The thumb's box is resized to it, so the
+    /// knob is drawn inside the bounds and nothing is cut.</summary>
+    private const double SeekKnobSize = 20;
+
     /// <summary>The compact track row's measured height. The collapsed card leaves a few
     /// pixels of slack around the cover; the expanded card freezes this height so the cover
     /// and the title do not move when the panel opens.</summary>
@@ -98,13 +103,17 @@ public sealed partial class MiniPlayerPage : Page
         // The default thumb paints a 22 DIP circle out of an 18 DIP box with a -2 DIP
         // margin, and WinUI clips that overflow at the thumb's own bounds
         // (microsoft/microsoft-ui-xaml#11142): the knob reads as a rounded square, flat
-        // where it meets the track's ends. Drawing the circle inside the box removes it.
+        // where it meets the track's ends. Enlarging the box to the knob's size and
+        // drawing it inside leaves nothing to clip, at any width or DPI.
         Progress.Loaded += (_, _) =>
         {
             if (Descendant<Thumb>(Progress) is { } thumb
                 && VisualTreeHelper.GetChild(thumb, 0) is Border knob)
             {
+                thumb.Width = SeekKnobSize;
+                thumb.Height = SeekKnobSize;
                 knob.Margin = new Thickness(0);
+                knob.CornerRadius = new CornerRadius(SeekKnobSize / 2);
             }
         };
 

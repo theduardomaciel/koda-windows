@@ -229,7 +229,8 @@ The clip is layout-rounding dependent, so it appears at some widths and DPIs and
 not at others — it showed at the mini card's fitted widths even though the same
 slider looked fine when the card was 450 DIP wide.
 
-`MiniPlayerPage` removes the overflow once the template has loaded: the thumb's
-outer border loses its -2 DIP margin, so the knob is drawn inside its box and
-there is nothing to clip at any width. The knob is 18 DIP instead of 22 — the
-price of staying inside the bounds WinUI clips to.
+`MiniPlayerPage` removes the overflow once the template has loaded: the thumb's box
+is resized to `SeekKnobSize` (20 DIP — between the default's clipped 22 and the
+18 the box would otherwise allow) and its outer border loses the -2 DIP margin,
+with a corner radius of half the size so it stays a circle. The knob is drawn
+inside the bounds WinUI clips to, so nothing is cut at any width or DPI.
