@@ -111,6 +111,10 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         Header.Visibility = Visibility.Collapsed;
         // The card's own padding is the gutter: the words line up with the cover above.
         LyricsScroll.Margin = new Thickness(0);
+        // The drawer's loading wash is solid; over Mica it reads as a gray block.
+        Preparing.Background = null;
+        // The lines keep only the room the hover box needs, not the full glow pads.
+        _lyrics.CompactInsets = true;
     }
 
     /// <summary>Puts the words on screen and starts them following the song. Called when

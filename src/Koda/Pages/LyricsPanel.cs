@@ -577,6 +577,11 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Where the song is, read live: the panel asks every frame.</summary>
     public Func<double>? PositionSource { get; set; }
 
+    /// <summary>A compact host's tighter horizontal inset. When set, the lines keep just
+    /// enough room for the hover box instead of the 18/24 glow pads Now Playing and the
+    /// drawer use. Set it before the panel fills.</summary>
+    public bool CompactInsets { get; set; }
+
     /// <summary>The listener's correction for this song, in seconds.</summary>
     public double Offset
     {
@@ -2048,8 +2053,7 @@ internal sealed class LyricsPanel : IDisposable
     /// (a narrower window, a DPI change or UI zoom), keeping the same elements.</summary>
     private void Reshape()
     {
-        var sidePad = Math.Max(18, _fontSize * 0.5);
-        var endPad = Math.Max(24, sidePad);
+        var (sidePad, endPad) = TextInsets();
         _lines.Margin = new Thickness(sidePad, 0, endPad, 0);
         var lineWidth = Math.Max(0, _panelWidth - sidePad - endPad);
         foreach (var row in _rows)
@@ -2195,6 +2199,20 @@ internal sealed class LyricsPanel : IDisposable
         _hoverScaleOut.Duration = TimeSpan.FromMilliseconds(300);
     }
 
+    /// <summary>The line's left and right insets: the glow pads by default, or the hover
+    /// box's reach in a compact host.</summary>
+    private (double Side, double End) TextInsets()
+    {
+        if (CompactInsets)
+        {
+            var pad = Math.Max(10, _fontSize * HoverBoxPad);
+            return (pad, pad);
+        }
+
+        var side = Math.Max(18, _fontSize * 0.5);
+        return (side, Math.Max(24, side));
+    }
+
     /// <summary>Gives every word panel the width to wrap against, and the line-timed text
     /// the width to wrap inside. Called from the width the scroll viewer actually has.</summary>
     private void ApplyTextWidth()
@@ -2204,8 +2222,7 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
-        var sidePad = Math.Max(18, _fontSize * 0.5);
-        var endPad = Math.Max(24, sidePad);
+        var (sidePad, endPad) = TextInsets();
         _lines.Margin = new Thickness(sidePad, 0, endPad, 0);
         var contentWidth = Math.Max(0, _panelWidth - sidePad - endPad);
         foreach (var row in _rows)

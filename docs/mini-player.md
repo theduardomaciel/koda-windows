@@ -22,6 +22,7 @@ on. The short version:
 | `FitCardWidth` | Same | Picks the width for the display (see the formula below). |
 | `_widthFit` timer | Same | Re-fits the card 250 ms after a move to another display settles. |
 | Track strip, panel, seek bar, controls | `src/Koda/Pages/MiniPlayerPage.xaml` | Row heights add up to the window size; the panel row is `0` until expanded. |
+| `CompactInsets` | `src/Koda/Pages/LyricsPanel.cs` | Compact hosts replace the 18/24 DIP glow pads with the hover box's reach. |
 
 In compact chrome the panes drop their own horizontal insets: the card's 16 DIP
 padding is the gutter, so lyric lines and queue rows start at the same x as the
@@ -144,9 +145,16 @@ itself, so `MiniPlayerPage` calls `UseCompactChrome()` on both panes once, befor
 they are shown.
 
 The method drops the surface, divider, header/tabs/close row and the horizontal
-insets. The queue also swaps `CatalogRowStyle` for its local
-`CompactQueueRowStyle` (`Padding="0"`), and the lyrics `ScrollViewer` drops its
-10 DIP margin, so both start at the card's 16 DIP gutter, in line with the cover.
+insets. The queue swaps `CatalogRowStyle` for its local
+`CompactQueueRowStyle` (`Padding="0"`). The lyrics `ScrollViewer` drops its 10 DIP
+margin and the panel's `CompactInsets` flag replaces the 18/24 DIP glow pads with
+the hover box's reach (`max(10, fontSize × 0.35)`). Both panes therefore start
+near the card's 16 DIP gutter, in line with the cover.
+
+It also clears the loading overlay's (`Preparing`) solid surface background. The
+drawer uses that wash to hide the panel behind it, but over the mini player's Mica
+it reads as a gray block; in the card the backdrop shows through while the words
+load.
 
 This is intentionally imperative: the compact mode is permanent for the lifetime
 of the mini player window, the call happens once before layout, and the panes are
