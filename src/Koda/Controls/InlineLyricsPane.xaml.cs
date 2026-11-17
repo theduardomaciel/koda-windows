@@ -100,6 +100,17 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         Loaded += (_, _) => LyricsFade.Apply(LyricsView, LyricsMaskedContent, LyricsMask, ref _masked);
     }
 
+    /// <summary>Drops the drawer's own chrome for a host that provides it: no side divider,
+    /// no surface of its own, and no header, so the words fill the whole panel. The expanded
+    /// mini player hosts the body under its own track strip and controls.</summary>
+    public void UseCompactChrome()
+    {
+        Surface.Background = null;
+        Surface.BorderThickness = new Thickness(0);
+        HeaderRow.Height = new GridLength(0);
+        Header.Visibility = Visibility.Collapsed;
+    }
+
     /// <summary>Puts the words on screen and starts them following the song. Called when
     /// the drawer opens, and again when it is shown after Now Playing or a video.</summary>
     public void Activate(bool animate = true)

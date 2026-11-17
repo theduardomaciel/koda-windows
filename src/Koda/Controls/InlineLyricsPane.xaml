@@ -17,16 +17,17 @@
          The panel follows the song exactly as Now Playing's does, but it follows the
          app's light and dark themes instead of the player's fixed dark surface. -->
     <Border
+        x:Name="Surface"
         Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
         BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
         BorderThickness="1,0,0,0">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="48" />
+                <RowDefinition x:Name="HeaderRow" Height="48" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Grid Padding="16,0,8,0">
+            <Grid x:Name="Header" Padding="16,0,8,0">
                 <TextBlock
                     Text="Lyrics"
                     VerticalAlignment="Center"

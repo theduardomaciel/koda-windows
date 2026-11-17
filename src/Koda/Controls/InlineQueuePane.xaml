@@ -58,17 +58,18 @@
     <!-- The queue drawer: the same right-side surface as the lyrics, with the two views
          Apple Music offers — what plays next and what has played. -->
     <Border
+        x:Name="Surface"
         Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
         BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
         BorderThickness="1,0,0,0">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
+                <RowDefinition x:Name="TabsRow" Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Grid Padding="12,8,12,4" ColumnSpacing="8">
+            <Grid x:Name="Tabs" Padding="12,8,12,4" ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />

@@ -15,8 +15,10 @@ namespace Koda.Pages;
 
 /// <summary>
 /// The compact overlay's surface: the cover, what is playing, the seek bar, and the few
-/// controls a window this size needs. It follows the player like the bar does, and its way
-/// out is the full Now Playing page, because Windows already gives the overlay a close button.
+/// controls a window this size needs. It follows the player like the bar does. The lyrics
+/// and queue buttons grow the card into a taller panel that hosts their words and list
+/// directly, instead of leaving for the full Now Playing page; the caption's expand button
+/// is still the way there, because Windows already gives the overlay a close button.
 /// </summary>
 public sealed partial class MiniPlayerPage : Page
 {
@@ -26,9 +28,22 @@ public sealed partial class MiniPlayerPage : Page
     private bool _volumeDirty;
     private DispatcherQueueTimer? _volumeSave;
 
+    /// <summary>The side panel in the expanded card: <c>"lyrics"</c>, <c>"queue"</c>, or null.</summary>
+    private string? _panel;
+
+    /// <summary>Whether the card has grown past its compact height.</summary>
+    private bool _expanded;
+
+    /// <summary>Raised when the card should grow for a side panel, or shrink back. The
+    /// window owns the size; the page only decides what is shown in it.</summary>
+    public event Action<bool>? ExpandedChanged;
+
     /// <summary>Raised when the listener asks for the full player. The argument is the
     /// panel to open there: <c>"lyrics"</c>, <c>"queue"</c>, or null for the player itself.</summary>
     public event Action<string?>? FullPlayerRequested;
+
+    /// <summary>The panel the expanded card is showing, for the full-player handoff.</summary>
+    public string? OpenPanel => _panel;
 
     /// <summary>The title bar the window hands to Windows as its drag region.</summary>
     public TitleBar TitleBarControl => MiniTitleBar;
@@ -39,6 +54,25 @@ public sealed partial class MiniPlayerPage : Page
     {
         InitializeComponent();
         Attach();
+
+        // The panel bodies normally draw the main window's drawer chrome: a surface and a
+        // header of their own. In the card that chrome is the card's, so they give it up.
+        LyricsPane.UseCompactChrome();
+        QueuePane.UseCompactChrome();
+        LyricsPane.CloseRequested += OnPanelCloseRequested;
+        QueuePane.CloseRequested += OnPanelCloseRequested;
+
+        // Esc puts the panel away first; Windows owns the way out of the overlay itself.
+        var escape = new KeyboardAccelerator { Key = Windows.System.VirtualKey.Escape };
+        escape.Invoked += (_, args) =>
+        {
+            if (_expanded)
+            {
+                Collapse();
+                args.Handled = true;
+            }
+        };
+        KeyboardAccelerators.Add(escape);
 
         _volumeSave = DispatcherQueue.CreateTimer();
         _volumeSave.Interval = TimeSpan.FromMilliseconds(300);
@@ -104,6 +138,11 @@ public sealed partial class MiniPlayerPage : Page
         {
             _volumeSave?.Stop();
         }
+
+        LyricsPane.CloseRequested -= OnPanelCloseRequested;
+        QueuePane.CloseRequested -= OnPanelCloseRequested;
+        LyricsPane.Dispose();
+        QueuePane.Deactivate();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e) => Detach();
@@ -121,6 +160,12 @@ public sealed partial class MiniPlayerPage : Page
     private void RenderTrack()
     {
         var song = Playback.CurrentSong;
+        if (song is null && _expanded)
+        {
+            // The words and the queue have nothing to say without a song.
+            Collapse();
+        }
+
         TitleText.Text = song?.Title ?? "Nothing playing";
         ArtistText.Text = song?.ArtistLine ?? "";
         Art.SetSource(CoverImage, song?.Artwork);
@@ -241,13 +286,100 @@ public sealed partial class MiniPlayerPage : Page
 
     private void OnNextClick(object sender, RoutedEventArgs e) => _ = Playback.NextAsync();
 
-    private void OnLyricsClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke("lyrics");
+    private void OnLyricsClick(object sender, RoutedEventArgs e) => TogglePanel("lyrics");
 
-    private void OnQueueClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke("queue");
+    private void OnQueueClick(object sender, RoutedEventArgs e) => TogglePanel("queue");
 
-    private void OnRestoreClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
+    private void OnPanelCloseRequested() => Collapse();
 
-    private void OnRestoreTapped(object sender, DoubleTappedRoutedEventArgs e) => FullPlayerRequested?.Invoke(null);
+    /// <summary>Opens one side panel in the taller card, swaps to the other, or closes the
+    /// one already showing when its own button is pressed again.</summary>
+    private void TogglePanel(string panel)
+    {
+        if (_panel == panel)
+        {
+            Collapse();
+            return;
+        }
+
+        var grow = !_expanded;
+        _expanded = true;
+        // Set before asking the window to grow: if the shell refuses the taller overlay,
+        // the window falls back to the full player and needs to know what to open there.
+        _panel = panel;
+        if (grow)
+        {
+            ExpandedChanged?.Invoke(true);
+            if (!_attached)
+            {
+                return; // the overlay fell back to the full player and closed
+            }
+        }
+
+        ApplyPanel();
+    }
+
+    /// <summary>Shrinks back to the compact card, keeping it where the listener left it.</summary>
+    private void Collapse()
+    {
+        if (!_expanded)
+        {
+            return;
+        }
+
+        _panel = null;
+        _expanded = false;
+        // Hide the words before the window gets shorter, so nothing is squeezed.
+        ApplyPanel();
+        ExpandedChanged?.Invoke(false);
+    }
+
+    /// <summary>Puts the open panel in the card, or returns it to the compact rows.</summary>
+    private void ApplyPanel()
+    {
+        var open = _panel is not null;
+
+        TrackRow.Height = open ? new GridLength(80) : new GridLength(1, GridUnitType.Star);
+        PanelRow.Height = open ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        PanelHost.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+
+        var lyrics = _panel is "lyrics";
+        var queue = _panel is "queue";
+        LyricsPane.Visibility = lyrics ? Visibility.Visible : Visibility.Collapsed;
+        QueuePane.Visibility = queue ? Visibility.Visible : Visibility.Collapsed;
+        LyricsButton.IsChecked = lyrics;
+        QueueButton.IsChecked = queue;
+        SetPanelButtonLabel(LyricsButton, "lyrics", lyrics);
+        SetPanelButtonLabel(QueueButton, "queue", queue);
+
+        if (lyrics)
+        {
+            QueuePane.Deactivate();
+            LyricsPane.Activate(animate: true);
+        }
+        else if (queue)
+        {
+            // Keep the words for a switch back; they are off screen meanwhile.
+            LyricsPane.Suspend();
+            QueuePane.Activate();
+        }
+        else
+        {
+            LyricsPane.Deactivate();
+            QueuePane.Deactivate();
+        }
+    }
+
+    private static void SetPanelButtonLabel(ToggleButton button, string panel, bool open)
+    {
+        var label = open ? $"Hide {panel}" : $"Show {panel}";
+        ToolTipService.SetToolTip(button, label);
+        AutomationProperties.SetName(button, label);
+    }
+
+    private void OnRestoreClick(object sender, RoutedEventArgs e) => FullPlayerRequested?.Invoke(_panel);
+
+    private void OnRestoreTapped(object sender, DoubleTappedRoutedEventArgs e) => FullPlayerRequested?.Invoke(_panel);
 
     /// <summary>The title bar's right header is measured after the bar itself, so its
     /// passthrough area must be recomputed once the loaded layout is complete.</summary>

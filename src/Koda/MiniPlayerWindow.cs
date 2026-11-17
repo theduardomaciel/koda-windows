@@ -15,16 +15,21 @@ namespace Koda;
 /// The mini player as Windows knows it: a compact overlay, the same picture-in-picture
 /// surface video apps use, so it floats above other windows with the system's own frame
 /// and can be moved where the listener wants it. It is a second window, not a restyle of
-/// the main one, so the library stays open behind it.
+/// the main one, so the library stays open behind it. The lyrics and queue grow it into a
+/// taller card and collapsing returns it, at the same spot, to the compact one.
 /// </summary>
 public sealed class MiniPlayerWindow : Window
 {
     private const double CardWidth = 450;
-    private const double CardHeight = 200; // 187.5 to keep the old proportion
+    private const double CardHeight = 200;
+    private const double ExpandedCardHeight = 620;
 
     private readonly MiniPlayerPage _page;
     private bool _customTitleBar;
     private bool _frameApplied;
+
+    /// <summary>Where the compact card sat before it grew, so collapsing puts it back.</summary>
+    private PointInt32 _compactPosition;
 
     public MiniPlayerWindow()
     {
@@ -81,9 +86,11 @@ public sealed class MiniPlayerWindow : Window
             PaintCaptionButtons();
         };
 
+        _page.ExpandedChanged += OnExpandedChanged;
         _page.FullPlayerRequested += OnFullPlayerRequested;
         Closed += (_, _) =>
         {
+            _page.ExpandedChanged -= OnExpandedChanged;
             _page.FullPlayerRequested -= OnFullPlayerRequested;
             _page.Detach();
         };
@@ -92,15 +99,10 @@ public sealed class MiniPlayerWindow : Window
     /// <summary>The window handle, for the DPI-aware size.</summary>
     private nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
 
-    /// <summary>The card's size in effective pixels, scaled to the monitor's DPI.</summary>
+    /// <summary>The card's compact size in effective pixels, scaled to the monitor's DPI.</summary>
     private void ResizeCard()
     {
-        var scale = Win32.GetDpiForWindow(Handle) / 96.0;
-        if (!double.IsFinite(scale) || scale <= 0)
-        {
-            scale = 1;
-        }
-
+        var scale = DpiScale();
         try
         {
             AppWindow.Resize(new SizeInt32(
@@ -110,6 +112,76 @@ public sealed class MiniPlayerWindow : Window
         catch (Exception)
         {
             // The preset is a perfectly good mini player if the shell refuses the size.
+        }
+    }
+
+    private double DpiScale()
+    {
+        var scale = Win32.GetDpiForWindow(Handle) / 96.0;
+        return double.IsFinite(scale) && scale > 0 ? scale : 1;
+    }
+
+    /// <summary>Grows or shrinks the card for the page's side panel. If the shell refuses
+    /// the taller overlay, the panel opens in the full player instead, as it used to.</summary>
+    private void OnExpandedChanged(bool expanded)
+    {
+        if (TryResizeCard(expanded) || !expanded)
+        {
+            return;
+        }
+
+        var panel = _page.OpenPanel;
+        Close();
+        App.Shell?.ShowNowPlaying(panel);
+    }
+
+    /// <summary>Resizes the card for the expanded panel, keeping the window on its screen.
+    /// The card grows upward when the taller version would run past the work area, so an
+    /// overlay parked near the taskbar keeps its panel in view.</summary>
+    private bool TryResizeCard(bool expanded)
+    {
+        try
+        {
+            var scale = DpiScale();
+            var width = (int)Math.Round(CardWidth * scale);
+            var height = (int)Math.Round((expanded ? ExpandedCardHeight : CardHeight) * scale);
+
+            if (DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest) is not { } area)
+            {
+                return false;
+            }
+
+            var work = area.WorkArea;
+            height = Math.Min(height, work.Height);
+
+            int x;
+            int y;
+            if (expanded)
+            {
+                // Remember the compact spot now, before the card moves or grows.
+                _compactPosition = AppWindow.Position;
+                x = _compactPosition.X;
+                // Keep the top where it is while the taller card fits; otherwise the bottom
+                // edge stays put and the card grows upward.
+                y = Math.Clamp(_compactPosition.Y, work.Y, work.Y + work.Height - height);
+            }
+            else
+            {
+                x = _compactPosition.X;
+                y = _compactPosition.Y;
+            }
+
+            // A display change or a moved card can leave the remembered spot outside the work
+            // area; the card always comes back fully on screen.
+            x = Math.Clamp(x, work.X, Math.Max(work.X, work.X + work.Width - width));
+            y = Math.Clamp(y, work.Y, Math.Max(work.Y, work.Y + work.Height - height));
+
+            AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 

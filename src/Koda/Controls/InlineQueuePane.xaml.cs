@@ -37,6 +37,18 @@ public sealed partial class InlineQueuePane : UserControl
         Loaded += OnLoaded;
     }
 
+    /// <summary>Drops the drawer's own chrome for a host that provides it: no side divider,
+    /// no surface of its own, and no tab or close rows, leaving the Playing Next list under
+    /// a slim Clear/Autoplay bar. History stays a drawer-only view.</summary>
+    public void UseCompactChrome()
+    {
+        Surface.Background = null;
+        Surface.BorderThickness = new Thickness(0);
+        Tabs.Visibility = Visibility.Collapsed;
+        TabsRow.Height = new GridLength(0);
+        CloseButton.Visibility = Visibility.Collapsed;
+    }
+
     public void Activate()
     {
         if (!_active)
