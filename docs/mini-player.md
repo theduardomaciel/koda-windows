@@ -164,6 +164,12 @@ covered the right edge of the hover box and made a duet's right-aligned line loo
 offset even though the line insets were symmetric. Wheel, touch and keyboard
 scrolling still work, and Now Playing keeps its own scrollbar.
 
+The hover box follows the line's visible width. `WordWrapPanel` drops the trailing
+word gap at the end of each visual row, so a right-aligned duet line ends its glyphs
+on the row edge and the box's padding stays the same on both sides. Without that,
+the widest row carried the space that would have separated its last word from the
+next, and the hover box gained a few DIP of padding on the right.
+
 The loading overlay's (`Preparing`) solid surface background is cleared only for
 the mini. The drawer uses that wash to hide the panel behind it, but over the mini
 player's Mica it reads as a gray block; in the card the backdrop shows through

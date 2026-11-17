@@ -61,8 +61,14 @@ internal sealed class WordWrapPanel : Panel
 
     private bool _alignRight;
 
-    /// <summary>The room kept clear on the right for the scrollbar.</summary>
+    /// <summary>The space kept clear on the right for the scrollbar.</summary>
     public double Inset { get; set; } = 24;
+
+    /// <summary>The empty space after the last word of a visual row. Right-aligned rows
+    /// ignore it when they end at the row edge, so the glyphs and the hover box's padding
+    /// stay symmetric instead of carrying a trailing word gap on the right.</summary>
+    private static double TrailingGap(UIElement child) =>
+        child is FrameworkElement element ? element.Margin.Right : 0;
 
     public void Add(FrameworkElement child, bool joinsPrevious)
     {
@@ -130,7 +136,9 @@ internal sealed class WordWrapPanel : Panel
                 continue;
             }
 
-            var x = AlignRight ? Math.Max(0, right - rowWidth) : 0;
+            var x = AlignRight
+                ? Math.Max(0, right - (rowWidth - (unit > 0 ? TrailingGap(Children[unit - 1]) : 0)))
+                : 0;
             for (var placed = rowStart; placed < unit; placed++)
             {
                 var (childStart, count, _, _) = units[placed];
@@ -180,6 +188,9 @@ internal sealed class WordWrapPanel : Panel
 
             if (x > 0 && x + unitWidth > limit)
             {
+                // The row ends with the word before this unit. Its trailing gap is empty,
+                // so it must not widen the panel (and the hover box behind the line).
+                widest = Math.Max(widest, x - (start > 0 ? TrailingGap(Children[start - 1]) : 0));
                 y += rowHeight + RowSpacing;
                 x = 0;
                 rowHeight = 0;
@@ -187,7 +198,11 @@ internal sealed class WordWrapPanel : Panel
 
             x += unitWidth;
             rowHeight = Math.Max(rowHeight, unitHeight);
-            widest = Math.Max(widest, x);
+        }
+
+        if (Children.Count > 0)
+        {
+            widest = Math.Max(widest, x - TrailingGap(Children[Children.Count - 1]));
         }
 
         return new Size(
@@ -242,7 +257,8 @@ internal sealed class WordWrapPanel : Panel
     /// line belongs on the right.</summary>
     private void PlaceRow(int start, int end, double width, double height, double y, double right)
     {
-        var x = AlignRight ? Math.Max(0, right - width) : 0;
+        var trailing = end > start ? TrailingGap(Children[end - 1]) : 0;
+        var x = AlignRight ? Math.Max(0, right - (width - trailing)) : 0;
         for (var part = start; part < end; part++)
         {
             var size = Children[part].DesiredSize;
