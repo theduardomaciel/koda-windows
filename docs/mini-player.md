@@ -134,3 +134,61 @@ ratio survived.
   collapsed card's star row is a couple of pixels taller than the 80 DIP cover,
   so using a fixed 80 DIP in the expanded card made the cover and title jump up;
   carrying the measured height keeps them still.
+
+## Compact chrome
+
+The inline lyrics and queue panes normally draw the main window's drawer chrome:
+a solid surface, a left divider, a header (lyrics) or tabs and a close button
+(queue), and a 12 DIP row inset. The expanded mini player provides that chrome
+itself, so `MiniPlayerPage` calls `UseCompactChrome()` on both panes once, before
+they are shown.
+
+The method drops the surface, divider, header/tabs/close row and the horizontal
+insets. The queue also swaps `CatalogRowStyle` for its local
+`CompactQueueRowStyle` (`Padding="0"`), and the lyrics `ScrollViewer` drops its
+10 DIP margin, so both start at the card's 16 DIP gutter, in line with the cover.
+
+This is intentionally imperative: the compact mode is permanent for the lifetime
+of the mini player window, the call happens once before layout, and the panes are
+one-off compositions rather than generally themed controls.
+
+### Options that would need a refactor
+
+These were considered and are **not** implemented. They are recorded so the next
+change does not have to rediscover the trade-offs.
+
+**A. A `CompactChrome` dependency property.** Move the mode onto the control as a
+DP (`PropertyMetadata` plus an `ApplyChrome` callback) and declare it where the
+pane is hosted (`CompactChrome="True"`).
+
+- Pros: the mode is visible in the host markup and the designer, is part of the
+  control's public surface, and can be toggled at runtime.
+- Costs: DP boilerplate; the restore path has to capture the drawer background,
+  border, header row height, insets and row style at construction. The background
+  is a theme resource resolved to a brush, so restoring it after a later theme
+  change would reuse the old brush. The mini player never toggles the mode, so
+  none of that machinery is exercised there.
+
+**B. A templated `Control` with `Drawer` / `Compact` visual states.** Turn each
+pane into a `Control` with a `ControlTemplate` and switch `VisualStateManager`
+states.
+
+- Pros: the fully declarative WinUI route, and the variant becomes themeable like
+  any other templated control.
+- Costs: a significant rewrite; WinUI has no data triggers, and
+  `RowDefinition.Height` and `ItemContainerStyle` are awkward in visual-state
+  setters. The panes are small compositions, not reusable themed controls, so the
+  ceremony outweighs the benefit.
+
+**C. Split chrome from body (`LyricsBody` / `QueueBody`).** Extract the actual
+content (lines, mask, follow pill; queue list and section row) and let the drawer
+pane and the mini player compose the body with their own chrome.
+
+- Pros: no mode flag at all, the cleanest separation, and each body becomes easier
+  to test or host somewhere else.
+- Costs: moves the lyrics timer, loading state and panel ownership into a new
+  control; touches both hosts; only pays off when a third host appears.
+
+The current `UseCompactChrome()` is the smallest thing that works for two hosts.
+If the mode ever needs to be toggled, the property in **A** is the next step; if a
+third host needs a different composition, **C** is the one to take.
