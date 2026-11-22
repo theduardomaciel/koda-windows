@@ -73,6 +73,24 @@ public sealed class LyricsMotionTests
         Assert.Equal(0, after.Y, 4);
     }
 
+    [Fact]
+    public void AHeldSyllableRestsAtItsWordScaleInsteadOfShrinkingTwice()
+    {
+        // The word already rests at 0.95; the letter must not shrink it again.
+        var word = LyricsMotion.Word(0, 1.0, 0);
+        var letter = LyricsMotion.Letter(0, 1.0, 0, 4);
+        Assert.Equal(LyricsMotion.WordRestScale, word.Scale * letter.Scale, 4);
+
+        // Once its wave ends, the letter returns to the word's full size and waits
+        // there until the syllable ends; it must not settle at a smaller rest size.
+        const double duration = 2.0;
+        var delay = LyricsMotion.LetterWaveDelay(duration, 4, 0);
+        var wave = LyricsMotion.LetterWaveDuration(duration, 4);
+        var afterWave = LyricsMotion.Letter(delay + wave + 0.05, duration, 0, 4);
+        Assert.Equal(1, afterWave.Scale, 4);
+        Assert.Equal(0, afterWave.Y, 4);
+    }
+
     [Theory]
     [InlineData("hold", 4)]
     [InlineData("café", 4)]

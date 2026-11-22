@@ -49,7 +49,7 @@ Related reads:
 | `7dbc903` | Far-row rest size, previous-song collection, fast activation fade. |
 | `155c54b` | Whole-row rest scale (later removed as a workaround). |
 | `fc27546` | Group-centre syllable origins (later reverted; CSS uses seams). |
-| `23bb9f1` | Removed the second letter rest scale (later reverted for the all-rows experiment). |
+| `23bb9f1` | Removed the second letter rest scale (reverted for the all-rows experiment, then re-applied). |
 | `1480f6b` | Line-timed rows scaled from BuildRows. |
 | `e8924b4` | First-frame spacing compensation via precomputed placements. |
 | `260f3f0` | Margin compensation instead of row scale. |
@@ -107,8 +107,9 @@ The CSS says, and `d11c840` originally implemented:
 ### Held syllables
 
 - Split only for words lasting at least 700 ms with 2-8 safe glyphs.
-- Letters rest at **0.95 scale / 0.02em Y**, inside the word rest, so the composed
-  resting scale is 0.95 * 0.95.
+- Letters rest at their word-relative size (**1.0 scale / 0 Y**); the word
+  supplies the 0.95 rest, so the composed resting scale is just 0.95 instead of
+  0.95 * 0.95.
 - Letter wave peaks around 1.12-1.175 with **0.03em** spread.
 - The letter glow follows the wave.
 - Letters spring back to **1 / 0** after the syllable ends.
@@ -287,7 +288,7 @@ Android Expressive size/weight table into the Spicy look.
 - `perf-test` at `a157652`:
   - every rich-synced line word/letter-level from load;
   - composition motion;
-  - CSS rest values (word 0.95/0.01em, letter 0.95/0.02em, seam origins);
+  - CSS rest values (word 0.95/0.01em, letters at word-relative 1.0/0, seam origins);
   - normal space + 0.06em word gap;
   - no spacing compensation in this mode;
   - `KODA_NP_WINDOWED=1` restores the previous windowed/placeholder path.

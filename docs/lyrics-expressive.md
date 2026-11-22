@@ -46,7 +46,8 @@ bounce.
 
 Each letter:
 
-- rests at `scale 0.95`, `translateY 0.02em`;
+- rests at the word's own size (`scale 1.0`, no extra offset), so the word's
+  `0.95` rest is not applied a second time;
 - gets `duration / letterCount` of the highlight;
 - waves for `slot * 2 + 0.55s`;
 - starts at `slot * (i + 1) / 1.2 + duration / 6 - waveDuration * 0.46`;
