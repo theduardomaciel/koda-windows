@@ -473,7 +473,7 @@
                                     Background="#99000000"
                                     CornerRadius="8"
                                     IsHitTestVisible="False"
-                                    Visibility="Collapsed">
+                                    Opacity="0">
                                     <FontIcon Glyph="&#xE740;" FontSize="18" Foreground="White" />
                                 </Border>
                             </Grid>

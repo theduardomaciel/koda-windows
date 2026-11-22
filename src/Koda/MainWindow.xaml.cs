@@ -105,6 +105,10 @@ public sealed partial class MainWindow : Window
     private Storyboard? _panelCrossfade;
     private int _panelCrossfadeVersion;
 
+    /// <summary>The cover's hover scrim fade; stopping it between fades starts the next
+    /// one from the opacity on screen.</summary>
+    private Storyboard? _coverHoverFade;
+
     /// <summary>Set while the drawer is closed on purpose, so the pane's light-dismiss
     /// guard knows this close is not a tap outside.</summary>
     private bool _closingSidePanel;
@@ -1935,10 +1939,42 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnCoverPointerEntered(object sender, PointerRoutedEventArgs e) =>
-        CoverHover.Visibility = Playback.CurrentSong is null ? Visibility.Collapsed : Visibility.Visible;
+        FadeCoverHover(Playback.CurrentSong is not null);
 
     private void OnCoverPointerExited(object sender, PointerRoutedEventArgs e) =>
-        CoverHover.Visibility = Visibility.Collapsed;
+        FadeCoverHover(false);
+
+    /// <summary>Fades the cover's scrim instead of popping it. A reversal mid-fade starts
+    /// from the opacity on screen, so a quick in-and-out never jumps.</summary>
+    private void FadeCoverHover(bool show)
+    {
+        var from = CoverHover.Opacity;
+        _coverHoverFade?.Stop();
+
+        var fade = new DoubleAnimation
+        {
+            From = from,
+            To = show ? 1 : 0,
+            Duration = TimeSpan.FromMilliseconds(show ? 140 : 100),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(fade, CoverHover);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(fade);
+        _coverHoverFade = storyboard;
+        storyboard.Begin();
+    }
+
+    /// <summary>Clears the scrim without a fade when the bar disappears underneath the
+    /// pointer; the next hover starts from transparent.</summary>
+    private void ClearCoverHover()
+    {
+        _coverHoverFade?.Stop();
+        _coverHoverFade = null;
+        CoverHover.Opacity = 0;
+    }
 
     // MARK: profiles
 
@@ -2222,7 +2258,7 @@ public sealed partial class MainWindow : Window
         {
             // The bar may vanish under the pointer (Now Playing, video); clear the cover's
             // hover scrim so it is not stuck on when the bar comes back.
-            CoverHover.Visibility = Visibility.Collapsed;
+            ClearCoverHover();
         }
         VideoBar.Visibility = videoOn && !onNowPlaying ? Visibility.Visible : Visibility.Collapsed;
         if (VideoBar.Visibility == Visibility.Visible)
