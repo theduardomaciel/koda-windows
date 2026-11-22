@@ -447,17 +447,38 @@
                     <Grid x:Name="TrackInfo" ColumnSpacing="12" VerticalAlignment="Center" SizeChanged="OnTrackInfoSizeChanged">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="56" />
-                            <ColumnDefinition x:Name="TrackTextColumn" Width="280" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <Border Width="56" Height="56" CornerRadius="8" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Tapped="OnNowPlayingTapped" ToolTipService.ToolTip="Open Now Playing" AutomationProperties.Name="Open Now Playing">
+                        <!-- Hovering the cover dims the art and shows the expand glyph, so the
+                             way into Now Playing reads as a control rather than a picture. The
+                             scrim ignores hit-testing to keep the Border's tap and pointer
+                             events intact. -->
+                        <Border
+                            Width="56"
+                            Height="56"
+                            CornerRadius="8"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            Tapped="OnNowPlayingTapped"
+                            PointerEntered="OnCoverPointerEntered"
+                            PointerExited="OnCoverPointerExited"
+                            ToolTipService.ToolTip="Open Now Playing"
+                            AutomationProperties.Name="Open Now Playing">
                             <Grid>
                                 <FontIcon x:Name="CoverGlyph" Glyph="&#xE8D6;" FontSize="18" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                                 <Image x:Name="CoverImage" helpers:Art.Pixels="56" Stretch="UniformToFill" />
+                                <Border
+                                    x:Name="CoverHover"
+                                    Background="#99000000"
+                                    CornerRadius="8"
+                                    IsHitTestVisible="False"
+                                    Visibility="Collapsed">
+                                    <FontIcon Glyph="&#xE740;" FontSize="18" Foreground="White" />
+                                </Border>
                             </Grid>
                         </Border>
-                        <StackPanel x:Name="TrackInfoText" Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                        <StackPanel x:Name="TrackInfoText" Grid.Column="1" MaxWidth="280" VerticalAlignment="Center" Spacing="1">
                             <TextBlock
                                 x:Name="TrackTitleText"
                                 Text="Nothing playing"

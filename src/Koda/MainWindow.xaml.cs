@@ -1914,18 +1914,17 @@ public sealed partial class MainWindow : Window
 
     /// <summary>The title and artist take the room the cover, the gaps and the heart leave;
     /// past that they trim with an ellipsis, so the heart stays beside the words instead of
-    /// at the cell's edge. The text column is a fixed width, not Auto: an Auto column
-    /// measures its child with unlimited width, which lets the text paint past its slot and
-    /// be clipped without an ellipsis. A little of that width is reserved for the ellipsis
-    /// itself, which WinUI otherwise lets the last word crowd out of the slot.</summary>
+    /// at the cell's edge. The text column is Auto, with the stack capped at the available
+    /// width: an Auto column alone measures its child with unlimited width, which lets the
+    /// text paint past its slot and be clipped without an ellipsis, but the cap makes the
+    /// column as wide as the words really are, so a short title keeps the heart close. A
+    /// little of that width is reserved for the ellipsis itself, which WinUI otherwise lets
+    /// the last word crowd out of the slot.</summary>
     private void OnTrackInfoSizeChanged(object sender, SizeChangedEventArgs e)
     {
         var reserve = Math.Max(10, Math.Round(TrackTitleText.FontSize * 0.8));
         var width = Math.Clamp(e.NewSize.Width - 56 - 36 - 36 - reserve, 80, 280);
-        TrackTextColumn.Width = new GridLength(width);
-        TrackTitleText.Width = width;
-        TrackArtistText.Width = width;
-        NextUpText.Width = width;
+        TrackInfoText.MaxWidth = width;
 
         // Writing the lines again makes the text measure and trim at the new room; WinUI
         // otherwise keeps the truncation it decided at the old width.
@@ -1934,6 +1933,12 @@ public sealed partial class MainWindow : Window
         TrackArtistText.Text = song?.ArtistLine ?? "";
         RefreshNextUp();
     }
+
+    private void OnCoverPointerEntered(object sender, PointerRoutedEventArgs e) =>
+        CoverHover.Visibility = Playback.CurrentSong is null ? Visibility.Collapsed : Visibility.Visible;
+
+    private void OnCoverPointerExited(object sender, PointerRoutedEventArgs e) =>
+        CoverHover.Visibility = Visibility.Collapsed;
 
     // MARK: profiles
 
@@ -2213,6 +2218,12 @@ public sealed partial class MainWindow : Window
         var onNowPlaying = ContentFrame.Content is NowPlayingPage;
         var videoOn = Video.HasVideo && !onWatch;
         PlayerBar.Visibility = !onWatch && !onNowPlaying && !videoOn ? Visibility.Visible : Visibility.Collapsed;
+        if (PlayerBar.Visibility == Visibility.Collapsed)
+        {
+            // The bar may vanish under the pointer (Now Playing, video); clear the cover's
+            // hover scrim so it is not stuck on when the bar comes back.
+            CoverHover.Visibility = Visibility.Collapsed;
+        }
         VideoBar.Visibility = videoOn && !onNowPlaying ? Visibility.Visible : Visibility.Collapsed;
         if (VideoBar.Visibility == Visibility.Visible)
         {
