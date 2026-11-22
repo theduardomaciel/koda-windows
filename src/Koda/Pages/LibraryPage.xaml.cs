@@ -19,7 +19,7 @@ namespace Koda.Pages;
 public sealed partial class LibraryPage : Page
 {
     /// <summary>A playlist made here, drawn like a collection row; it plays when tapped.</summary>
-    private sealed record UserPlaylistRow(UserPlaylist Playlist)
+    internal sealed record UserPlaylistRow(UserPlaylist Playlist)
     {
         public string Title => Playlist.Name;
         public string Subtitle => $"Your playlist · {Playlist.Songs.Length} songs";
@@ -34,6 +34,7 @@ public sealed partial class LibraryPage : Page
         InitializeComponent();
         SongMenu.Attach(Items, () => _songs);
         ArtistMenu.Attach(Items);
+        PlaylistMenu.Attach(Items);
         App.Library.Changed += OnLibraryChanged;
         Unloaded += (_, _) => App.Library.Changed -= OnLibraryChanged;
     }
