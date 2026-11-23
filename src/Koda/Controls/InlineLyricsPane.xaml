@@ -116,7 +116,7 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Shown when the listener scrolls away: hands the panel back to the song. -->
+                <!-- Shown when the listener scrolls away: returns to the line being sung. -->
                 <Button
                     x:Name="FollowLyricsButton"
                     HorizontalAlignment="Center"
@@ -132,10 +132,10 @@
                     IsTabStop="False"
                     Click="OnFollowLyricsClick"
                     ToolTipService.ToolTip="Jump back to the line being sung"
-                    AutomationProperties.Name="Follow the lyrics">
+                    AutomationProperties.Name="Back to the current line">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon x:Name="FollowLyricsChevron" Glyph="&#xE70D;" FontSize="12" />
-                        <TextBlock Text="Follow along" FontSize="12" FontWeight="SemiBold" />
+                        <TextBlock Text="Back to current line" FontSize="12" FontWeight="SemiBold" />
                     </StackPanel>
                 </Button>
             </Grid>
