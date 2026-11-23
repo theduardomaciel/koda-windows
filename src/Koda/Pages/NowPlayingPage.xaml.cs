@@ -255,6 +255,23 @@ public sealed partial class NowPlayingPage : Page
     /// <summary>Lets the shell ask for that re-measure after the sidebar changes width.</summary>
     public void Relayout() => RelayoutPage();
 
+    /// <summary>The shell window is hidden to the tray or minimized: the page is not being
+    /// read, so its lyrics let go of their word surfaces while the music plays on.
+    /// Restoring rebuilds them for the line being sung, as returning to the page does.</summary>
+    public void SetShellVisible(bool visible)
+    {
+        if (!visible)
+        {
+            _lyrics?.Pause();
+            return;
+        }
+
+        if (_lyricsOpen)
+        {
+            _lyrics?.PlayEntrance(animate: false);
+        }
+    }
+
     // MARK: the song
 
     private void RenderTrack()

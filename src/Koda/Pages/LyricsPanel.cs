@@ -213,6 +213,18 @@ internal sealed class LyricsPanel : IDisposable
 
     private readonly List<Row> _rows = [];
     private readonly List<LyricLine> _lyricLines = [];
+    /// <summary>Rows whose word-level text is built after the panel is already on screen,
+    /// a few per frame, so a song's whole build does not land in one frame. Only the
+    /// all-rows mode stages; the windowed mode builds around the song as it did.</summary>
+    private readonly Queue<Row> _pendingRows = new();
+    private readonly System.Diagnostics.Stopwatch _buildClock = new();
+
+    /// <summary>The rows around the line being sung built before the first frame, so the
+    /// viewport is never empty while the rest arrive.</summary>
+    private const int StagedWindowRows = 10;
+
+    /// <summary>How much of a frame the staged build may use.</summary>
+    private const int StagedBuildBudgetMs = 6;
     private readonly Queue<Letter> _glowWarmup = new();
     private readonly HashSet<Letter> _glowWarmupSet = [];
     private readonly List<Letter> _liveGlows = [];
@@ -479,6 +491,12 @@ internal sealed class LyricsPanel : IDisposable
             if (PositionSource is { } source)
             {
                 SetPosition(double.IsNaN(_freezeAt) ? source() : _freezeAt);
+            }
+
+            // A few rows of a fresh song arrive each frame instead of all at once.
+            if (_pendingRows.Count > 0)
+            {
+                BuildStagedRows();
             }
 
             // Following the song here, not on the app's twice-a-second tick: the line
@@ -805,6 +823,14 @@ internal sealed class LyricsPanel : IDisposable
             // landed instead of once for every intermediate line.
             _glowHoldUntil = _frameClock.ElapsedMilliseconds + 300;
             _glowWindowIndex = -2;
+
+            // A seek can land far from what is built: the staged build restarts around
+            // the line it landed on instead of finishing the old area first.
+            if (_allRowsRich && _rowsBuilt)
+            {
+                QueueStagedRows(newIndex);
+                UpdateFrame();
+            }
         }
 
         _position = next;
@@ -940,11 +966,26 @@ internal sealed class LyricsPanel : IDisposable
             ResetGlyphMasks();
         }
 
+        // Whether the previous song had row surfaces to release: only then is the
+        // collection below worth a stall. A closed panel's words are already parked in
+        // the pool and trimmed here; a clear has nothing at all.
+        var hadRows = _rows.Count > 0;
         ReturnAllRowWords();
+        var trimmedPool = false;
+        if (!_visible)
+        {
+            // A closed panel parks a whole song's words it will not build: keep a small
+            // working set and let the collection take the rest, instead of holding a
+            // song's native surfaces until the panel opens again.
+            trimmedPool = _plainWordPool.Count > 64 || _splitWordPool.Count > 16;
+            TrimPools(64, 16);
+        }
+
         _repaintFrom = -1;
         _repaintTo = -1;
         _lines.Children.Clear();
         _rows.Clear();
+        _pendingRows.Clear();
         _lyricLines.Clear();
         _leadingDots = null;
         _leadingDotItems = [];
@@ -964,8 +1005,13 @@ internal sealed class LyricsPanel : IDisposable
 
         // The previous song's rows, words, placeholders and masks were just dropped. Collect
         // after those references are gone, so the new song does not allocate on top of the
-        // old song's native text and composition surfaces.
-        ForceCollection();
+        // old song's native text and composition surfaces - but only when something was
+        // actually released. A closed panel collects too when its parked song was trimmed:
+        // nothing is animating there, so the stall costs nothing.
+        if (hadRows || trimmedPool)
+        {
+            ForceCollection();
+        }
 
         if (lyrics.IsSynced)
         {
@@ -995,6 +1041,7 @@ internal sealed class LyricsPanel : IDisposable
 
         _lines.Children.Clear();
         _rows.Clear();
+        _pendingRows.Clear();
         _leadingDots = null;
         _leadingDotItems = [];
         _tween.Stop();
@@ -1153,10 +1200,8 @@ internal sealed class LyricsPanel : IDisposable
             _lines.Children.Add(host);
             _rows.Add(row);
 
-            if (_allRowsRich && line.Words.Count > 0)
-            {
-                BuildRichRow(row);
-            }
+            // The word-level text is built after the hosts: the rows around the line
+            // being sung first, the rest a few per frame (BuildStagedWindow/QueueStagedRows).
 
             if (_renderer == LyricsRenderer.Expressive && _motion && !row.Rich)
             {
@@ -1227,9 +1272,17 @@ internal sealed class LyricsPanel : IDisposable
             ? (Lyrics.IndexOf(_position, _lyricLines) ?? 0)
             : 0;
         start = Math.Clamp(start, 0, Math.Max(0, _rows.Count - 1));
-        EnsureRichWindow(start);
-        if (!_allRowsRich)
+        if (_allRowsRich)
         {
+            // The words around the line being sung are built now, so the panel has
+            // something to show and aim at; the rest arrive a few per frame.
+            BuildStagedWindow(start);
+            QueueStagedRows(start);
+            UpdateFrame();
+        }
+        else
+        {
+            EnsureRichWindow(start);
             // A windowed panel's rows collapse back into the pool as the song moves;
             // the pool must not keep every word of the biggest song for its life.
             TrimPools(400, 60);
@@ -1519,6 +1572,18 @@ internal sealed class LyricsPanel : IDisposable
     {
         if (_allRowsRich)
         {
+            // The line being sung is never allowed to wait for the staged build: a seek
+            // can land anywhere, and its words must be there when the panel aims at it.
+            if (_rowsBuilt && index >= 0 && index < _rows.Count)
+            {
+                var active = _rows[index];
+                if (!active.Rich && active.Line.Words.Count > 0)
+                {
+                    BuildRichRow(active);
+                    PaintStagedRow(active);
+                }
+            }
+
             return;
         }
 
@@ -1556,6 +1621,139 @@ internal sealed class LyricsPanel : IDisposable
         for (var i = from; i <= to; i++)
         {
             BuildRichRow(_rows[i]);
+        }
+    }
+
+    /// <summary>Builds the rows around a line before the first frame: the panel needs them
+    /// to place the line and fill the viewport while the rest arrive.</summary>
+    private void BuildStagedWindow(int index)
+    {
+        if (!_allRowsRich || !_rowsBuilt || _rows.Count == 0)
+        {
+            return;
+        }
+
+        index = Math.Clamp(index, 0, _rows.Count - 1);
+        var from = Math.Max(0, index - StagedWindowRows);
+        var to = Math.Min(_rows.Count - 1, index + StagedWindowRows);
+        for (var i = from; i <= to; i++)
+        {
+            BuildRichRow(_rows[i]);
+        }
+    }
+
+    /// <summary>Queues the rows outside the built window, nearest the line being sung
+    /// first on both sides, so the panel fills outward from what the listener reads.</summary>
+    private void QueueStagedRows(int index)
+    {
+        _pendingRows.Clear();
+        if (!_allRowsRich || !_rowsBuilt || _rows.Count == 0)
+        {
+            return;
+        }
+
+        index = Math.Clamp(index, 0, _rows.Count - 1);
+        for (var distance = StagedWindowRows + 1; distance < _rows.Count; distance++)
+        {
+            var after = index + distance;
+            if (after < _rows.Count)
+            {
+                _pendingRows.Enqueue(_rows[after]);
+            }
+
+            var before = index - distance;
+            if (before >= 0)
+            {
+                _pendingRows.Enqueue(_rows[before]);
+            }
+        }
+    }
+
+    /// <summary>Builds a few queued rows within a frame's budget, gives each the state the
+    /// song clock says it should have, and keeps the line being sung on the reading anchor
+    /// as the heights above it change.</summary>
+    private void BuildStagedRows()
+    {
+        if (!_visible)
+        {
+            return;
+        }
+
+        _buildClock.Restart();
+        var built = 0;
+        while (_pendingRows.Count > 0
+            && built < 8
+            && _buildClock.ElapsedMilliseconds < StagedBuildBudgetMs)
+        {
+            var row = _pendingRows.Dequeue();
+            if (row.Rich || row.Line.Words.Count == 0)
+            {
+                continue;
+            }
+
+            BuildRichRow(row);
+            PaintStagedRow(row);
+            built++;
+        }
+
+        if (built > 0)
+        {
+            CorrectAnchor();
+        }
+
+        if (_pendingRows.Count == 0)
+        {
+            UpdateFrame();
+        }
+    }
+
+    /// <summary>A row that arrives after the load's full repaint takes its words' state
+    /// from the song clock: lines already behind it are complete, not resting.</summary>
+    private void PaintStagedRow(Row row)
+    {
+        var started = _position >= row.Line.Time;
+        foreach (var word in row.WordItems)
+        {
+            Paint(word, _position, _motion, lineStarted: started);
+        }
+
+        foreach (var word in row.BackgroundItems)
+        {
+            Paint(word, _position, _motion, lineStarted: started);
+        }
+    }
+
+    /// <summary>Puts the line being sung back on the reading anchor after the staged build
+    /// changed the heights above it. A running glide has its target corrected instead of
+    /// being cut short; a listener who has taken the scroll is left alone.</summary>
+    private void CorrectAnchor()
+    {
+        if (_current is null || _userScrolled || !_visible || _scroll.ViewportHeight <= 1)
+        {
+            return;
+        }
+
+        double target;
+        try
+        {
+            var offset = _current.Host.TransformToVisual(_lines)
+                .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+            target = Math.Max(0, offset - _scroll.ViewportHeight * ReadingAnchor);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        if (_tween.IsRunning)
+        {
+            _tweenTarget = target;
+            return;
+        }
+
+        if (Math.Abs(target - _scroll.VerticalOffset) > 0.5)
+        {
+            _scroll.ChangeView(null, target, null, true);
         }
     }
 
@@ -2604,6 +2802,7 @@ internal sealed class LyricsPanel : IDisposable
         TrimPools(64, 16);
         _lines.Children.Clear();
         _rows.Clear();
+        _pendingRows.Clear();
         _rowsBuilt = false;
         _current = null;
         _leadingDots = null;
@@ -2645,7 +2844,9 @@ internal sealed class LyricsPanel : IDisposable
 
     private void UpdateFrame()
     {
-        var run = _visible && _playing && _rows.Count > 0;
+        // A staged build keeps the timer alive even while paused: the rest of the song's
+        // rows still have to arrive after a load or a seek.
+        var run = _visible && (_playing || _pendingRows.Count > 0) && _rows.Count > 0;
         if (run && !_frame.IsRunning)
         {
             _frame.Start();

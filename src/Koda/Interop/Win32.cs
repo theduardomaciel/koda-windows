@@ -32,6 +32,7 @@ internal static partial class Win32
     public const int SW_SHOWMAXIMIZED = 3;
 
     public const int SIZE_RESTORED = 0;
+    public const int SIZE_MINIMIZED = 1;
     public const int SIZE_MAXIMIZED = 2;
 
     public const uint MONITOR_DEFAULTTONULL = 0;

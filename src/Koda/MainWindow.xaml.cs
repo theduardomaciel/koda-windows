@@ -50,6 +50,9 @@ public sealed partial class MainWindow : Window
     private TrayIconHost? _tray;
     private Taskbar? _taskbar;
     private MiniPlayerWindow? _mini;
+    /// <summary>Whether the drawer's lyrics pane was suspended because the shell window
+    /// was hidden or minimized, so showing the window resumes exactly what it paused.</summary>
+    private bool _lyricsSuspendedForShell;
     private readonly SmtcController _smtc = new();
     private readonly Windows.UI.ViewManagement.UISettings _systemColors = new();
     private nint _previousWndProc;
@@ -2524,6 +2527,41 @@ public sealed partial class MainWindow : Window
         {
             Win32.SwitchToThisWindow(hwnd, altTab: true);
         }
+
+        SetShellVisible(true);
+    }
+
+    /// <summary>
+    /// The shell window is hidden to the tray or minimized: nothing on screen is being
+    /// read, so the lyrics stop painting and let go of their word surfaces while the
+    /// music keeps playing. Coming back rebuilds the words for the line being sung,
+    /// the same way returning to Now Playing does.
+    /// </summary>
+    private void SetShellVisible(bool visible)
+    {
+        if (ContentFrame.Content is NowPlayingPage page)
+        {
+            page.SetShellVisible(visible);
+        }
+
+        if (visible)
+        {
+            if (_lyricsSuspendedForShell)
+            {
+                _lyricsSuspendedForShell = false;
+                InlineLyrics.Resume(animate: false);
+            }
+
+            return;
+        }
+
+        // Suspend the drawer only if it was showing: resuming a pane the listener had
+        // closed would open it again when the window comes back.
+        if (InlineLyrics.Visibility == Visibility.Visible)
+        {
+            _lyricsSuspendedForShell = true;
+            InlineLyrics.Suspend();
+        }
     }
 
     /// <summary>
@@ -2714,6 +2752,7 @@ public sealed partial class MainWindow : Window
                 if (App.CloseToTray && _current is not null)
                 {
                     _current.CloseMiniPlayer();
+                    _current.SetShellVisible(false);
                     _current.AppWindow.Hide();
                     return 0;
                 }
@@ -2721,6 +2760,17 @@ public sealed partial class MainWindow : Window
                 break;
 
             case Win32.WM_SIZE:
+                // The lyrics are not read while the window is out of sight; a minimized
+                // shell lets them go, restoring brings them back for the line playing.
+                if ((int)wParam == Win32.SIZE_MINIMIZED)
+                {
+                    _current?.SetShellVisible(false);
+                }
+                else if ((int)wParam == Win32.SIZE_RESTORED || (int)wParam == Win32.SIZE_MAXIMIZED)
+                {
+                    _current?.SetShellVisible(true);
+                }
+
                 // Maximising and restoring from the caption never ends a drag, so
                 // WM_EXITSIZEMOVE does not fire for them. Save the state as soon as
                 // it flips; during a drag it has not changed, so nothing is written.
