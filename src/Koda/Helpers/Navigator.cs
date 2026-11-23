@@ -121,7 +121,7 @@ public static class SongMenu
 
         if (song.Album is { } albumRef)
         {
-            menu.Items.Add(Item("Go to album", "\uE93C", () => Navigator.Go(typeof(Pages.AlbumPage), albumRef.Id)));
+            menu.Items.Add(Item("Go to album", "\uE93C", () => Navigator.Go(typeof(Pages.AlbumPage), new Pages.AlbumPage.AlbumRequest(albumRef.Id, song.Id))));
         }
 
         foreach (var artist in song.Artists.Where(a => a.Id is not null).Take(3))

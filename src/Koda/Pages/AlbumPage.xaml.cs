@@ -18,6 +18,7 @@ namespace Koda.Pages;
 public sealed partial class AlbumPage : Page
 {
     private string _id = "";
+    private string? _targetSongId;
     private EngineAlbum? _album;
     private Song[] _songs = [];
 
@@ -32,12 +33,24 @@ public sealed partial class AlbumPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs args)
     {
         base.OnNavigatedTo(args);
-        if (args.Parameter is string id && id.Length > 0)
+        switch (args.Parameter)
         {
-            _id = id;
-            _ = LoadAsync();
+            case string id when id.Length > 0:
+                _id = id;
+                _targetSongId = null;
+                _ = LoadAsync();
+                break;
+            case AlbumRequest request when request.Id.Length > 0:
+                _id = request.Id;
+                _targetSongId = request.SongId;
+                _ = LoadAsync();
+                break;
         }
     }
+
+    /// <summary>An album to open, and the song to leave selected in its table when the
+    /// listener came from that song.</summary>
+    public sealed record AlbumRequest(string Id, string? SongId = null);
 
     private async Task LoadAsync()
     {
@@ -78,12 +91,22 @@ public sealed partial class AlbumPage : Page
         _songs = page.Songs;
         DownloadButton.Title = album.Title;
         DownloadButton.Songs = page.Songs;
-        Tracks.ItemsSource = page.Songs.Select((s, i) => new TrackRow(i + 1, s)).ToArray();
+        var rows = page.Songs.Select((s, i) => new TrackRow(i + 1, s)).ToArray();
+        Tracks.ItemsSource = rows;
         Versions.Shelves = page.OtherVersions.Length > 0
             ? [ShelfView.Of("Other versions", page.OtherVersions.Select(a => (MusicItem)new MusicItem.AlbumRecord(a)))]
             : [];
         UpdateSave();
         Tracks.Visibility = Visibility.Visible;
+        if (_targetSongId is { } target && rows.FirstOrDefault(row => row.Song.Id == target) is { } selected)
+        {
+            Tracks.SelectedItem = selected;
+            DispatcherQueue.TryEnqueue(() => Tracks.ScrollIntoView(selected));
+        }
+        else
+        {
+            Tracks.SelectedItem = null;
+        }
     }
 
     private void OnLibraryChanged() => DispatcherQueue.TryEnqueue(UpdateSave);

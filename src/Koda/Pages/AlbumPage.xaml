@@ -10,7 +10,7 @@
             x:Name="Tracks"
             Padding="14,0,14,32"
             Visibility="Collapsed"
-            SelectionMode="None"
+            SelectionMode="Single"
             IsItemClickEnabled="True"
             ItemClick="OnTrackClick"
             ItemContainerStyle="{StaticResource CatalogRowStyle}"

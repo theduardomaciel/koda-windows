@@ -435,8 +435,10 @@
                     Grid.Row="1"
                     Height="84"
                     Padding="12,0"
+                    Background="Transparent"
                     ColumnSpacing="16"
-                    SizeChanged="OnPlayerBarSizeChanged">
+                    SizeChanged="OnPlayerBarSizeChanged"
+                    ContextRequested="OnPlayerBarContextRequested">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" MinWidth="200" />
                         <ColumnDefinition Width="2*" MaxWidth="620" />
@@ -486,6 +488,7 @@
                                 TextTrimming="CharacterEllipsis"
                                 TextWrapping="Wrap"
                                 MaxLines="1"
+                                Tapped="OnTrackTitleTapped"
                                 AutomationProperties.Name="Track title" />
                             <TextBlock
                                 x:Name="TrackArtistText"

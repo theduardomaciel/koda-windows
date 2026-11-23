@@ -1690,6 +1690,37 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>The words name the song, so they open the album it belongs to and leave
+    /// that song selected in the table.</summary>
+    private void OnTrackTitleTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (Playback.CurrentSong is { Album: { } album } song)
+        {
+            NavigateTo(typeof(AlbumPage), new AlbumPage.AlbumRequest(album.Id, song.Id));
+        }
+    }
+
+    /// <summary>Right-clicking anywhere on the bar is the song's own menu, as on any row.</summary>
+    private void OnPlayerBarContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        if (Playback.CurrentSong is not { } song)
+        {
+            return;
+        }
+
+        var menu = SongMenu.Build(song, [.. Playback.Queue.Items.Select(item => item.Song)]);
+        if (args.TryGetPosition(PlayerBar, out var position))
+        {
+            menu.ShowAt(PlayerBar, position);
+        }
+        else
+        {
+            menu.ShowAt(PlayerBar);
+        }
+
+        args.Handled = true;
+    }
+
     private void OnArtistTapped(object sender, TappedRoutedEventArgs e)
     {
         if (Playback.CurrentSong?.Artists.FirstOrDefault(a => a.Id is not null) is { Id: { } id })
