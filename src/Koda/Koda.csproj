@@ -31,6 +31,15 @@
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
 
+  <!-- The managed heap here is tiny (10-20 MB), so the runtime's default gen0 budget makes
+       full collections fire every few seconds while the lyrics panel allocates a line's
+       surfaces. A 32 MB gen0 budget absorbs those bursts: measured in the player, full
+       collections during steady singing fell from ~17/min to ~3/min. The cost is a few MB
+       of managed heap at most; the process's memory is dominated by native surfaces. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.Gen0Size" Value="33554432" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- The component packages, not the metapackage: the metapackage also brings
          AI, ML (onnxruntime + DirectML), Search and Widgets, which Koda never uses.
