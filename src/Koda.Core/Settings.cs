@@ -446,11 +446,17 @@ public sealed class Settings
         LyricsSourceOrder = listed;
     }
 
-    /// <summary>Changes a setting and writes the file.</summary>
-    public void Update(Action<Settings> change)
+    /// <summary>Changes a setting and writes the file. A continuous control (a slider
+    /// being dragged) can pass <paramref name="save"/> false: listeners still hear the
+    /// change at once, and the page writes the final value when the movement settles.</summary>
+    public void Update(Action<Settings> change, bool save = true)
     {
         change(this);
-        Save();
+        if (save)
+        {
+            Save();
+        }
+
         Changed?.Invoke(this);
     }
 

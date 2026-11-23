@@ -35,6 +35,13 @@ public sealed partial class SettingsPage : Page
     private bool _loaded;
     private Brush? _highlightBrush;
 
+    /// <summary>How long after the last slider movement the settings file is written.
+    /// Every tick still reaches the open panel; only the disk write waits.</summary>
+    private const int SettingsSaveDelayMs = 500;
+
+    private DispatcherTimer? _settingsSaveTimer;
+    private bool _settingsSavePending;
+
     /// <summary>The typefaces the lyrics look offers; the panel falls back if one is absent.</summary>
     private static readonly string[] LyricsFonts =
         ["Segoe UI Variable Text", "Segoe UI Variable Display", "Segoe UI", "Georgia"];
@@ -62,6 +69,7 @@ public sealed partial class SettingsPage : Page
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
         base.OnNavigatedFrom(e);
+        FlushSettingsSave();
         EnergySaver.Changed -= OnEnergySaverChanged;
         App.Library.Changed -= OnLibraryChanged;
         App.Downloads.Changed -= OnDownloadsChanged;
@@ -205,6 +213,38 @@ public sealed partial class SettingsPage : Page
     }
 
     // MARK: search
+
+    /// <summary>Writes a slider's value after the movement settles. A drag calls Update
+    /// on every tick; the open lyrics panel hears each one, but the file is written once.</summary>
+    private void SaveSettingsSoon()
+    {
+        _settingsSavePending = true;
+        if (_settingsSaveTimer is null)
+        {
+            _settingsSaveTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(SettingsSaveDelayMs),
+            };
+            _settingsSaveTimer.Tick += (_, _) => FlushSettingsSave();
+        }
+
+        _settingsSaveTimer.Stop();
+        _settingsSaveTimer.Start();
+    }
+
+    /// <summary>Writes a pending slider value now: the page is being left, or the timer
+    /// has settled.</summary>
+    private void FlushSettingsSave()
+    {
+        _settingsSaveTimer?.Stop();
+        if (!_settingsSavePending)
+        {
+            return;
+        }
+
+        _settingsSavePending = false;
+        App.Settings.Save();
+    }
 
     private void OnSettingsSearchChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
@@ -743,7 +783,8 @@ public sealed partial class SettingsPage : Page
         var seconds = Math.Round(e.NewValue);
         CrossfadeValue.Text = $"{seconds:F0} s";
         if (!_loaded || seconds == App.Settings.CrossfadeSeconds) return;
-        App.Settings.Update(s => s.CrossfadeSeconds = seconds);
+        App.Settings.Update(s => s.CrossfadeSeconds = seconds, save: false);
+        SaveSettingsSoon();
     }
 
     private void OnCloseToTrayToggled(object sender, RoutedEventArgs e)
@@ -1036,7 +1077,8 @@ public sealed partial class SettingsPage : Page
         {
             s.LyricsLineSpacing = e.NewValue;
             s.LyricsPreset = LyricsPreset.Custom;
-        });
+        }, save: false);
+        SaveSettingsSoon();
         LyricsSpacingValue.Text = $"{e.NewValue:F2}×";
         ShowCustomPreset();
     }
@@ -1052,7 +1094,8 @@ public sealed partial class SettingsPage : Page
         {
             s.LyricsIdleOpacity = Math.Round(e.NewValue, 2);
             s.LyricsPreset = LyricsPreset.Custom;
-        });
+        }, save: false);
+        SaveSettingsSoon();
         ShowCustomPreset();
     }
 
@@ -1067,7 +1110,8 @@ public sealed partial class SettingsPage : Page
         {
             s.LyricsSoftness = e.NewValue;
             s.LyricsPreset = LyricsPreset.Custom;
-        });
+        }, save: false);
+        SaveSettingsSoon();
         ShowCustomPreset();
     }
 
@@ -1082,7 +1126,8 @@ public sealed partial class SettingsPage : Page
         {
             s.LyricsGlowIntensity = e.NewValue;
             s.LyricsPreset = LyricsPreset.Custom;
-        });
+        }, save: false);
+        SaveSettingsSoon();
         LyricsGlowValue.Text = $"{e.NewValue:F1}×";
         ShowCustomPreset();
     }
@@ -1106,7 +1151,8 @@ public sealed partial class SettingsPage : Page
         if (!_loaded) return;
         var size = Math.Round(e.NewValue);
         LyricsSizeValue.Text = $"{size:F0}";
-        App.Settings.Update(s => s.LyricsFontSize = size);
+        App.Settings.Update(s => s.LyricsFontSize = size, save: false);
+        SaveSettingsSoon();
     }
 
     private void OnLyricsGapChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -1114,7 +1160,8 @@ public sealed partial class SettingsPage : Page
         if (!_loaded) return;
         var gap = Math.Round(e.NewValue);
         LyricsGapValue.Text = $"{gap:F0}";
-        App.Settings.Update(s => s.LyricsLineGap = gap);
+        App.Settings.Update(s => s.LyricsLineGap = gap, save: false);
+        SaveSettingsSoon();
     }
 
     private void OnRelookLyricsClick(object sender, RoutedEventArgs e)

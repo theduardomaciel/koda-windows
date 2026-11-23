@@ -103,6 +103,25 @@ public class SettingsTests
     }
 
     [Fact]
+    public void AnUnsavedChangeStillNotifies()
+    {
+        var settings = new Settings();
+        var heard = 0;
+        Settings? last = null;
+        settings.Changed += changed =>
+        {
+            heard++;
+            last = changed;
+        };
+
+        settings.Update(s => s.Volume = 42, save: false);
+
+        Assert.Equal(42, settings.Volume);
+        Assert.Equal(1, heard);
+        Assert.Same(settings, last);
+    }
+
+    [Fact]
     public void TheLastServiceCannotBeTurnedOff()
     {
         var settings = new Settings();
