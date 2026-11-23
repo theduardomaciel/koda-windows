@@ -844,8 +844,7 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Told when the listener scrolls away from the line being sung, or back to it.</summary>
     public Action<bool>? ScrolledAwayChanged { get; set; }
 
-    /// <summary>Hands the panel back to the song: the line being sung glides into place.
-    /// Untimed lyrics have no line to return to, so they go back to the top.</summary>
+    /// <summary>Hands the panel back to the song: the line being sung glides into place.</summary>
     public void ResumeFollowing()
     {
         UserScrolled = false;
@@ -855,14 +854,6 @@ internal sealed class LyricsPanel : IDisposable
             // window stayed behind; materialize the lines around the song again.
             EnsureRichWindow(Lyrics.IndexOf(_position, _lyricLines) ?? 0);
             GlideTo(_current);
-        }
-        else
-        {
-            // Plain lyrics have no current line: the start of the words is the place
-            // the pill can return to.
-            _tween.Stop();
-            _needsGlide = false;
-            _scroll.ChangeView(null, 0, null, true);
         }
     }
 

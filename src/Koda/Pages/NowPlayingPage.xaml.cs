@@ -143,13 +143,13 @@ public sealed partial class NowPlayingPage : Page
                 }
             }),
             handledEventsToo: true);
-        // The follow pill points at the line being sung, or offers the top for plain
-        // lyrics; keep it true as the panel scrolls, including with the wheel.
+        // The follow pill's chevron points at the line being sung; keep it true as the
+        // panel scrolls, including with the wheel or the scrollbar.
         LyricsScroll.ViewChanged += (_, _) =>
         {
             if (_followPillShown)
             {
-                UpdateFollowPill();
+                UpdateFollowArrow();
             }
         };
     }
@@ -725,38 +725,28 @@ public sealed partial class NowPlayingPage : Page
     private void ShowFollowPill(bool show)
     {
         show &= _lyricsOpen;
-        if (show)
-        {
-            UpdateFollowPill();
-        }
-
+        // Untimed lyrics have no line to follow: the pill would offer nothing.
+        show &= _lyrics?.Lines.Count > 0;
         if (show == _followPillShown)
         {
             return;
         }
 
         _followPillShown = show;
+        if (show)
+        {
+            UpdateFollowArrow();
+        }
+
         FollowLyricsButton.IsHitTestVisible = show;
         FollowLyricsButton.IsTabStop = show;
         Fade(FollowLyricsButton, show ? 1 : 0, 160);
     }
 
-    /// <summary>The pill's words and chevron: synced lyrics return to the sung line,
-    /// untimed lyrics can only return to the top of the words.</summary>
-    private void UpdateFollowPill()
-    {
-        var timed = _lyrics?.Lines.Count > 0;
-        FollowLyricsLabel.Text = timed ? "Follow along" : "Back to top";
-        ToolTipService.SetToolTip(
-            FollowLyricsButton,
-            timed ? "Jump back to the line being sung" : "Scroll back to the top of the lyrics");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
-            FollowLyricsButton,
-            timed ? "Follow the lyrics" : "Back to top");
-        FollowLyricsChevron.Glyph = !timed || _lyrics?.CurrentLineIsAbove != false
-            ? "\uE70E"
-            : "\uE70D";
-    }
+    /// <summary>The chevron points at the line being sung: up when it is above the middle
+    /// of the panel, down when it is below.</summary>
+    private void UpdateFollowArrow() =>
+        FollowLyricsChevron.Glyph = _lyrics?.CurrentLineIsAbove != false ? "\uE70E" : "\uE70D";
 
     private void OnFollowLyricsClick(object sender, RoutedEventArgs e) => _lyrics?.ResumeFollowing();
 
