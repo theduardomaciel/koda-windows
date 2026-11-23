@@ -407,7 +407,10 @@
                             </muxc:NavigationView.FooterMenuItems>
 
                             <Grid>
-                                <Frame x:Name="ContentFrame" />
+                                <!-- CacheSize must be non-zero for NavigationCacheMode="Enabled"
+                                     pages to survive a navigation; Now Playing is one (its
+                                     lyrics panel and cover art are expensive to rebuild). -->
+                                <Frame x:Name="ContentFrame" CacheSize="3" />
                                 <!-- Non-blocking notes and faults: never a dialog. -->
                                 <muxc:InfoBar
                                     x:Name="StatusRibbon"

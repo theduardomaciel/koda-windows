@@ -209,6 +209,7 @@ internal sealed class LyricsPanel : IDisposable
     private readonly Border _spacer = new();
     private readonly DispatcherQueueTimer _tween;
     private readonly DispatcherQueueTimer _frame;
+    private readonly DispatcherQueueTimer? _probe;
 
     private readonly List<Row> _rows = [];
     private readonly List<LyricLine> _lyricLines = [];
@@ -490,9 +491,20 @@ internal sealed class LyricsPanel : IDisposable
             }
         };
 
+        // Diagnostic only: the live log ticks while the panel paints, so the resting floor
+        // after a close has no trace. This slow timer keeps reporting private and managed
+        // memory across the whole session, whether the panel is open or not; it never
+        // collects, or the floor it is meant to show would erase itself.
+        if (_gcProbe)
+        {
+            _probe = queue.CreateTimer();
+            _probe.Interval = TimeSpan.FromSeconds(20);
+            _probe.Tick += (_, _) => LogIdleProbe();
+            _probe.Start();
+        }
+
         // The words are laid out in rows that fit the panel, so a line breaks where it should.
-        _scroll.SizeChanged += (_, _) => RefreshLayout();
-        // The pane collapse, a monitor move and a zoom change can all leave the scroll
+        _scroll.SizeChanged += (_, _) => RefreshLayout();        // The pane collapse, a monitor move and a zoom change can all leave the scroll
         // viewer at a different size without a SizeChanged reaching us; every layout pass
         // checks. The check is cheap, but the transform probe it asks for is not: a glide
         // scrolls the panel every frame and each frame's arrange raised it, so the probe
@@ -4338,6 +4350,31 @@ internal sealed class LyricsPanel : IDisposable
         }
     }
 
+    /// <summary>Diagnostic only: reports private and managed memory on a slow timer,
+    /// independent of the panel, so the resting floor after a close has a trace in the
+    /// same log. It reads only and never collects, or the floor would erase itself.</summary>
+    private void LogIdleProbe()
+    {
+        var process = System.Diagnostics.Process.GetCurrentProcess();
+        process.Refresh();
+        var privateBytes = process.PrivateMemorySize64;
+        var managed = GC.GetTotalMemory(false);
+        try
+        {
+            _gcProbeLogPath ??= System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(), "koda-lyrics-gc.txt");
+            System.IO.File.AppendAllText(
+                _gcProbeLogPath,
+                $"{DateTime.Now:HH:mm:ss.fff} probe=idle private={privateBytes / 1048576.0:F1}MB " +
+                $"managed={managed / 1048576.0:F1}MB gc0={GC.CollectionCount(0)} " +
+                $"gc2={GC.CollectionCount(2)}{Environment.NewLine}");
+        }
+        catch (Exception)
+        {
+            // diagnostics must not take the panel down
+        }
+    }
+
     /// <summary>Diagnostic only: once a second, logs the live glow count, the letters
     /// painted this frame, and private-byte growth.</summary>
     private void LogLiveSet()
@@ -4624,6 +4661,7 @@ internal sealed class LyricsPanel : IDisposable
         _hoverEase?.Dispose();
         _tween.Stop();
         _frame.Stop();
+        _probe?.Stop();
     }
 }
 
