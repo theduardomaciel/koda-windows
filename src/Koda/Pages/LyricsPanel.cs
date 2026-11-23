@@ -310,6 +310,10 @@ internal sealed class LyricsPanel : IDisposable
     private string? _gcProbeLogPath;
     private StackPanel? _leadingDots;
     private List<Ellipse> _leadingDotItems = [];
+    /// <summary>The unsynced lyrics' lines, each its own block so the line gap applies
+    /// between them. A blank line is an empty block and becomes a stanza break.</summary>
+    private StackPanel? _plainStack;
+    private readonly List<TextBlock> _plainLines = [];
     private Row? _current;
     private double _offset;
     private bool _userScrolled;
@@ -1191,9 +1195,24 @@ internal sealed class LyricsPanel : IDisposable
 
         if (!lyrics.IsSynced)
         {
-            if (changes.HasFlag(LookChange.Structure) || changes.HasFlag(LookChange.Shape))
+            if (changes.HasFlag(LookChange.Structure))
             {
+                // A palette change or a rebuilt sheet: the plain blocks are re-made from
+                // the new colour and the current settings.
                 RebuildRowsForLook();
+                return;
+            }
+
+            if (changes.HasFlag(LookChange.Shape))
+            {
+                ApplyTextWidth();
+                Reshape(resetGlyphs: false);
+                _scroll.UpdateLayout();
+            }
+
+            if (changes.HasFlag(LookChange.Gap))
+            {
+                ApplyLineGap();
             }
 
             return;
@@ -1404,7 +1423,7 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>Updates only the space between lines: no text is re-shaped.</summary>
     private void ApplyLineGap()
     {
-        if (_rows.Count == 0)
+        if (_rows.Count == 0 && _plainStack is null)
         {
             return;
         }
@@ -1423,6 +1442,11 @@ internal sealed class LyricsPanel : IDisposable
             {
                 SizeDots(dots, row.Dots, _fontSize, _lineGap * 0.75);
             }
+        }
+
+        if (_plainStack is { } plain)
+        {
+            plain.Spacing = _lineGap;
         }
 
         if (_leadingDots is { } leading)
@@ -1608,6 +1632,8 @@ internal sealed class LyricsPanel : IDisposable
         _lines.Children.Clear();
         _rows.Clear();
         _pendingRows.Clear();
+        _plainLines.Clear();
+        _plainStack = null;
         _lyricLines.Clear();
         _leadingDots = null;
         _leadingDotItems = [];
@@ -1673,6 +1699,8 @@ internal sealed class LyricsPanel : IDisposable
         _lines.Children.Clear();
         _rows.Clear();
         _pendingRows.Clear();
+        _plainLines.Clear();
+        _plainStack = null;
         _leadingDots = null;
         _leadingDotItems = [];
         _tween.Stop();
@@ -1684,22 +1712,42 @@ internal sealed class LyricsPanel : IDisposable
 
         if (!lyrics.IsSynced)
         {
-            // Untimed lyrics are shown as they came: one block, no timing.
+            // Untimed lyrics keep their own lines: each is a block in a stack whose
+            // spacing is the listener's line gap. One dense text block ignored the gap
+            // setting and made the words read as a paragraph.
             var size = _fontSize;
-            var plain = new TextBlock
+            var brush = Brush(0xD9);
+            var stack = new StackPanel { Spacing = _lineGap };
+            _plainStack = stack;
+            foreach (var text in PlainLines(lyrics.Plain))
             {
-                Text = lyrics.Plain,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = Brush(0xD9),
-            };
-            Shape(plain, size);
-            _lines.Children.Add(plain);
+                var line = new TextBlock
+                {
+                    Text = text,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = brush,
+                };
+                Shape(line, size);
+                if (text.Length > 0)
+                {
+                    _plainLines.Add(line);
+                }
+
+                stack.Children.Add(line);
+            }
+
+            if (stack.Children.Count > 0)
+            {
+                _lines.Children.Add(stack);
+            }
+
             if (MakeCredits(lyrics) is { } credits)
             {
                 _lines.Children.Add(credits);
             }
 
             _rowsBuilt = true;
+            ApplyTextWidth();
             UpdateSpacers();
             return;
         }
@@ -1917,6 +1965,28 @@ internal sealed class LyricsPanel : IDisposable
             // A windowed panel's rows collapse back into the pool as the song moves;
             // the pool must not keep every word of the biggest song for its life.
             TrimPools(400, 60);
+        }
+    }
+
+    /// <summary>Splits untimed lyrics into the lines the provider gave. A blank line is
+    /// kept as an empty block, so a verse break still separates the stanzas.</summary>
+    private static IEnumerable<string> PlainLines(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            yield break;
+        }
+
+        var lines = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var end = lines.Length;
+        while (end > 0 && string.IsNullOrWhiteSpace(lines[end - 1]))
+        {
+            end--;
+        }
+
+        for (var index = 0; index < end; index++)
+        {
+            yield return lines[index].Trim();
         }
     }
 
@@ -3158,6 +3228,16 @@ internal sealed class LyricsPanel : IDisposable
             }
         }
 
+        if (_plainStack is { } plain)
+        {
+            plain.Spacing = _lineGap;
+            foreach (var line in _plainLines)
+            {
+                Shape(line, _fontSize);
+                line.MaxWidth = lineWidth;
+            }
+        }
+
         if (_leadingDots is { } leading)
         {
             SizeDots(leading, _leadingDotItems, _fontSize, _lineGap * 0.75);
@@ -3315,6 +3395,15 @@ internal sealed class LyricsPanel : IDisposable
             row.Background.WrapWidth = contentWidth;
         }
 
+        if (_plainStack is { } plain)
+        {
+            plain.Spacing = _lineGap;
+            foreach (var line in _plainLines)
+            {
+                line.MaxWidth = contentWidth;
+            }
+        }
+
         if (_maskCacheLines is not null)
         {
             // The cached twins wrap inside the panel, so every one of them stays on
@@ -3454,6 +3543,8 @@ internal sealed class LyricsPanel : IDisposable
         _lines.Children.Clear();
         _rows.Clear();
         _pendingRows.Clear();
+        _plainLines.Clear();
+        _plainStack = null;
         _rowsBuilt = false;
         _current = null;
         _leadingDots = null;
