@@ -150,6 +150,31 @@ shadow.BlurRadius = (float)(4 + 12 * Math.Clamp(glow, 0, 1));
 
 There are no composition animations to start, stop or seek.
 
+### Light and dark surfaces
+
+The glow has its own colour, `_glowColor`, instead of borrowing the text's. A
+`DropShadow` can only darken what sits behind it, so the colour that reads as
+light on the player would read as a smear in the light drawer:
+
+| Surface | Colour | Strength |
+|---|---|---|
+| Now Playing (always dark) | `#FFFFFF` | full range (`_glowMax = 2`; opacity still clamps at 1) |
+| Inline drawer and mini (light theme) | `#595959` | capped at `0.4` (`_glowMax`) |
+
+The cap also shortens the reach, because `BlurRadius` is derived from the same
+strength (`4 + 12 × opacity`). `_glow` still gates the swell and every letter's
+wave is applied before the glow block in `SetLetterMotion`; `_glowMax` only limits
+the halo, so a capped or disabled glow never removes the motion.
+
+A white "paper bloom" was tried first: keep the glow white in both themes so it
+lifts the `SolidBackgroundFillColorBase` surface instead of inking it. On the
+near-white drawer it was not visible, so the grey cap above is the current state.
+
+**Open decision:** disable the halo in light mode rather than tinting it.
+Setting `_glowMax = 0` in the light branch of `ReadPalette` does that without
+touching the motion, and no shadow or mask is built because the strength never
+crosses the `0.01` gate in `SetLetterMotion`.
+
 ### Measured cost
 
 Capture: City Walls, ten-second segment, the old halo baseline and the new
@@ -277,6 +302,9 @@ requires Win2D.
 - The Gaussian `DropShadow` glow covers the letter views. Word-level glow was
   not part of the previous halo implementation either, so it is still a
   follow-up.
+- A light surface has no light to add, so the light theme's glow is a faint grey
+  halo rather than a bloom. Whether to remove it there is still open; see
+  [Light and dark surfaces](#light-and-dark-surfaces).
 - Per-line `filter: blur()` is not implemented and still needs Win2D or a
   custom text pipeline.
 - The performance sample is one ten-second run. GPU attribution and presented
