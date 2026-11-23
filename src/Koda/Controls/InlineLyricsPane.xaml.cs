@@ -92,13 +92,13 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
             }),
             handledEventsToo: true);
 
-        // The follow pill's chevron points at the line being sung; keep it true while
-        // the panel scrolls, including with the wheel or the scrollbar.
+        // The follow pill points at the line being sung, or offers the top for plain
+        // lyrics; keep it true while the panel scrolls, including with the wheel.
         LyricsScroll.ViewChanged += (_, _) =>
         {
             if (_followPillShown)
             {
-                UpdateFollowArrow();
+                UpdateFollowPill();
             }
         };
 
@@ -338,12 +338,24 @@ public sealed partial class InlineLyricsPane : UserControl, IDisposable
         FollowLyricsButton.Opacity = show ? 1 : 0;
         if (show)
         {
-            UpdateFollowArrow();
+            UpdateFollowPill();
         }
     }
 
-    private void UpdateFollowArrow() =>
-        FollowLyricsChevron.Glyph = _lyrics.CurrentLineIsAbove ? "\uE70E" : "\uE70D";
+    /// <summary>The pill's words and chevron: synced lyrics return to the sung line,
+    /// untimed lyrics can only return to the top of the words.</summary>
+    private void UpdateFollowPill()
+    {
+        var timed = _lyrics.Lines.Count > 0;
+        FollowLyricsLabel.Text = timed ? "Follow along" : "Back to top";
+        ToolTipService.SetToolTip(
+            FollowLyricsButton,
+            timed ? "Jump back to the line being sung" : "Scroll back to the top of the lyrics");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
+            FollowLyricsButton,
+            timed ? "Follow the lyrics" : "Back to top");
+        FollowLyricsChevron.Glyph = !timed || _lyrics.CurrentLineIsAbove ? "\uE70E" : "\uE70D";
+    }
 
     private void OnFollowLyricsClick(object sender, RoutedEventArgs e) => _lyrics.ResumeFollowing();
 
