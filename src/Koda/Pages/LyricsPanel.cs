@@ -177,6 +177,25 @@ internal sealed class LyricsPanel : IDisposable
     private double _maskTwinOpacity = 0.01;
     private string _maskHide = "";
     private int _paintedLetters;
+
+    /// <summary>Whether the shared glyph mask cache is allowed at all. It is the default;
+    /// KODA_LYRICS_GLYPH_CACHE=0 restores the per-letter twins for an A/B run or if a
+    /// compositor build misbehaves with one mask shared by several shadows.</summary>
+    private readonly bool _glyphCache =
+        Environment.GetEnvironmentVariable("KODA_LYRICS_GLYPH_CACHE") != "0";
+
+    /// <summary>How many distinct glyph masks one panel may keep. Split letters are Latin,
+    /// Greek or Cyrillic only (eight glyphs max, one or two sizes), so this holds every
+    /// glyph of a song with room to spare; past it a letter falls back to its own twin.</summary>
+    private const int GlyphMaskLimit = 256;
+
+    private readonly Dictionary<(string Text, double Size, bool Soft, LyricsRenderer Renderer), GlyphMask> _glyphMasks = [];
+    private Grid? _maskCacheHost;
+    private WordWrapPanel? _maskCacheLines;
+    private bool _glyphCacheUnavailable;
+    private bool _glyphCacheResetWanted;
+    private double _glyphCacheSize;
+    private int _masksReused;
     private readonly bool _frameLog = Environment.GetEnvironmentVariable("KODA_LYRICS_FRAME_LOG") == "1";
     private readonly bool _liveLog = Environment.GetEnvironmentVariable("KODA_LYRICS_LIVE_LOG") == "1";
     private readonly System.Diagnostics.Stopwatch _frameClock = System.Diagnostics.Stopwatch.StartNew();
@@ -324,6 +343,9 @@ internal sealed class LyricsPanel : IDisposable
         public DropShadow? Shadow { get; set; }
         public SpriteVisual? GlowVisual { get; set; }
         public CompositionBrush? Mask { get; set; }
+        /// <summary>Whether <see cref="Mask"/> is a shared glyph-cache mask. A shared mask
+        /// belongs to the cache and is never disposed with the letter.</summary>
+        public bool MaskShared { get; set; }
         public CompositionBrush? GlowBrush { get; set; }
         public bool NeedsMaskRefresh { get; set; }
         public bool GlowWanted { get; set; }
@@ -403,6 +425,27 @@ internal sealed class LyricsPanel : IDisposable
         double Width,
         double MarginLeft,
         double MarginRight);
+
+    /// <summary>One shared glyph mask: the static twin its alpha was taken from, kept laid
+    /// out in the panel's hidden cache host, and the mask itself once it has been taken.
+    /// One entry serves every letter that draws the same glyph, so the per-letter twin -
+    /// an extra TextBlock and glow-tree node per letter - is gone.</summary>
+    private sealed class GlyphMask
+    {
+        public required TextBlock Twin { get; init; }
+        public CompositionBrush? Mask { get; set; }
+    }
+
+    /// <summary>Whether a letter can get a shared mask this frame.</summary>
+    private enum MaskState
+    {
+        /// <summary>The glyph's mask is ready; the letter can use it.</summary>
+        Ready,
+        /// <summary>The glyph's twin was just built and needs a layout pass first.</summary>
+        Waiting,
+        /// <summary>The cache is off, full, or has no host: the letter's own twin serves.</summary>
+        Unavailable,
+    }
 
     public LyricsPanel(ScrollViewer scroll, StackPanel lines, DispatcherQueue queue)
     {
@@ -793,13 +836,14 @@ internal sealed class LyricsPanel : IDisposable
         ReadPalette();
         var settings = Koda.Core.Settings.Current;
         _font = string.IsNullOrWhiteSpace(settings.LyricsFont) ? LyricFont : new FontFamily(settings.LyricsFont);
-        // A different family shapes every cached width differently; the sizes and the
-        // renderer are part of each key, but the family empties the whole cache.
+        // A different family shapes every cached width and every glyph mask differently;
+        // the sizes and the renderer are part of each key, but the family empties both.
         var family = string.IsNullOrWhiteSpace(settings.LyricsFont) ? "" : settings.LyricsFont;
         if (family != _shapedFont)
         {
             _shapedFont = family;
             _shapedWidths.Clear();
+            _glyphCacheResetWanted = true;
         }
         _lineHeightFactor = LineHeightFactor * settings.LyricsLineSpacing;
         _feather = 0.08 + 0.55 * settings.LyricsSoftness;
@@ -837,10 +881,24 @@ internal sealed class LyricsPanel : IDisposable
             && Environment.GetEnvironmentVariable("KODA_LYRICS_GLOW_OFF") != "1";
         _motion = settings.LyricsMotion
             && Environment.GetEnvironmentVariable("KODA_LYRICS_MOTION_OFF") != "1";
+        if (settings.LyricsRenderer != _renderer)
+        {
+            // The renderer is part of every glyph mask's key (weight and tracking are its
+            // shaping), and the entries of the old renderer should not linger.
+            _glyphCacheResetWanted = true;
+        }
+
         _renderer = settings.LyricsRenderer;
         _compensateSpacing = settings.LyricsCompensateSpacing
             && Environment.GetEnvironmentVariable("KODA_NP_NO_SPACING_COMP") != "1";
         UpdateScale();
+        if (Math.Abs(_fontSize - _glyphCacheSize) >= 0.25)
+        {
+            // Every shared mask was shaped at the old size; the keys carry the size, but
+            // the old entries would only sit in the cache until it filled.
+            _glyphCacheSize = _fontSize;
+            _glyphCacheResetWanted = true;
+        }
     }
 
     /// <summary>The size the words are drawn at: the listener's size, scaled down when the
@@ -864,6 +922,12 @@ internal sealed class LyricsPanel : IDisposable
         _frame.Stop();
         UserScrolled = false;
         ReleaseGlows();
+        if (_glyphCacheResetWanted)
+        {
+            // A new font or renderer: no letter holds a shared mask after ReleaseGlows.
+            ResetGlyphMasks();
+        }
+
         ReturnAllRowWords();
         _repaintFrom = -1;
         _repaintTo = -1;
@@ -2048,8 +2112,13 @@ internal sealed class LyricsPanel : IDisposable
                 // Test only: a twin whose fill is a fixed solid, so the mask source is
                 // never invalidated by the sharp letter's per-frame gradient. It is
                 // nearly transparent but still rendered, which GetAlphaMask needs.
-                (maskText, maskWrapper) = MakeMaskTwin(text, fontSize, soft);
-                glowHost.Children.Add(maskWrapper);
+                // With the shared glyph cache serving this panel, the twin lives once
+                // per glyph in the cache host instead of once per letter.
+                if (!UseGlyphCache)
+                {
+                    (maskText, maskWrapper) = MakeMaskTwin(text, fontSize, soft);
+                    glowHost.Children.Add(maskWrapper);
+                }
             }
         }
 
@@ -2178,6 +2247,15 @@ internal sealed class LyricsPanel : IDisposable
     /// (a narrower window, a DPI change or UI zoom), keeping the same elements.</summary>
     private void Reshape()
     {
+        if (_glyphMasks.Count > 0)
+        {
+            // Every shared mask was shaped at the old size. The glows let go of theirs
+            // first (release is what makes disposing them safe), then the cache empties
+            // and the next paint rebuilds glows at the new size.
+            ReleaseGlows();
+            ResetGlyphMasks();
+        }
+
         var (sidePad, endPad) = TextInsets();
         _lines.Margin = new Thickness(sidePad, 0, endPad, 0);
         var lineWidth = Math.Max(0, _panelWidth - sidePad - endPad);
@@ -2388,6 +2466,13 @@ internal sealed class LyricsPanel : IDisposable
             }
 
             row.Background.WrapWidth = contentWidth;
+        }
+
+        if (_maskCacheLines is not null)
+        {
+            // The cached twins wrap inside the panel, so every one of them stays on
+            // screen and can hand out its alpha.
+            _maskCacheLines.WrapWidth = contentWidth;
         }
     }
 
@@ -3535,6 +3620,116 @@ internal sealed class LyricsPanel : IDisposable
     private TextBlock MaskSource(Letter letter) =>
         _glowStaticMask && letter.MaskText is { } twin ? twin : letter.Text;
 
+    /// <summary>Whether the shared glyph cache serves this panel: it needs masks, the
+    /// static twin to take one from, and a host to lay the twins out in. Every other mode
+    /// keeps the per-letter twin.</summary>
+    private bool UseGlyphCache =>
+        _glyphCache && _glow && _glowStaticMask && !_glowNoMask && !_glyphCacheUnavailable;
+
+    /// <summary>The hidden host the cached twins are laid out in, so each one can give up
+    /// its alpha once and stay alive for every letter that shares the mask. It is a
+    /// sibling of the scroll viewer, invisible (the wrappers keep their 0.01 opacity), and
+    /// out of the layout: the hosts put both in the same single-cell grid.</summary>
+    private WordWrapPanel? EnsureMaskCacheHost()
+    {
+        if (_maskCacheLines is not null)
+        {
+            return _maskCacheLines;
+        }
+
+        if (_glyphCacheUnavailable || _scroll.Parent is not Panel parent)
+        {
+            _glyphCacheUnavailable = true;
+            return null;
+        }
+
+        _maskCacheLines = new WordWrapPanel
+        {
+            Inset = 0,
+            RowSpacing = 2,
+            IsHitTestVisible = false,
+        };
+        if (_panelWidth > 0)
+        {
+            _maskCacheLines.WrapWidth = _panelWidth;
+        }
+        _maskCacheHost = new Grid
+        {
+            IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        _maskCacheHost.Children.Add(_maskCacheLines);
+        parent.Children.Add(_maskCacheHost);
+        return _maskCacheLines;
+    }
+
+    /// <summary>The shared mask for a letter's glyph, taken once per glyph and size from a
+    /// cache-owned twin. A letter that arrives before the twin was measured waits a frame;
+    /// a letter the cache cannot serve (off, full, no host) falls back to its own twin.</summary>
+    private MaskState LetterMask(Letter letter, out CompositionBrush? mask)
+    {
+        mask = null;
+        if (!UseGlyphCache)
+        {
+            return MaskState.Unavailable;
+        }
+
+        var key = (letter.Text.Text, letter.MaskFontSize, letter.MaskSoft, _renderer);
+        if (!_glyphMasks.TryGetValue(key, out var entry))
+        {
+            if (_glyphMasks.Count >= GlyphMaskLimit || EnsureMaskCacheHost() is not { } lines)
+            {
+                return MaskState.Unavailable;
+            }
+
+            var (twin, wrapper) = MakeMaskTwin(letter.Text.Text, letter.MaskFontSize, letter.MaskSoft);
+            _glyphMasks[key] = new GlyphMask { Twin = twin };
+            lines.Add(wrapper, joinsPrevious: false);
+            return MaskState.Waiting; // the next layout pass measures the twin
+        }
+
+        if (entry.Mask is null)
+        {
+            if (entry.Twin.ActualWidth < 0.5 || entry.Twin.ActualHeight < 0.5)
+            {
+                return MaskState.Waiting;
+            }
+
+            entry.Mask = entry.Twin.GetAlphaMask();
+            _masksCreated++;
+        }
+
+        mask = entry.Mask;
+        return MaskState.Ready;
+    }
+
+    /// <summary>Disposes every shared glyph mask and empties the cache host. Only valid
+    /// while no letter is showing a glow: a live shadow still references the mask it was
+    /// given. Called on a font or renderer change, on a size re-shape, and on dispose -
+    /// each one releases the glows first.</summary>
+    private void ResetGlyphMasks()
+    {
+        _glyphCacheResetWanted = false;
+        if (_glyphMasks.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var entry in _glyphMasks.Values)
+        {
+            if (entry.Mask is { } mask)
+            {
+                mask.Dispose();
+                _masksDisposed++;
+                _masksDisposedSinceCollection++;
+            }
+        }
+
+        _glyphMasks.Clear();
+        _maskCacheLines?.ClearWords();
+    }
+
     /// <summary>Whether the mask's source has been laid out. A twin added this frame has
     /// no size until the next layout pass, and GetAlphaMask needs one.</summary>
     private bool MaskSourceHasSize(Letter letter) =>
@@ -3555,6 +3750,14 @@ internal sealed class LyricsPanel : IDisposable
         letter.Mask = null;
         if (mask is null)
         {
+            return;
+        }
+
+        if (letter.MaskShared)
+        {
+            // The brush belongs to the glyph cache and may still be serving other
+            // letters; the letter only lets go of its reference.
+            letter.MaskShared = false;
             return;
         }
 
@@ -3628,22 +3831,36 @@ internal sealed class LyricsPanel : IDisposable
             return; // the first paint can run before the letter has a size
         }
 
-        if (_glowStaticMask && !_glowNoMask && letter.MaskText is null)
+        // The shared glyph cache first: one mask serves every letter of the glyph.
+        var shared = MaskState.Unavailable;
+        CompositionBrush? sharedMask = null;
+        if (!_glowNoMask)
+        {
+            shared = LetterMask(letter, out sharedMask);
+            if (shared == MaskState.Waiting)
+            {
+                return; // the glyph's twin is measured on the next layout pass
+            }
+        }
+
+        // The letter's own twin serves when the cache cannot (off, full, no host, or a
+        // test mode without twins). A letter that has one keeps using it.
+        var ownTwin = !_glowNoMask && shared != MaskState.Ready;
+        if (ownTwin && _glowStaticMask && letter.MaskText is null)
         {
             // The twin went with the mask when the glow was released: a fresh one must
             // exist before any mask is taken, and it needs a layout pass before its
-            // alpha can be read, so its mask arrives a frame later. (Only the static-twin
-            // mode has twins; the other modes take the mask from the sharp letter.)
+            // alpha can be read, so its mask arrives a frame later.
             EnsureMaskTwin(letter);
             return;
         }
 
-        if (!_glowNoMask && !MaskSourceHasSize(letter))
+        if (ownTwin && !MaskSourceHasSize(letter))
         {
             return; // a fresh twin is measured on the next layout pass
         }
 
-        if (!_glowNoMask && letter.Mask is not null && letter.NeedsMaskRefresh
+        if (ownTwin && letter.Mask is not null && letter.NeedsMaskRefresh
             && letter.MaskWrapper is not null)
         {
             // The font or size changed. Dispose the stale mask with its twin, then let
@@ -3663,11 +3880,24 @@ internal sealed class LyricsPanel : IDisposable
         shadow.BlurRadius = _glowBlurFixed ? 12 : 0;
         if (!_glowNoMask)
         {
-            if (letter.Mask is null || letter.NeedsMaskRefresh)
+            if (shared == MaskState.Ready)
+            {
+                // The mask is the cache's; the letter only points at it.
+                if (!ReferenceEquals(letter.Mask, sharedMask))
+                {
+                    letter.Mask = sharedMask;
+                    letter.MaskShared = true;
+                    _masksReused++;
+                }
+
+                letter.NeedsMaskRefresh = false;
+            }
+            else if (letter.Mask is null || letter.NeedsMaskRefresh)
             {
                 // Keep the mask while this letter stays in the live window; a seek
                 // back into the same window can reuse it instead of taking a new one.
                 letter.Mask = MaskSource(letter).GetAlphaMask();
+                letter.MaskShared = false;
                 _masksCreated++;
                 letter.NeedsMaskRefresh = false;
             }
@@ -3713,6 +3943,29 @@ internal sealed class LyricsPanel : IDisposable
             return;
         }
 
+        if (UseGlyphCache)
+        {
+            var shared = LetterMask(letter, out var sharedMask);
+            if (shared == MaskState.Waiting)
+            {
+                return;
+            }
+
+            if (shared == MaskState.Ready)
+            {
+                if (!ReferenceEquals(letter.Mask, sharedMask))
+                {
+                    letter.Shadow.Mask = sharedMask;
+                    letter.Mask = sharedMask;
+                    letter.MaskShared = true;
+                    _masksReused++;
+                }
+
+                letter.NeedsMaskRefresh = false;
+                return;
+            }
+        }
+
         if (letter.NeedsMaskRefresh && letter.Mask is not null && letter.MaskWrapper is not null)
         {
             // The font or size changed: the old mask is stale, and it may only be
@@ -3734,6 +3987,7 @@ internal sealed class LyricsPanel : IDisposable
         {
             letter.Shadow.Mask = mask;
             letter.Mask = mask;
+            letter.MaskShared = false;
         }
 
         letter.NeedsMaskRefresh = false;
@@ -3763,7 +4017,14 @@ internal sealed class LyricsPanel : IDisposable
 
         if (!keepMask && letter.Mask is not null)
         {
-            if (letter.MaskWrapper is not null)
+            if (letter.MaskShared)
+            {
+                // A shared glyph mask serves other letters and the cache; dropping the
+                // reference is all this letter does.
+                letter.Mask = null;
+                letter.MaskShared = false;
+            }
+            else if (letter.MaskWrapper is not null)
             {
                 // The letter is leaving the live window: dispose the mask together with
                 // the twin that produced it, and drop the twin rather than replacing it.
@@ -4111,7 +4372,7 @@ internal sealed class LyricsPanel : IDisposable
             System.IO.File.AppendAllText(
                 System.IO.Path.Combine(System.IO.Path.GetTempPath(), "koda-lyrics-live.txt"),
                 $"{DateTime.Now:HH:mm:ss.fff} test={_glowTest} live={live} painted={_paintedLetters} " +
-                $"masks={_masksCreated} disposed={_masksDisposed} built={_glowsBuilt} " +
+                $"masks={_masksCreated} reused={_masksReused} disposed={_masksDisposed} built={_glowsBuilt} " +
                 $"forced={_collectionsForced} hold={(GlowHeld ? 1 : 0)} " +
                 $"pools={_plainWordPool.Count}+{_splitWordPool.Count} " +
                 $"made={_plainWordsMade}+{_splitWordsMade}/{_lettersMade} " +
@@ -4348,6 +4609,14 @@ internal sealed class LyricsPanel : IDisposable
     {
         _scroll.ActualThemeChanged -= OnActualThemeChanged;
         ReleaseGlows();
+        ResetGlyphMasks();
+        if (_maskCacheHost is { } host && host.Parent is Panel parent)
+        {
+            parent.Children.Remove(host);
+        }
+
+        _maskCacheHost = null;
+        _maskCacheLines = null;
         _hoverOpacityIn?.Dispose();
         _hoverOpacityOut?.Dispose();
         _hoverScaleIn?.Dispose();
