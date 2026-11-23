@@ -87,6 +87,15 @@ internal sealed class LyricsPanel : IDisposable
     /// shadow's own opacity still scales the visible glow. It stays white in both
     /// themes because only its alpha is read.</summary>
     private readonly Color _maskTwinColor = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+
+    /// <summary>The glow's own colour, not the text's. White on the dark player, where it
+    /// adds light; a neutral grey in the light drawer, where the black text colour would
+    /// smear a second copy of the glyph instead of glowing.</summary>
+    private Color _glowColor = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+
+    /// <summary>How bright the glow may get. The dark player keeps the full range; the
+    /// light drawer caps the halo faint, because a light surface has no light to add.</summary>
+    private double _glowMax = 2;
     private Color _expressiveUnsung = Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF);
     private Color _expressiveHoverSung = Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF);
     private Color _expressiveHoverUnsung = Color.FromArgb(0xBF, 0xFF, 0xFF, 0xFF);
@@ -853,6 +862,8 @@ internal sealed class LyricsPanel : IDisposable
             _expressiveActiveHoverSung = Color.FromArgb(0xFF, 0x00, 0x00, 0x00);
             _expressiveActiveHoverUnsung = Color.FromArgb(0xF2, 0x00, 0x00, 0x00);
             _hoverBoxColor = Color.FromArgb(0x1A, 0x00, 0x00, 0x00);
+            _glowColor = Color.FromArgb(0xFF, 0x59, 0x59, 0x59);
+            _glowMax = 0.4;
             return;
         }
 
@@ -865,6 +876,8 @@ internal sealed class LyricsPanel : IDisposable
         _expressiveActiveHoverSung = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
         _expressiveActiveHoverUnsung = Color.FromArgb(0xF2, 0xFF, 0xFF, 0xFF);
         _hoverBoxColor = Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF);
+        _glowColor = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+        _glowMax = 2;
     }
 
     /// <summary>The appearance settings, read once per fill so a song never changes look
@@ -3497,7 +3510,7 @@ internal sealed class LyricsPanel : IDisposable
         if (word.LetterCount > 0)
         {
             _paintedLetters += word.LetterCount;
-            var strength = _glow ? Math.Clamp(_glowIntensity, 0, 2) : 0;
+            var strength = _glow ? Math.Min(_glowMax, Math.Clamp(_glowIntensity, 0, 2)) : 0;
             for (var letterIndex = 0; letterIndex < word.LetterCount; letterIndex++)
             {
                 var letter = word.Letters[letterIndex];
@@ -4087,7 +4100,7 @@ internal sealed class LyricsPanel : IDisposable
         var visual = ElementCompositionPreview.GetElementVisual(letter.GlowHost);
         var compositor = visual.Compositor;
         var shadow = compositor.CreateDropShadow();
-        shadow.Color = _sung;
+        shadow.Color = _glowColor;
         shadow.Offset = Vector3.Zero;
         shadow.Opacity = 0;
         shadow.BlurRadius = _glowBlurFixed ? 12 : 0;
