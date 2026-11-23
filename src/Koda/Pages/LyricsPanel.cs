@@ -154,8 +154,8 @@ internal sealed class LyricsPanel : IDisposable
     /// <summary>No size is fitted below this, however narrow the panel.</summary>
     private const double MinFontSize = 12;
 
-    // The look, read from the settings when a song's lyrics load. A change in
-    // Settings applies the next time the panel fills, not mid-song.
+    // The look, re-read when the panel opens and while it is visible: a settings
+    // change is applied to the words already on screen, without a song reload.
     private FontFamily _font = LyricFont;
     private double _lineHeightFactor = LineHeightFactor;
     private double _feather = Feather;
@@ -186,6 +186,53 @@ internal sealed class LyricsPanel : IDisposable
     private double _maskTwinOpacity = 0.01;
     private string _maskHide = "";
     private int _paintedLetters;
+
+    /// <summary>What a settings change needs from the panel. The look is diffed before it
+    /// is applied so an unrelated setting (volume, cache limit) costs nothing.</summary>
+    [Flags]
+    private enum LookChange
+    {
+        None = 0,
+        /// <summary>A repaint alone: idle opacity, softness, glow strength or motion.</summary>
+        Paint = 1,
+        /// <summary>The gap between lines: row margins and the interlude dots.</summary>
+        Gap = 2,
+        /// <summary>Text that has to be shaped again: size, family, line height, spacing.</summary>
+        Shape = 4,
+        /// <summary>Rows that have to be built again: backing vocals or the Expressive
+        /// split-syllable structure.</summary>
+        Structure = 8,
+        /// <summary>The theme's palette, which is baked into every fill.</summary>
+        Palette = 16,
+        /// <summary>The renderer's fill rule changed: every word is painted again.</summary>
+        Relight = 32,
+        /// <summary>The motion is off or on: stale lifts must be cleared from every word.</summary>
+        Motion = 64,
+    }
+
+    /// <summary>How often a visible panel applies a changing look while a slider moves:
+    /// about fifteen passes a second, not one per slider tick.</summary>
+    private const int LookPreviewIntervalMs = 66;
+
+    /// <summary>How long after the last settings change the rest of the rows and the
+    /// glyph masks are brought to the final look.</summary>
+    private const int LookSettleMs = 200;
+
+    /// <summary>A live look pass over the visible rows may spend this much before the
+    /// panel stops trying to preview and applies the rest once, on settle.</summary>
+    private const int LookApplyBudgetMs = 8;
+
+    private readonly DispatcherQueueTimer _lookTimer;
+    private readonly HashSet<Row> _visibleLookRows = [];
+    private readonly System.Diagnostics.Stopwatch _lookClock = new();
+    private bool _lookHooked;
+    private bool _lookDirty;
+    private bool _lookNeedsFullReshape;
+    private bool _lookPreviewActive;
+    private bool _lookLiveDisabled;
+    private long _lookSettleAtMs;
+    private Row? _lookAnchorRow;
+    private double _lookAnchorOffset;
 
     /// <summary>Whether the shared glyph mask cache is allowed at all. It is the default;
     /// KODA_LYRICS_GLYPH_CACHE=0 restores the per-letter twins for an A/B run or if a
@@ -518,6 +565,14 @@ internal sealed class LyricsPanel : IDisposable
             }
         };
 
+        // A look change is coalesced: the slider may raise Changed dozens of times a
+        // second, but the panel applies the latest look a few times per second while it
+        // moves, then finishes the off-screen rows once the listener stops.
+        _lookTimer = queue.CreateTimer();
+        _lookTimer.Interval = TimeSpan.FromMilliseconds(LookPreviewIntervalMs);
+        _lookTimer.IsRepeating = true;
+        _lookTimer.Tick += (_, _) => OnLookTick();
+
         // Diagnostic only: the live log ticks while the panel paints, so the resting floor
         // after a close has no trace. This slow timer keeps reporting private and managed
         // memory across the whole session, whether the panel is open or not; it never
@@ -660,11 +715,13 @@ internal sealed class LyricsPanel : IDisposable
 
         _panelWidth = width;
         _panelHeight = height;
-        ApplyTextWidth();
-        UpdateSpacers();
 
         var oldSize = _fontSize;
         UpdateScale();
+        // The insets depend on the fitted size, so the wrap widths are set after the
+        // scale is known; a narrower panel gets both the smaller words and their room.
+        ApplyTextWidth();
+        UpdateSpacers();
         if (Math.Abs(_fontSize - oldSize) >= 0.25)
         {
             Reshape();
@@ -769,9 +826,11 @@ internal sealed class LyricsPanel : IDisposable
             if (value)
             {
                 // The listener has taken the panel: let go of the glide at once, rather
-                // than fighting their scroll for the rest of its half second.
+                // than fighting their scroll for the rest of its half second. A live look
+                // preview also stops pinning the old top row.
                 _tween.Stop();
                 _needsGlide = false;
+                _lookAnchorRow = null;
             }
 
             ScrolledAwayChanged?.Invoke(value);
@@ -880,10 +939,25 @@ internal sealed class LyricsPanel : IDisposable
         _glowMax = 2;
     }
 
-    /// <summary>The appearance settings, read once per fill so a song never changes look
-    /// halfway through.</summary>
-    private void ReadLook()
+    /// <summary>Reads the appearance settings and reports what changed. The caller can
+    /// apply only what the change needs: a repaint, a gap update, a reshape, or new rows.</summary>
+    private LookChange ReadLook()
     {
+        var oldPalette = _paletteTheme;
+        var oldFamily = _shapedFont;
+        var oldRenderer = _renderer;
+        var oldLineHeight = _lineHeightFactor;
+        var oldFontSize = _fontSize;
+        var oldLineGap = _lineGap;
+        var oldIdle = _idleFar;
+        var oldFeather = _feather;
+        var oldGlowIntensity = _glowIntensity;
+        var oldGlow = _glow;
+        var oldMotion = _motion;
+        var oldBacking = _backingMode;
+        var oldCompensate = _compensateSpacing;
+        var oldSplit = _renderer == LyricsRenderer.Expressive && _motion;
+
         ReadPalette();
         var settings = Koda.Core.Settings.Current;
         _font = string.IsNullOrWhiteSpace(settings.LyricsFont) ? LyricFont : new FontFamily(settings.LyricsFont);
@@ -894,9 +968,17 @@ internal sealed class LyricsPanel : IDisposable
         {
             _shapedFont = family;
             _shapedWidths.Clear();
+            _spaceSize = -1;
+            _spaceSoftSize = -1;
             _glyphCacheResetWanted = true;
         }
         _lineHeightFactor = LineHeightFactor * settings.LyricsLineSpacing;
+        if (Math.Abs(_lineHeightFactor - oldLineHeight) >= 0.0001)
+        {
+            // The glyph's mask box is shaped with the line height; the shared masks are
+            // replaced on the next reshape rather than reused with the old box.
+            _glyphCacheResetWanted = true;
+        }
         _feather = 0.08 + 0.55 * settings.LyricsSoftness;
         _baseFontSize = settings.LyricsFontSize;
         _baseLineGap = settings.LyricsLineGap;
@@ -937,6 +1019,9 @@ internal sealed class LyricsPanel : IDisposable
             // The renderer is part of every glyph mask's key (weight and tracking are its
             // shaping), and the entries of the old renderer should not linger.
             _glyphCacheResetWanted = true;
+            _shapedWidths.Clear();
+            _spaceSize = -1;
+            _spaceSoftSize = -1;
         }
 
         _renderer = settings.LyricsRenderer;
@@ -949,6 +1034,525 @@ internal sealed class LyricsPanel : IDisposable
             // the old entries would only sit in the cache until it filled.
             _glyphCacheSize = _fontSize;
             _glyphCacheResetWanted = true;
+        }
+
+        var changes = LookChange.None;
+        if (_paletteTheme != oldPalette)
+        {
+            changes |= LookChange.Palette;
+        }
+
+        if (Math.Abs(_idleFar - oldIdle) >= 0.0001
+            || Math.Abs(_feather - oldFeather) >= 0.0001
+            || Math.Abs(_glowIntensity - oldGlowIntensity) >= 0.0001)
+        {
+            changes |= LookChange.Paint;
+        }
+
+        if (_motion != oldMotion)
+        {
+            changes |= LookChange.Motion;
+        }
+
+        if (_renderer != oldRenderer)
+        {
+            changes |= LookChange.Relight;
+        }
+
+        if (Math.Abs(_lineGap - oldLineGap) >= 0.01)
+        {
+            changes |= LookChange.Gap;
+        }
+
+        if (Math.Abs(_fontSize - oldFontSize) >= 0.01
+            || Math.Abs(_lineHeightFactor - oldLineHeight) >= 0.0001
+            || _renderer != oldRenderer
+            || _backingMode != oldBacking
+            || _compensateSpacing != oldCompensate
+            || _shapedFont != oldFamily)
+        {
+            changes |= LookChange.Shape;
+        }
+
+        // The Expressive renderer splits held syllables into letters only when the motion
+        // is on. Crossing that line changes the built element tree, not just its shape.
+        var newSplit = _renderer == LyricsRenderer.Expressive && _motion;
+        if (_backingMode != oldBacking
+            || newSplit != oldSplit
+            || (!oldGlow && _glow && newSplit))
+        {
+            changes |= LookChange.Structure;
+        }
+
+        return changes;
+    }
+
+    /// <summary>Starts listening for look changes while the panel is on screen. A closed or
+    /// suspended panel does no work; the next PlayEntrance reads the settings again.</summary>
+    private void HookLook()
+    {
+        if (_lookHooked)
+        {
+            return;
+        }
+
+        _lookHooked = true;
+        Koda.Core.Settings.Current.Changed += OnSettingsChanged;
+    }
+
+    private void UnhookLook()
+    {
+        if (_lookHooked)
+        {
+            _lookHooked = false;
+            Koda.Core.Settings.Current.Changed -= OnSettingsChanged;
+        }
+
+        _lookTimer.Stop();
+        _lookDirty = false;
+        _lookSettleAtMs = 0;
+        _lookNeedsFullReshape = false;
+        _lookPreviewActive = false;
+        _lookLiveDisabled = false;
+        _lookAnchorRow = null;
+        _visibleLookRows.Clear();
+    }
+
+    private void OnSettingsChanged(Settings settings)
+    {
+        if (!_visible || !_lookHooked)
+        {
+            return;
+        }
+
+        if (!_scroll.DispatcherQueue.HasThreadAccess)
+        {
+            _scroll.DispatcherQueue.TryEnqueue(() => OnSettingsChanged(settings));
+            return;
+        }
+
+        _lookDirty = true;
+        _lookSettleAtMs = _frameClock.ElapsedMilliseconds + LookSettleMs;
+        if (!_lookTimer.IsRunning)
+        {
+            _lookTimer.Start();
+        }
+    }
+
+    /// <summary>Applies at most one look pass per tick. The last change extends the settle
+    /// deadline; a quiet tick finishes the rows the live pass left alone.</summary>
+    private void OnLookTick()
+    {
+        if (!_visible || !_lookHooked)
+        {
+            _lookTimer.Stop();
+            return;
+        }
+
+        if (_lookDirty)
+        {
+            _lookDirty = false;
+            ApplyLook(ReadLook(), interactive: true);
+        }
+
+        var now = _frameClock.ElapsedMilliseconds;
+        if (!_lookDirty
+            && now >= _lookSettleAtMs
+            && (_lookNeedsFullReshape || _lookPreviewActive))
+        {
+            FinishLookPreview();
+        }
+
+        if (!_lookDirty && !_lookNeedsFullReshape && !_lookPreviewActive)
+        {
+            _lookTimer.Stop();
+        }
+    }
+
+    /// <summary>Applies a diffed look change. While a slider moves, only the visible rows
+    /// are reshaped and the glyph masks are held back; the quiet settle pass finishes the
+    /// rest and resets the masks once.</summary>
+    private void ApplyLook(LookChange changes, bool interactive)
+    {
+        if (!_visible || changes == LookChange.None || _pendingLyrics is not { } lyrics)
+        {
+            return;
+        }
+
+        // A palette is baked into every gradient and placeholder brush; the rows need the
+        // same rebuild a light/dark switch used to ask for.
+        if (changes.HasFlag(LookChange.Palette))
+        {
+            changes |= LookChange.Structure;
+        }
+
+        _lookClock.Restart();
+        _visibleLookRows.Clear();
+
+        if (!lyrics.IsSynced)
+        {
+            if (changes.HasFlag(LookChange.Structure) || changes.HasFlag(LookChange.Shape))
+            {
+                RebuildRowsForLook();
+            }
+
+            return;
+        }
+
+        if (!_rowsBuilt || _rows.Count == 0)
+        {
+            return;
+        }
+
+        if (changes.HasFlag(LookChange.Structure))
+        {
+            RebuildRowsForLook();
+            return;
+        }
+
+        var shaping = changes.HasFlag(LookChange.Shape);
+        var shaped = false;
+        if (shaping)
+        {
+            if (interactive)
+            {
+                BeginLookPreview();
+                _lookNeedsFullReshape = true;
+                if (!_lookLiveDisabled)
+                {
+                    var rows = VisibleLookRows();
+                    ApplyTextWidth();
+                    Reshape(resetGlyphs: false, rows);
+                    ResetLookWordRest(rows);
+                    _visibleLookRows.Clear();
+                    _scroll.UpdateLayout();
+                    RestoreLookAnchor();
+                    shaped = true;
+                }
+            }
+            else
+            {
+                _lookNeedsFullReshape = false;
+                _lookPreviewActive = false;
+                _lookLiveDisabled = false;
+                ApplyTextWidth();
+                Reshape(resetGlyphs: true);
+                ResetLookWordRest(rows: null);
+                _scroll.UpdateLayout();
+                CorrectAnchor();
+                shaped = true;
+            }
+        }
+
+        if (changes.HasFlag(LookChange.Gap))
+        {
+            ApplyLineGap();
+        }
+
+        if (changes.HasFlag(LookChange.Motion) || changes.HasFlag(LookChange.Relight))
+        {
+            // The old lift is written on every word, or the old renderer's fill rule is
+            // still on the words behind the song: repaint the whole panel once.
+            _needsFullPaint = true;
+        }
+
+        if (shaped
+            || changes.HasFlag(LookChange.Paint)
+            || changes.HasFlag(LookChange.Gap)
+            || changes.HasFlag(LookChange.Motion)
+            || changes.HasFlag(LookChange.Relight))
+        {
+            Paint();
+        }
+
+        if (interactive && shaping && _lookClock.Elapsed.TotalMilliseconds > LookApplyBudgetMs)
+        {
+            // A passage over the visible rows already cost more than a frame. Keep the
+            // current look and let the settle pass do the one full reshape.
+            _lookLiveDisabled = true;
+        }
+    }
+
+    /// <summary>The first shape change of a drag: the glows are released once and no new
+    /// masks are built until the settle pass, so a slider tick cannot churn native surfaces.</summary>
+    private void BeginLookPreview()
+    {
+        if (_lookPreviewActive)
+        {
+            return;
+        }
+
+        CaptureLookAnchor();
+        _lookPreviewActive = true;
+        ReleaseGlows();
+    }
+
+    /// <summary>The rows the listener can actually see, plus a screen above and below.
+    /// The rest wait for the settle pass. A null answer means reshape everything.</summary>
+    private IReadOnlySet<Row>? VisibleLookRows()
+    {
+        _visibleLookRows.Clear();
+        if (_scroll.ViewportHeight < 1 || _rows.Count == 0)
+        {
+            return null;
+        }
+
+        var top = _scroll.VerticalOffset;
+        var from = top - _scroll.ViewportHeight;
+        var to = top + _scroll.ViewportHeight * 2;
+        try
+        {
+            foreach (var row in _rows)
+            {
+                var rowTop = row.Host.TransformToVisual(_lines)
+                    .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+                var rowBottom = rowTop + Math.Max(1, row.Host.ActualHeight);
+                if (rowBottom >= from && rowTop <= to)
+                {
+                    _visibleLookRows.Add(row);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        return _visibleLookRows.Count > 0 ? _visibleLookRows : null;
+    }
+
+    /// <summary>Remembers the line at the top of a scrolled panel, so live reshaping keeps
+    /// the words under the listener's eye instead of moving them with the layout.</summary>
+    private void CaptureLookAnchor()
+    {
+        _lookAnchorRow = null;
+        if (!_userScrolled || _rows.Count == 0)
+        {
+            return;
+        }
+
+        var offset = _scroll.VerticalOffset;
+        try
+        {
+            foreach (var row in _rows)
+            {
+                var top = row.Host.TransformToVisual(_lines)
+                    .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+                if (top + Math.Max(1, row.Host.ActualHeight) > offset)
+                {
+                    _lookAnchorRow = row;
+                    _lookAnchorOffset = top - offset;
+                    return;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            _lookAnchorRow = null;
+        }
+    }
+
+    private void RestoreLookAnchor()
+    {
+        if (_userScrolled && _lookAnchorRow is { } row)
+        {
+            try
+            {
+                var top = row.Host.TransformToVisual(_lines)
+                    .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+                var target = Math.Max(0, top - _lookAnchorOffset);
+                if (Math.Abs(target - _scroll.VerticalOffset) > 0.5)
+                {
+                    _scroll.ChangeView(null, target, null, true);
+                }
+
+                return;
+            }
+            catch (Exception)
+            {
+                // The row left the tree; fall back to the reading anchor.
+            }
+        }
+
+        CorrectAnchor();
+    }
+
+    /// <summary>The live pass is over: every row takes the final look and the shared glyph
+    /// masks are replaced once, after the glows that would reference them are gone.</summary>
+    private void FinishLookPreview()
+    {
+        var reshape = _lookNeedsFullReshape;
+        _lookNeedsFullReshape = false;
+        _lookLiveDisabled = false;
+        _lookPreviewActive = false;
+
+        if (reshape && _visible && _rows.Count > 0 && _pendingLyrics is { IsSynced: true })
+        {
+            ApplyTextWidth();
+            Reshape(resetGlyphs: true);
+            ResetLookWordRest(rows: null);
+            _scroll.UpdateLayout();
+            RestoreLookAnchor();
+            _needsFullPaint = true;
+            Follow();
+        }
+
+        _lookAnchorRow = null;
+        _visibleLookRows.Clear();
+    }
+
+    /// <summary>Updates only the space between lines: no text is re-shaped.</summary>
+    private void ApplyLineGap()
+    {
+        if (_rows.Count == 0)
+        {
+            return;
+        }
+
+        var ownAnchor = !_lookPreviewActive;
+        if (ownAnchor)
+        {
+            CaptureLookAnchor();
+        }
+
+        var half = _lineGap / 2;
+        foreach (var row in _rows)
+        {
+            row.Host.Margin = new Thickness(0, half, 0, half);
+            if (row.DotsHost is { } dots)
+            {
+                SizeDots(dots, row.Dots, _fontSize, _lineGap * 0.75);
+            }
+        }
+
+        if (_leadingDots is { } leading)
+        {
+            SizeDots(leading, _leadingDotItems, _fontSize, _lineGap * 0.75);
+        }
+
+        _scroll.UpdateLayout();
+        RestoreLookAnchor();
+        if (ownAnchor)
+        {
+            _lookAnchorRow = null;
+        }
+    }
+
+    /// <summary>The word rest transforms depend on the font size and renderer; after a
+    /// reshape they are written again without allocating a word.</summary>
+    private void ResetLookWordRest(IReadOnlySet<Row>? rows)
+    {
+        foreach (var row in _rows)
+        {
+            if (rows is not null && !rows.Contains(row))
+            {
+                continue;
+            }
+
+            row.SpacingDirty = true;
+            foreach (var word in row.WordItems)
+            {
+                ResetWordMotion(word);
+            }
+
+            foreach (var word in row.BackgroundItems)
+            {
+                ResetWordMotion(word);
+            }
+
+            row.PlaceholderScale = -1;
+            row.BackgroundPlaceholderScale = -1;
+        }
+    }
+
+    /// <summary>Rebuilds the rows from the lyrics already in hand. Used only for discrete
+    /// structure changes: backing vocals, the Expressive split-syllable mode, or a palette.
+    /// The word and letter pools are reused and the scroll position is kept.</summary>
+    private void RebuildRowsForLook()
+    {
+        if (_pendingLyrics is null)
+        {
+            return;
+        }
+
+        var offset = _scroll.VerticalOffset;
+        var anchorIndex = -1;
+        var anchorDelta = 0.0;
+        if (_userScrolled)
+        {
+            try
+            {
+                for (var index = 0; index < _rows.Count; index++)
+                {
+                    var top = _rows[index].Host.TransformToVisual(_lines)
+                        .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+                    if (top + Math.Max(1, _rows[index].Host.ActualHeight) > offset)
+                    {
+                        anchorIndex = index;
+                        anchorDelta = top - offset;
+                        break;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                anchorIndex = -1;
+            }
+        }
+
+        _tween.Stop();
+        _needsGlide = false;
+        _lookPreviewActive = false;
+        _lookNeedsFullReshape = false;
+        _lookLiveDisabled = false;
+        _lookAnchorRow = null;
+        _visibleLookRows.Clear();
+        ReleaseGlows();
+        if (_glyphCacheResetWanted)
+        {
+            ResetGlyphMasks();
+        }
+
+        ReturnAllRowWords();
+        _lines.Children.Clear();
+        _rows.Clear();
+        _pendingRows.Clear();
+        _lyricLines.Clear();
+        _leadingDots = null;
+        _leadingDotItems = [];
+        _current = null;
+        _repaintFrom = -1;
+        _repaintTo = -1;
+        _rowsBuilt = false;
+        BuildRows();
+        _scroll.UpdateLayout();
+
+        if (_userScrolled)
+        {
+            if (anchorIndex >= 0 && anchorIndex < _rows.Count)
+            {
+                try
+                {
+                    var top = _rows[anchorIndex].Host.TransformToVisual(_lines)
+                        .TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
+                    _scroll.ChangeView(null, Math.Max(0, top - anchorDelta), null, true);
+                }
+                catch (Exception)
+                {
+                    _scroll.ChangeView(null, Math.Min(offset, _scroll.ScrollableHeight), null, true);
+                }
+            }
+            else
+            {
+                _scroll.ChangeView(null, Math.Min(offset, _scroll.ScrollableHeight), null, true);
+            }
+        }
+
+        _needsFullPaint = true;
+        Follow();
+        if (!_userScrolled && _current is not null)
+        {
+            JumpTo(_current);
         }
     }
 
@@ -969,6 +1573,11 @@ internal sealed class LyricsPanel : IDisposable
     public void Load(Lyrics? lyrics)
     {
         ReadLook();
+        _lookPreviewActive = false;
+        _lookNeedsFullReshape = false;
+        _lookLiveDisabled = false;
+        _lookAnchorRow = null;
+        _visibleLookRows.Clear();
         _tween.Stop();
         _frame.Stop();
         UserScrolled = false;
@@ -1050,6 +1659,15 @@ internal sealed class LyricsPanel : IDisposable
         if (_pendingLyrics is not { } lyrics)
         {
             return;
+        }
+
+        if (_glyphCacheResetWanted && _rows.Count == 0)
+        {
+            // A font, size, renderer or line-height change while the panel was closed:
+            // no letter is holding a shared mask after the rows were released, so the
+            // cache can be replaced before the new letters ask for one.
+            ReleaseGlows();
+            ResetGlyphMasks();
         }
 
         _lines.Children.Clear();
@@ -2466,11 +3084,12 @@ internal sealed class LyricsPanel : IDisposable
             line.Text.Contains(joined, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Re-shapes the words already on the panel when the fitted text size changes
-    /// (a narrower window, a DPI change or UI zoom), keeping the same elements.</summary>
-    private void Reshape()
+    /// <summary>Re-shapes the words already on the panel when the fitted text size or the
+    /// chosen look changes, keeping the same elements. A live preview may pass only the
+    /// rows on screen; the rest wait for the full settle pass.</summary>
+    private void Reshape(bool resetGlyphs = true, IReadOnlySet<Row>? rows = null)
     {
-        if (_glyphMasks.Count > 0)
+        if (resetGlyphs && (_glyphMasks.Count > 0 || _glyphCacheResetWanted))
         {
             // Every shared mask was shaped at the old size. The glows let go of theirs
             // first (release is what makes disposing them safe), then the cache empties
@@ -2484,6 +3103,11 @@ internal sealed class LyricsPanel : IDisposable
         var lineWidth = Math.Max(0, _panelWidth - sidePad - endPad);
         foreach (var row in _rows)
         {
+            if (rows is not null && !rows.Contains(row))
+            {
+                continue;
+            }
+
             // Every word's size and placement just changed: the row's word gaps are
             // compensated again on the next pass.
             row.SpacingDirty = true;
@@ -2711,14 +3335,25 @@ internal sealed class LyricsPanel : IDisposable
     /// skipped when the drawer is already open and the panel is merely swapping in.</summary>
     public void PlayEntrance(bool animate = true)
     {
-        // A closed panel may have kept the other theme's palette: rebuild the words
-        // before they are shown rather than lighting them in the wrong colour.
-        if (_pendingLyrics is not null && _paletteTheme != _scroll.ActualTheme)
+        // The settings are read on every entrance: while the panel was closed the
+        // listener may have changed the look, and the rows are rebuilt from the fields
+        // this read leaves behind.
+        var changes = ReadLook();
+        if (_pendingLyrics is not null && changes.HasFlag(LookChange.Palette))
         {
+            // A closed panel may have kept the other theme's palette: rebuild the words
+            // before they are shown rather than lighting them in the wrong colour.
             Load(_pendingLyrics);
+            changes = LookChange.None;
         }
 
         _visible = true;
+        HookLook();
+        if (_pendingLyrics is not null && _rowsBuilt && changes != LookChange.None)
+        {
+            ApplyLook(changes, interactive: false);
+        }
+
         UserScrolled = false;
         if (!_rowsBuilt)
         {
@@ -2736,6 +3371,7 @@ internal sealed class LyricsPanel : IDisposable
         UpdateScale();
         if (Math.Abs(_fontSize - previousSize) >= 0.25)
         {
+            ApplyTextWidth();
             Reshape();
         }
 
@@ -2779,6 +3415,7 @@ internal sealed class LyricsPanel : IDisposable
     public void Pause()
     {
         _visible = false;
+        UnhookLook();
         ReleaseRowsForClosedPanel();
         UpdateFrame();
     }
@@ -2788,6 +3425,7 @@ internal sealed class LyricsPanel : IDisposable
     public void Suspend()
     {
         _visible = false;
+        UnhookLook();
         // A suspended panel keeps its timings (the song, the current line, the
         // listener's scroll) but not its word surfaces. The drawer, Now Playing and
         // the mini player each own one of these panels, and every hidden one holding
@@ -3041,9 +3679,11 @@ internal sealed class LyricsPanel : IDisposable
                     : wordsTarget;
             }
 
-            if (row.BackgroundItems.Count > 0)
+            if (row.BackgroundItems.Count > 0 || row.BackgroundPlaceholder is not null)
             {
-                // Backing vocals step back with their line, at 70% of its weight.
+                // Backing vocals step back with their line, at 70% of its weight. A far
+                // line's one-block stand-in lives on the same panel, so an idle-opacity
+                // change reaches it too.
                 var target = wordsTarget * 0.7;
                 if (Math.Abs(row.Background.Opacity - target) >= 0.001)
                 {
@@ -4032,6 +4672,13 @@ internal sealed class LyricsPanel : IDisposable
     /// own word range, which may rebuild a glow that ended earlier.</summary>
     private void EnsureGlow(Letter letter, bool painting = false)
     {
+        if (_lookPreviewActive)
+        {
+            // A live look change holds the glyph masks back: the settle pass replaces
+            // them once instead of building and disposing a set on every slider tick.
+            return;
+        }
+
         if (!_glow || letter.GlowHost is null || letter.GlowVisual is not null)
         {
             return;
@@ -4407,7 +5054,7 @@ internal sealed class LyricsPanel : IDisposable
     private void ScheduleGlows(int index)
     {
         // The seek hold owns the window: it is scheduled once when the hold ends.
-        if (!_glow || GlowHeld || index == _glowWindowIndex)
+        if (_lookPreviewActive || !_glow || GlowHeld || index == _glowWindowIndex)
         {
             return;
         }
@@ -4469,7 +5116,7 @@ internal sealed class LyricsPanel : IDisposable
     /// it is sung without a composition setup spike on the frame a note starts.</summary>
     private void WarmQueuedGlows()
     {
-        if (GlowHeld)
+        if (_lookPreviewActive || GlowHeld)
         {
             return;
         }
@@ -4858,6 +5505,7 @@ internal sealed class LyricsPanel : IDisposable
 
     public void Dispose()
     {
+        UnhookLook();
         _scroll.ActualThemeChanged -= OnActualThemeChanged;
         ReleaseGlows();
         ResetGlyphMasks();
