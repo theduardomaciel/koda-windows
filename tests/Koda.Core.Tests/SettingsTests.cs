@@ -229,6 +229,8 @@ public class SettingsTests
         settings.ApplyLyricsPreset(LyricsPreset.Expressive);
 
         Assert.Equal(LyricsRenderer.Expressive, settings.LyricsRenderer);
+        Assert.Equal(44, settings.LyricsFontSize);
+        Assert.Equal(24, settings.LyricsLineGap);
         Assert.Equal(0.90, settings.LyricsLineSpacing, 2);
         Assert.Equal(0.20, settings.LyricsSoftness, 2);
         Assert.Equal(0.30, settings.LyricsIdleOpacity, 2);
@@ -238,21 +240,54 @@ public class SettingsTests
         settings.ApplyLyricsPreset(LyricsPreset.Minimal);
 
         Assert.Equal(LyricsRenderer.Classic, settings.LyricsRenderer);
+        Assert.Equal(32, settings.LyricsFontSize);
+        Assert.Equal(40, settings.LyricsLineGap);
         Assert.Equal(0, settings.LyricsGlowIntensity);
         Assert.False(settings.LyricsMotion);
+
+        settings.ApplyLyricsPreset(LyricsPreset.Koda);
+
+        Assert.Equal(LyricsRenderer.Sweep, settings.LyricsRenderer);
+        Assert.Equal(40, settings.LyricsFontSize);
+        Assert.Equal(32, settings.LyricsLineGap);
+    }
+
+    [Fact]
+    public void ASavedPresetIsRefreshedButACustomMixIsNot()
+    {
+        var named = Path.Combine(Fixtures.Scratch, $"settings-named-{Guid.NewGuid():N}.json");
+        File.WriteAllText(named, """{ "lyricsPreset": "Koda", "lyricsFontSize": 20 }""");
+
+        var refreshed = Settings.Load(named);
+
+        Assert.Equal(40, refreshed.LyricsFontSize);
+        Assert.Equal(32, refreshed.LyricsLineGap);
+
+        var custom = Path.Combine(Fixtures.Scratch, $"settings-custom-{Guid.NewGuid():N}.json");
+        File.WriteAllText(custom, """{ "lyricsPreset": "Custom", "lyricsFontSize": 20, "lyricsLineGap": 12 }""");
+
+        var kept = Settings.Load(custom);
+
+        Assert.Equal(20, kept.LyricsFontSize);
+        Assert.Equal(12, kept.LyricsLineGap);
     }
 
     [Fact]
     public void TheOldLyricsSizeBecomesAPointSize()
     {
-        var file = Path.Combine(Fixtures.Scratch, $"settings-old-size-{Guid.NewGuid():N}.json");
-        File.WriteAllText(file, """{ "lyricsSize": "Large" }""");
+        var large = Path.Combine(Fixtures.Scratch, $"settings-old-size-{Guid.NewGuid():N}.json");
+        File.WriteAllText(large, """{ "lyricsSize": "Large" }""");
 
-        var settings = Settings.Load(file);
+        var settings = Settings.Load(large);
 
-        Assert.Equal(24, settings.LyricsFontSize);
+        Assert.Equal(48, settings.LyricsFontSize);
         // The old name reads as nothing, so it is never written back.
         Assert.Null(settings.LegacyLyricsSize);
+
+        var small = Path.Combine(Fixtures.Scratch, $"settings-old-size-{Guid.NewGuid():N}.json");
+        File.WriteAllText(small, """{ "lyricsSize": "Small" }""");
+
+        Assert.Equal(32, Settings.Load(small).LyricsFontSize);
     }
 
     [Theory]
@@ -275,7 +310,7 @@ public class SettingsTests
         Assert.True(settings.Crossfades);
         Assert.Equal(5, settings.CrossfadeSeconds);
         Assert.False(settings.SharesOnDiscord);
-        Assert.Equal(36, settings.LyricsFontSize);
+        Assert.Equal(40, settings.LyricsFontSize);
         Assert.Equal(0.15, settings.LyricsIdleOpacity);
         Assert.Equal(32, settings.LyricsLineGap);
     }

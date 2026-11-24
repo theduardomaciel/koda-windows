@@ -534,7 +534,7 @@
                         <StackPanel VerticalAlignment="Center" Spacing="2">
                             <TextBlock Text="Look" Style="{ThemeResource BodyStrongTextBlockStyle}" />
                             <TextBlock
-                                Text="A named look. Changing an advanced control makes it Custom."
+                                Text="A named look, size and spacing included. Changing an advanced control makes it Custom."
                                 Style="{ThemeResource CaptionTextBlockStyle}"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 TextWrapping="Wrap" />
@@ -844,7 +844,7 @@
             <Border Style="{StaticResource SettingsCard}">
                 <StackPanel>
                     <TextBlock
-                        Text="The services the lyrics are asked for, best first. Drag a row to change its priority; the first service with lyrics wins."
+                        Text="The services the lyrics are asked for. The finest timing wins — syllables over words, words over lines — and the order breaks a tie. Drag a row to change its priority."
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap"

@@ -33,13 +33,12 @@ public enum LyricsSource
 }
 
 /// <summary>
-/// Lyrics from several services, in the listener's priority order: the first service
-/// with lyrics wins, and a higher-ranked answer is preferred for a short settling
-/// period before a lower-ranked one is shown.
+/// Lyrics from several services, in the listener's priority order. All of them are
+/// asked together; the answer with the finest timing wins (a word split into syllables
+/// over word timing, over line timing, over plain text), and the priority order only
+/// breaks a tie. When a coarser answer is found while a source that can do better is
+/// still out, the coarser one waits for it for a short settling period.
 ///
-/// The services answer at different speeds and come and go. All of them are asked
-/// together; the best-ranked answer is taken as soon as every service above it has
-/// answered, or after a brief settle when a slower higher-ranked source is still out.
 /// Ported from the KodaCore LyricsClient.swift contract.
 /// </summary>
 public sealed class LyricsClient : IDisposable
@@ -61,7 +60,8 @@ public sealed class LyricsClient : IDisposable
 
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(9);
 
-    /// <summary>How long a slower, higher-ranked source may hold up an answer already found.</summary>
+    /// <summary>How long a source that can sync better than an answer already found may
+    /// hold that answer up.</summary>
     private static readonly TimeSpan Settle = TimeSpan.FromSeconds(1.2);
 
     /// <summary>Lyrics already found this session, so reopening the panel or replaying a song is instant.</summary>
@@ -94,7 +94,8 @@ public sealed class LyricsClient : IDisposable
     /// <summary>How many songs have lyrics kept on disk.</summary>
     public int CachedSongs => _store?.Count ?? 0;
 
-    /// <summary>Lyrics for <paramref name="song"/> from the given services, ranked in the order given.</summary>
+    /// <summary>Lyrics for <paramref name="song"/> from the given services: the finest
+    /// timing wins, and their order breaks a tie.</summary>
     public async Task<Lyrics?> LyricsFor(
         Song song,
         IReadOnlyList<LyricsSource>? sources = null,
@@ -226,14 +227,10 @@ public sealed class LyricsClient : IDisposable
                     settle ??= Task.Delay(Settle);
                 }
 
-                // The best-ranked answer wins once every service above it has answered.
-                if (answers.Count > 0)
+                // The finest-timed answer wins once no waiting source could beat it.
+                if (answers.Count > 0 && !CouldImprove(answers, pending, sources))
                 {
-                    var top = answers.First();
-                    if (!pending.Any(rank => rank < top.Key))
-                    {
-                        return top.Value;
-                    }
+                    return BestAnswer(answers)?.Lyrics;
                 }
             }
         }
@@ -242,7 +239,59 @@ public sealed class LyricsClient : IDisposable
             // The deadline passed: the best-ranked answer so far is the answer.
         }
 
-        return answers.Count > 0 ? answers.First().Value : null;
+        return BestAnswer(answers)?.Lyrics;
+    }
+
+    /// <summary>How finely a source can time its lyrics: the providers that can sync
+    /// words or syllables can improve on a line-timed answer, however low they rank;
+    /// a line-only provider never can.</summary>
+    internal static int MaxSyncLevel(LyricsSource source) => source switch
+    {
+        LyricsSource.Lrclib or LyricsSource.BetterLyricsKugou or LyricsSource.KuGou => 1,
+        _ => 3,
+    };
+
+    /// <summary>The answer to show: the finest timing first, the higher-ranked source
+    /// when two are timed equally.</summary>
+    internal static (int Rank, Lyrics Lyrics)? BestAnswer(IEnumerable<KeyValuePair<int, Lyrics>> answers)
+    {
+        (int Rank, Lyrics Lyrics)? best = null;
+        foreach (var pair in answers)
+        {
+            if (best is not { } current ||
+                pair.Value.SyncLevel > current.Lyrics.SyncLevel ||
+                (pair.Value.SyncLevel == current.Lyrics.SyncLevel && pair.Key < current.Rank))
+            {
+                best = (pair.Key, pair.Value);
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Whether a source still out could produce a finer answer, or the same
+    /// timing from a source the listener ranks higher.</summary>
+    internal static bool CouldImprove(
+        IEnumerable<KeyValuePair<int, Lyrics>> answers,
+        IEnumerable<int> pending,
+        IReadOnlyList<LyricsSource> sources)
+    {
+        if (BestAnswer(answers) is not { } best)
+        {
+            return pending.Any();
+        }
+
+        foreach (var rank in pending)
+        {
+            var level = MaxSyncLevel(sources[rank]);
+            if (level > best.Lyrics.SyncLevel ||
+                (level == best.Lyrics.SyncLevel && rank < best.Rank))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<(int Rank, Lyrics? Lyrics)> Ask(int rank, LyricsSource source, Song song, CancellationToken cancellation)

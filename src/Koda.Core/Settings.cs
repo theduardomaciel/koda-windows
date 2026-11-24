@@ -124,7 +124,7 @@ public sealed class Settings
     /// <summary>Which revision of the recommended order the file was saved with.</summary>
     public int LyricsSourceOrderVersion { get; set; }
 
-    /// <summary>Every lyrics service, best first; the order decides which answer wins.</summary>
+    /// <summary>Every lyrics service, best first; the finest timing wins and this order breaks a tie.</summary>
     public List<LyricsSource> LyricsSourceOrder { get; set; } = [.. DefaultLyricsSources];
 
     /// <summary>The services the listener turned off.</summary>
@@ -196,7 +196,8 @@ public sealed class Settings
     /// <summary>The lyric typeface; the panel falls back to its own if the family is absent.</summary>
     public string LyricsFont { get; set; } = "Segoe UI Variable Text";
 
-    /// <summary>Applies a named look. Call inside <see cref="Update"/> so it is saved once.</summary>
+    /// <summary>Applies a named look, size and line gap included. Call inside
+    /// <see cref="Update"/> so it is saved once.</summary>
     public void ApplyLyricsPreset(LyricsPreset preset)
     {
         LyricsPreset = preset;
@@ -204,6 +205,8 @@ public sealed class Settings
         {
             case LyricsPreset.Koda:
                 LyricsRenderer = LyricsRenderer.Sweep;
+                LyricsFontSize = 40;
+                LyricsLineGap = 32;
                 LyricsLineSpacing = 1.0;
                 LyricsIdleOpacity = 0.15;
                 LyricsSoftness = 0.35;
@@ -213,6 +216,8 @@ public sealed class Settings
                 break;
             case LyricsPreset.Expressive:
                 LyricsRenderer = LyricsRenderer.Expressive;
+                LyricsFontSize = 44;
+                LyricsLineGap = 24;
                 LyricsLineSpacing = 0.90;
                 LyricsIdleOpacity = 0.30;
                 LyricsSoftness = 0.20;
@@ -222,6 +227,8 @@ public sealed class Settings
                 break;
             case LyricsPreset.Minimal:
                 LyricsRenderer = LyricsRenderer.Classic;
+                LyricsFontSize = 32;
+                LyricsLineGap = 40;
                 LyricsLineSpacing = 0.95;
                 LyricsIdleOpacity = 0.10;
                 LyricsSoftness = 0.0;
@@ -242,7 +249,7 @@ public sealed class Settings
         set => _lyricsFontSize = Math.Clamp(value, 16, 64);
     }
 
-    private double _lyricsFontSize = 36;
+    private double _lyricsFontSize = 40;
 
     /// <summary>The old three-step size, read once from an earlier settings file and never
     /// written: Small and Large keep their place either side of the default.</summary>
@@ -252,8 +259,8 @@ public sealed class Settings
         get => null;
         set => _lyricsFontSize = value switch
         {
-            "Small" => 16,
-            "Large" => 24,
+            "Small" => 32,
+            "Large" => 48,
             _ => _lyricsFontSize,
         };
     }
@@ -511,18 +518,20 @@ public sealed class Settings
                 return new Settings { LyricsSourceOrderVersion = CurrentLyricsSourceOrderVersion };
             }
 
-            var settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path), Options);
+            var text = File.ReadAllText(path);
+            var settings = JsonSerializer.Deserialize<Settings>(text, Options);
             if (settings is null)
             {
                 return new Settings { LyricsSourceOrderVersion = CurrentLyricsSourceOrderVersion };
             }
 
-            // The Expressive look changed from a softer Koda to the Spicy motion. A saved
-            // preset name is a request for the named look, so refresh it; a Custom mix is
-            // left exactly as the listener saved it.
-            if (settings.LyricsPreset == LyricsPreset.Expressive)
+            // A saved preset name is a request for the named look, so refresh it every
+            // launch. That also lifts values left behind by an older default (the size
+            // that used to be 20, for one). A file with no preset name predates the
+            // named looks and keeps its own size; a Custom mix is left exactly as saved.
+            if (HasSavedPreset(text) && settings.LyricsPreset != LyricsPreset.Custom)
             {
-                settings.ApplyLyricsPreset(LyricsPreset.Expressive);
+                settings.ApplyLyricsPreset(settings.LyricsPreset);
             }
 
             // A release that changes the recommended order puts the best providers at the
@@ -544,6 +553,23 @@ public sealed class Settings
         catch (Exception)
         {
             return new Settings { LyricsSourceOrderVersion = CurrentLyricsSourceOrderVersion };
+        }
+    }
+
+    /// <summary>Whether the file names a look. A file that predates the named looks
+    /// has no key, and its own size is not replaced by a preset's.</summary>
+    private static bool HasSavedPreset(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.EnumerateObject().Any(property =>
+                       string.Equals(property.Name, "lyricsPreset", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 }

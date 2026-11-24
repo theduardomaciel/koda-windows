@@ -190,6 +190,83 @@ public class LyricsTests
     }
 
     [Fact]
+    public void TheSyncLevelTellsSyllablesFromWordsAndLines()
+    {
+        Assert.Equal(0, Lyrics.Unsynced("one\ntwo").SyncLevel);
+
+        var lines = Lyrics.Synced(Lyrics.ParseLrc("[00:01.00]one\n[00:02.00]two"));
+        Assert.Equal(1, lines.SyncLevel);
+
+        var words = Lyrics.Synced(Lyrics.ParseLrc("[00:01.00]<00:01.00>one <00:01.50>two"));
+        Assert.Equal(2, words.SyncLevel);
+
+        var syllables = Lyrics.Synced(
+            Lyrics.ParseLrc("[00:01.00]<00:01.00>Hel<00:01.30>lo <00:01.60>world"));
+        Assert.Equal(3, syllables.SyncLevel);
+    }
+
+    [Fact]
+    public void TheFinestTimingWinsOverAHigherRankedSource()
+    {
+        // The reported case: Unison is asked before Spicy, but Spicy has syllables.
+        var line = Lyrics.Synced(Lyrics.ParseLrc("[00:01.00]one"));
+        var syllables = Lyrics.Synced(
+            Lyrics.ParseLrc("[00:01.00]<00:01.00>Hel<00:01.30>lo"));
+
+        var answers = new SortedDictionary<int, Lyrics> { [1] = line, [2] = syllables };
+
+        var chosen = LyricsClient.BestAnswer(answers);
+        Assert.NotNull(chosen);
+        Assert.Same(syllables, chosen.Value.Lyrics);
+    }
+
+    [Fact]
+    public void EqualTimingKeepsTheHigherRankedSource()
+    {
+        var first = Lyrics.Synced(Lyrics.ParseLrc("[00:01.00]one"));
+        var second = Lyrics.Synced(Lyrics.ParseLrc("[00:02.00]two"));
+
+        var answers = new SortedDictionary<int, Lyrics> { [0] = first, [1] = second };
+
+        var chosen = LyricsClient.BestAnswer(answers);
+        Assert.NotNull(chosen);
+        Assert.Same(first, chosen.Value.Lyrics);
+    }
+
+    [Fact]
+    public void AWaitingSourceOnlyHoldsUpAnAnswerItCouldBeat()
+    {
+        var sources = new[]
+        {
+            LyricsSource.BetterLyrics, LyricsSource.Unison, LyricsSource.SpicyLyrics, LyricsSource.Lrclib,
+        };
+        var line = Lyrics.Synced(Lyrics.ParseLrc("[00:01.00]one"));
+        var answers = new SortedDictionary<int, Lyrics> { [1] = line };
+
+        // Spicy is still out and can sync syllables, so the line waits.
+        Assert.True(LyricsClient.CouldImprove(answers, [2, 3], sources));
+
+        // Lrclib can only sync lines, and ranks lower than Unison: nothing can improve.
+        Assert.False(LyricsClient.CouldImprove(answers, [3], sources));
+
+        var syllables = Lyrics.Synced(
+            Lyrics.ParseLrc("[00:01.00]<00:01.00>Hel<00:01.30>lo"));
+        answers[2] = syllables;
+
+        // The best possible timing is already in hand.
+        Assert.False(LyricsClient.CouldImprove(answers, [3], sources));
+    }
+
+    [Fact]
+    public void OnlyTheProvidersThatSyncWordsCanBeatALine()
+    {
+        Assert.Equal(3, LyricsClient.MaxSyncLevel(LyricsSource.SpicyLyrics));
+        Assert.Equal(3, LyricsClient.MaxSyncLevel(LyricsSource.Unison));
+        Assert.Equal(1, LyricsClient.MaxSyncLevel(LyricsSource.Lrclib));
+        Assert.Equal(1, LyricsClient.MaxSyncLevel(LyricsSource.KuGou));
+    }
+
+    [Fact]
     public void ReadsSpicyAndUnisonAttribution()
     {
         var spicy = LyricsFormats.SpicyCredits(Json.Parse("""

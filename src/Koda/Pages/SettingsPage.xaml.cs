@@ -1202,8 +1202,13 @@ public sealed partial class SettingsPage : Page
         if (!_loaded) return;
         var size = Math.Round(e.NewValue);
         LyricsSizeValue.Text = $"{size:F0}";
-        App.Settings.Update(s => s.LyricsFontSize = size, save: false);
+        App.Settings.Update(s =>
+        {
+            s.LyricsFontSize = size;
+            s.LyricsPreset = LyricsPreset.Custom;
+        }, save: false);
         SaveSettingsSoon();
+        ShowCustomPreset();
     }
 
     private void OnLyricsGapChanged(object sender, RangeBaseValueChangedEventArgs e)
@@ -1211,8 +1216,13 @@ public sealed partial class SettingsPage : Page
         if (!_loaded) return;
         var gap = Math.Round(e.NewValue);
         LyricsGapValue.Text = $"{gap:F0}";
-        App.Settings.Update(s => s.LyricsLineGap = gap, save: false);
+        App.Settings.Update(s =>
+        {
+            s.LyricsLineGap = gap;
+            s.LyricsPreset = LyricsPreset.Custom;
+        }, save: false);
         SaveSettingsSoon();
+        ShowCustomPreset();
     }
 
     private void OnRelookLyricsClick(object sender, RoutedEventArgs e)

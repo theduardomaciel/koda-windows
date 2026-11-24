@@ -77,6 +77,28 @@ public sealed class Lyrics
     /// <summary>Word timing beats line timing beats none.</summary>
     public int Quality => Plain is not null ? 0 : Lines.Any(l => l.IsWordTimed) ? 2 : 1;
 
+    /// <summary>How finely the words are timed: 3 when a word is split into syllables,
+    /// 2 for word timing, 1 for line timing and 0 when there is no timing at all.</summary>
+    public int SyncLevel =>
+        !IsSynced ? 0
+        : Lines.Any(line => SplitsAWord(line.Words) || SplitsAWord(line.Background)) ? 3
+        : Lines.Any(line => line.IsWordTimed) ? 2
+        : 1;
+
+    /// <summary>Two timed pieces with no space between them are one word in syllables.</summary>
+    private static bool SplitsAWord(IReadOnlyList<LyricWord> words)
+    {
+        for (var index = 0; index + 1 < words.Count; index++)
+        {
+            if (!words[index].SpaceAfter)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The line playing at <paramref name="time"/>: the last one that has started.</summary>
     public static int? IndexOf(double time, IReadOnlyList<LyricLine> lines)
     {

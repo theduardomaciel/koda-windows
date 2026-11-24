@@ -18,8 +18,9 @@ namespace Koda.Core;
 /// </summary>
 public sealed class LyricsStore
 {
-    /// <summary>The file format, so an upgrade can drop files it cannot read.</summary>
-    private const int Version = 1;
+    /// <summary>The file format, so an upgrade can drop files it cannot read. Version 2
+    /// picks the finest-timed answer, so version 1 files may hold a coarser one.</summary>
+    private const int Version = 2;
 
     /// <summary>How much the lyrics cache may keep.</summary>
     private const long MaxBytes = 32 * 1024 * 1024;
