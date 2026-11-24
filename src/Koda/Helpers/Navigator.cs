@@ -86,7 +86,7 @@ public static class SongMenu
         var menu = new MenuFlyout();
         menu.Items.Add(Item("Play now", "\uE768", () => _ = PlaybackService.Instance.PlayNowAsync(song, queue.Count > 0 ? queue : [song])));
         menu.Items.Add(Item("Add to queue", "\uE71C", () => PlaybackService.Instance.AddToQueue([song])));
-        menu.Items.Add(Item("Play next", "\uE8A5", () => _ = PlaybackService.Instance.PlayNextAsync(song)));
+        menu.Items.Add(Item("Play next", "\uE893", () => _ = PlaybackService.Instance.PlayNextAsync(song)));
         menu.Items.Add(Item("Start radio", "\uE8FE", () => _ = PlaybackService.Instance.StartRadioAsync(song)));
         menu.Items.Add(new MenuFlyoutSeparator());
         var liked = App.Library.IsLiked(song);
