@@ -157,7 +157,6 @@ public sealed partial class MainWindow : Window
         AppTitleBar.SizeChanged += OnTitleBarSizeChanged;
         ApplyTitleBarChrome();
         Activated += OnActivated;
-        PointerCursors.Attach(Root);
 
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         WindowPlacement.Restore(hwnd);
