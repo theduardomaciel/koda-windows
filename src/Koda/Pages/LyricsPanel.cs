@@ -2351,8 +2351,12 @@ internal sealed class LyricsPanel : IDisposable
         for (var i = from; i <= to; i++)
         {
             var row = _rows[i];
+            var wasRich = row.Rich;
             BuildRichRow(row);
-            if (paint)
+            // Only a row that has just materialized needs its words painted here. A
+            // row that was already built keeps the fill its last frame left, and the
+            // jump's repaint range covers the lines whose state actually changed.
+            if (paint && !wasRich)
             {
                 PaintStagedRow(row);
             }
