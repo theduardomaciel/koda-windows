@@ -168,7 +168,10 @@
                         </Grid>
                     </Border>
                     <TextBlock Text="{Binding Title}" Style="{ThemeResource BodyStrongTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
-                    <TextBlock Text="{Binding Subtitle}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" MaxLines="2" TextWrapping="Wrap" />
+                    <!-- One line, like the title. A wrapped subtitle makes this card taller than
+                         its siblings, and the shelf row grows when the card is realized. The
+                         full line stays in the tooltip. -->
+                    <TextBlock Text="{Binding Subtitle}" ToolTipService.ToolTip="{Binding Subtitle}" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                 </StackPanel>
             </DataTemplate>
 
