@@ -57,7 +57,7 @@ public static class PlaylistMenu
         var menu = new MenuFlyout();
         menu.Items.Add(SongMenu.Item("Play", "\uE768", () => _ = PlayAsync(playlist, shuffle: false)));
         menu.Items.Add(SongMenu.Item("Shuffle", "\uE8B1", () => _ = PlayAsync(playlist, shuffle: true)));
-        menu.Items.Add(SongMenu.Item("Add to queue", "\uE71C", () => _ = QueueAsync(playlist)));
+        menu.Items.Add(SongMenu.Item("Add to queue", "\uE8FD", () => _ = QueueAsync(playlist)));
         menu.Items.Add(new MenuFlyoutSeparator());
 
         var saved = App.Library.IsSavedPlaylist(playlist.Id);
@@ -78,7 +78,7 @@ public static class PlaylistMenu
         var shuffle = SongMenu.Item("Shuffle", "\uE8B1", () => _ = PlaybackService.Instance.ShuffleAsync(playlist.Songs));
         shuffle.IsEnabled = hasSongs;
         menu.Items.Add(shuffle);
-        var queue = SongMenu.Item("Add to queue", "\uE71C", () => PlaybackService.Instance.AddToQueue(playlist.Songs));
+        var queue = SongMenu.Item("Add to queue", "\uE8FD", () => PlaybackService.Instance.AddToQueue(playlist.Songs));
         queue.IsEnabled = hasSongs;
         menu.Items.Add(queue);
         menu.Items.Add(new MenuFlyoutSeparator());

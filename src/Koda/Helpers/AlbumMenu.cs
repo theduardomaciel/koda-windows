@@ -51,7 +51,7 @@ public static class AlbumMenu
         var menu = new MenuFlyout();
         menu.Items.Add(SongMenu.Item("Play", "\uE768", () => _ = PlayAsync(album, shuffle: false)));
         menu.Items.Add(SongMenu.Item("Shuffle", "\uE8B1", () => _ = PlayAsync(album, shuffle: true)));
-        menu.Items.Add(SongMenu.Item("Add to queue", "\uE71C", () => _ = QueueAsync(album)));
+        menu.Items.Add(SongMenu.Item("Add to queue", "\uE8FD", () => _ = QueueAsync(album)));
         menu.Items.Add(new MenuFlyoutSeparator());
 
         var saved = App.Library.IsSavedAlbum(album.Id);

@@ -51,7 +51,7 @@ public static class ArtistMenu
         menu.Items.Add(SongMenu.Item("Play", "\uE768", () => _ = PlayAsync(artist, shuffle: false)));
         menu.Items.Add(SongMenu.Item("Shuffle", "\uE8B1", () => _ = PlayAsync(artist, shuffle: true)));
         menu.Items.Add(SongMenu.Item("Start radio", "\uE8FE", () => _ = RadioAsync(artist)));
-        menu.Items.Add(SongMenu.Item("Add to queue", "\uE71C", () => _ = QueueAsync(artist)));
+        menu.Items.Add(SongMenu.Item("Add to queue", "\uE8FD", () => _ = QueueAsync(artist)));
         menu.Items.Add(new MenuFlyoutSeparator());
 
         var followed = App.Library.IsSavedArtist(artist.Id);

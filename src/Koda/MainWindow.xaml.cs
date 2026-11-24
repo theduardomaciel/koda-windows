@@ -811,7 +811,7 @@ public sealed partial class MainWindow : Window
         });
         play.IsEnabled = playlist.Songs.Length > 0;
         menu.Items.Add(play);
-        var queue = SongMenu.Item("Add to queue", "\uE71C", () => Playback.AddToQueue(playlist.Songs));
+        var queue = SongMenu.Item("Add to queue", "\uE8FD", () => Playback.AddToQueue(playlist.Songs));
         queue.IsEnabled = playlist.Songs.Length > 0;
         menu.Items.Add(queue);
         menu.Items.Add(new MenuFlyoutSeparator());

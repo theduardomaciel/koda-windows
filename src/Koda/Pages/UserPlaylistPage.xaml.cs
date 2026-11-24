@@ -158,7 +158,7 @@ public sealed partial class UserPlaylistPage : Page
         var playNext = SongMenu.Item("Play next", "\uE893", () => _ = PlaybackService.Instance.PlayNextAsync(playlist.Songs[0]));
         playNext.IsEnabled = hasSongs;
         menu.Items.Add(playNext);
-        var queue = SongMenu.Item("Add to queue", "\uE71C", () => PlaybackService.Instance.AddToQueue(playlist.Songs));
+        var queue = SongMenu.Item("Add to queue", "\uE8FD", () => PlaybackService.Instance.AddToQueue(playlist.Songs));
         queue.IsEnabled = hasSongs;
         menu.Items.Add(queue);
         menu.Items.Add(new MenuFlyoutSeparator());
