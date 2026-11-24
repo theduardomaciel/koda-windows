@@ -217,9 +217,9 @@ public sealed class Settings
             case LyricsPreset.Expressive:
                 LyricsRenderer = LyricsRenderer.Expressive;
                 LyricsFontSize = 44;
-                LyricsLineGap = 24;
+                LyricsLineGap = 36;
                 LyricsLineSpacing = 0.90;
-                LyricsIdleOpacity = 0.30;
+                LyricsIdleOpacity = 0.10;
                 LyricsSoftness = 0.20;
                 LyricsGlowIntensity = 1.0;
                 LyricsFont = "Segoe UI Variable Display";

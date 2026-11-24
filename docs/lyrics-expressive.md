@@ -66,7 +66,7 @@ matches the source.
 - Unsung: `50%` white (`#80FFFFFF`).
 - Sung: `85%` white (`#D9FFFFFF`).
 - Hovered active line: up to `100%` white.
-- Upcoming line opacity: `0.30`; sung line opacity: `0.96`; active: `1.0`.
+- Upcoming line opacity: `0.10`; sung line opacity: `0.96`; active: `1.0`.
 
 ### Lines and extras
 

@@ -875,17 +875,21 @@ internal sealed class LyricsPanel : IDisposable
         // every seek touched hundreds of text surfaces the panel never shows.
         if (next < _position - 0.15 || next > _position + 0.6)
         {
+            var previous = _position;
             var oldIndex = _lyricLines.Count > 0
-                ? Lyrics.IndexOf(_position, _lyricLines) ?? -1
+                ? Lyrics.IndexOf(previous, _lyricLines) ?? -1
                 : -1;
             var newIndex = _lyricLines.Count > 0
                 ? Lyrics.IndexOf(next, _lyricLines) ?? -1
                 : -1;
+            // The rows built below take their state from the song clock, so the clock
+            // must already read where the seek landed.
+            _position = next;
             SetRepaintRange(oldIndex, newIndex);
 
             // A backward jump is a seek/replay. Re-arm the target window instead of
             // disposing every glow: the ones still in the window can be reused.
-            if (next < _position - 0.15)
+            if (next < previous - 0.15)
             {
                 RearmGlows(newIndex);
             }
@@ -896,13 +900,19 @@ internal sealed class LyricsPanel : IDisposable
             _glowHoldUntil = _frameClock.ElapsedMilliseconds + 300;
             _glowWindowIndex = -2;
 
-            // A seek can land far from what is built: the staged build restarts around
-            // the line it landed on instead of finishing the old area first.
+            // A seek can land far from what is built. Rebuild the window around the line
+            // it landed on, not only the queue outside it: the queue starts past
+            // StagedWindowRows, so without this the current line was built by Follow and
+            // the lines beside it - the next one included - stayed empty until the song
+            // walked into them.
             if (_allRowsRich && _rowsBuilt)
             {
+                BuildStagedWindow(newIndex, paint: true);
                 QueueStagedRows(newIndex);
                 UpdateFrame();
             }
+
+            return;
         }
 
         _position = next;
@@ -2326,8 +2336,9 @@ internal sealed class LyricsPanel : IDisposable
     }
 
     /// <summary>Builds the rows around a line before the first frame: the panel needs them
-    /// to place the line and fill the viewport while the rest arrive.</summary>
-    private void BuildStagedWindow(int index)
+    /// to place the line and fill the viewport while the rest arrive. A seek also paints
+    /// them here, since the load's full repaint has already run.</summary>
+    private void BuildStagedWindow(int index, bool paint = false)
     {
         if (!_allRowsRich || !_rowsBuilt || _rows.Count == 0)
         {
@@ -2339,7 +2350,12 @@ internal sealed class LyricsPanel : IDisposable
         var to = Math.Min(_rows.Count - 1, index + StagedWindowRows);
         for (var i = from; i <= to; i++)
         {
-            BuildRichRow(_rows[i]);
+            var row = _rows[i];
+            BuildRichRow(row);
+            if (paint)
+            {
+                PaintStagedRow(row);
+            }
         }
     }
 

@@ -89,7 +89,7 @@ The CSS says, and `d11c840` originally implemented:
 - Font: SF Pro Display/Text/Inter, weight 700, letter-spacing 0.
 - Line height 1.2.
 - No line-level size zoom. Line emphasis is opacity and blur only.
-- Upcoming line opacity 0.30 in Koda's Expressive default (the CSS shows 0.76); sung line opacity 0.96; transition 0.6 s.
+- Upcoming line opacity 0.10 in Koda's Expressive default (the CSS shows 0.76); sung line opacity 0.96; transition 0.6 s.
 - Blur 1.1 px per distance level (not implemented in Windows).
 
 ### Words
