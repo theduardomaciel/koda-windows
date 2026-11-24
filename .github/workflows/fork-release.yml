@@ -134,13 +134,14 @@ jobs:
               "artifacts/release/Koda-$version-win-x64-portable.zip")
           $arguments = @(
               'release', 'create', $tag) + $assets + @(
+              '--repo', $env:GITHUB_REPOSITORY,
               '--title', "Koda for Windows $version",
               '--generate-notes',
               '--latest')
 
           # The fork's first release has no previous release to measure from;
           # use the upstream tag it is based on so the notes are not all of history.
-          $previous = gh release list --limit 1
+          $previous = gh release list --repo $env:GITHUB_REPOSITORY --limit 1
           if (-not $previous) {
               $baseTag = 'v' + (($version -split '\.')[0..2] -join '.')
               git rev-parse --verify --quiet "refs/tags/$baseTag" | Out-Null
