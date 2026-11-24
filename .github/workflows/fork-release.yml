@@ -1,0 +1,150 @@
+name: Fork release
+
+on:
+  push:
+    tags: ['v*']
+
+# The release job creates the GitHub release with the workflow token.
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Never run from a repository that is not the fork that publishes releases.
+    if: github.repository == 'theduardomaciel/koda-windows'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Check the tag, upstream and version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+              throw "Tag $tag is not v<major>.<minor>.<patch>.<forkBuild>"
+          }
+          $release = [version]$version
+
+          git remote add upstream https://github.com/Ivorisnoob/koda-windows.git
+          git fetch --no-tags upstream beta
+          git merge-base --is-ancestor upstream/beta HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'upstream/beta is not an ancestor of this commit' }
+
+          $upstreamText = [regex]::Match(
+              (git show upstream/beta:src/Koda/Koda.csproj | Out-String),
+              '<Version>([^<]+)</Version>').Groups[1].Value
+          if (-not $upstreamText) { throw 'Upstream Koda.csproj has no Version' }
+          $upstream = [version]$upstreamText
+          $base = [version]::new($release.Major, $release.Minor, $release.Build)
+          $upstreamBase = [version]::new($upstream.Major, $upstream.Minor, $upstream.Build)
+          if ($base -lt $upstreamBase) {
+              throw "Fork version $version is below upstream $upstreamText"
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "RELEASE_VERSION=$version"
+
+      - name: Stamp the release version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+
+          $project = 'src/Koda/Koda.csproj'
+          $projectText = Get-Content $project -Raw
+          if ([regex]::Matches($projectText, '<Version>[^<]+</Version>').Count -ne 1) {
+              throw 'Expected exactly one <Version> in Koda.csproj'
+          }
+          $projectText = [regex]::Replace($projectText, '<Version>[^<]+</Version>', "<Version>$version</Version>")
+          if (-not $projectText.Contains("<Version>$version</Version>")) {
+              throw 'The csproj version was not stamped'
+          }
+          [IO.File]::WriteAllText((Resolve-Path $project), $projectText)
+
+          $manifest = 'src/Koda/Package.appxmanifest'
+          $manifestText = Get-Content $manifest -Raw
+          if ([regex]::Matches($manifestText, '<Identity[^>]*\bVersion="').Count -ne 1) {
+              throw 'Expected exactly one Identity version in Package.appxmanifest'
+          }
+          $manifestText = $manifestText -replace '(<Identity[^>]*\bVersion=")[^"]+(")', ('${1}' + $version + '${2}')
+          if ($manifestText -notmatch ('<Identity[^>]*\bVersion="' + [regex]::Escape($version) + '"')) {
+              throw 'The manifest version was not stamped'
+          }
+          [IO.File]::WriteAllText((Resolve-Path $manifest), $manifestText)
+
+      - name: Test
+        run: dotnet test tests\Koda.Core.Tests --configuration Release --nologo
+
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          $wix = Join-Path $env:RUNNER_TEMP 'wix'
+          dotnet tool install --tool-path $wix wix --version 5.0.2
+          Add-Content -Path $env:GITHUB_PATH -Value $wix
+
+      - name: Build the release artifacts
+        shell: pwsh
+        run: .\scripts\build-release.ps1 -Runtime x64
+
+      - name: Verify the artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+
+          $exe = Get-ChildItem 'src/Koda/bin/x64/Release' -Recurse -Filter Koda.exe |
+              Where-Object { $_.FullName -like '*win-x64*publish*' } |
+              Select-Object -First 1
+          if (-not $exe) { throw 'The published Koda.exe was not found' }
+          $fileVersion = $exe.VersionInfo.FileVersion
+          if (-not $fileVersion.StartsWith($version)) {
+              throw "Koda.exe is $fileVersion, expected $version"
+          }
+
+          foreach ($artifact in @(
+              "artifacts/release/msi/Koda-$version-win-x64.msi",
+              "artifacts/release/Koda-$version-win-x64-portable.zip")) {
+              if (-not (Test-Path $artifact)) { throw "Missing artifact: $artifact" }
+              '{0}: {1:N1} MB' -f $artifact, ((Get-Item $artifact).Length / 1MB)
+          }
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          $version = $env:RELEASE_VERSION
+
+          $assets = @(
+              "artifacts/release/msi/Koda-$version-win-x64.msi",
+              "artifacts/release/Koda-$version-win-x64-portable.zip")
+          $arguments = @(
+              'release', 'create', $tag) + $assets + @(
+              '--title', "Koda for Windows $version",
+              '--generate-notes',
+              '--latest')
+
+          # The fork's first release has no previous release to measure from;
+          # use the upstream tag it is based on so the notes are not all of history.
+          $previous = gh release list --limit 1
+          if (-not $previous) {
+              $baseTag = 'v' + (($version -split '\.')[0..2] -join '.')
+              git rev-parse --verify --quiet "refs/tags/$baseTag" | Out-Null
+              if ($LASTEXITCODE -eq 0) { $arguments += @('--notes-start-tag', $baseTag) }
+          }
+
+          gh @arguments
