@@ -3,8 +3,8 @@
 How this fork is built and published, and what to do when upstream moves or a
 new fork build is cut.
 
-Fork-only: do not upstream this file, `ForkConfig.cs`, or
-`.github/workflows/fork-release.yml`.
+Fork-only: do not upstream this file, `ForkConfig.cs`,
+`.github/workflows/fork-release.yml`, or `docs/fork-changelog.md`.
 
 ## Branches and remotes
 
@@ -82,17 +82,19 @@ dotnet build src\Koda\Koda.csproj -p:Platform=x64
 dotnet test tests\Koda.Core.Tests
 ```
 
-2. Pick the next free fourth number. With upstream at `0.3.0` and `v0.3.0.3`
-   published, the next tag is `v0.3.0.4`. If upstream moves to `0.3.1`, restart
+2. Pick the next free fourth number. With upstream at `0.3.0` and `v0.3.0.4`
+   published, the next tag is `v0.3.0.5`. If upstream moves to `0.3.1`, restart
    at `v0.3.1.1`. The tag must be higher than every published tag, including
-   tags left by failed attempts.
+   tags left by failed attempts. Add a `## <version>` section to
+   `docs/fork-changelog.md` with the user-facing notes; the workflow fails the
+   release if it is missing or empty.
 
 3. Tag and push:
 
 ```powershell
-git tag -a v0.3.0.4 -m "Koda for Windows v0.3.0.4"
+git tag -a v0.3.0.5 -m "Koda for Windows v0.3.0.5"
 git push origin custom
-git push origin v0.3.0.4
+git push origin v0.3.0.5
 ```
 
 4. Watch the run and verify the release:
@@ -100,11 +102,11 @@ git push origin v0.3.0.4
 ```powershell
 gh run list --repo theduardomaciel/koda-windows --limit 5
 gh run watch <run-id> --repo theduardomaciel/koda-windows
-gh release view v0.3.0.4 --repo theduardomaciel/koda-windows
+gh release view v0.3.0.5 --repo theduardomaciel/koda-windows
 ```
 
 Expected: a green run, a published non-prerelease latest release, and two
-assets (`Koda-0.3.0.4-win-x64.msi`, `Koda-0.3.0.4-win-x64-portable.zip`).
+assets (`Koda-0.3.0.5-win-x64.msi`, `Koda-0.3.0.5-win-x64-portable.zip`).
 
 The workflow:
 
@@ -117,24 +119,24 @@ The workflow:
 5. Runs the offline tests.
 6. Builds the self-contained publish, the portable zip and the MSI with WiX.
 7. Verifies the published `Koda.exe` file version and both artifact names.
-8. Creates the GitHub release with generated notes, passing `--repo` so `gh`
-   targets the fork instead of the `upstream` remote the guard added.
+8. Reads the tag's section from `docs/fork-changelog.md`, appends the Full
+   Changelog compare link, and creates the GitHub release with `--notes-file`,
+   passing `--repo` so `gh` targets the fork instead of the `upstream` remote
+   the guard added.
 
-## Release notes
+## Changelog and release notes
 
 The GitHub release body is the only notes surface today. There is no in-app
 "What's new" sheet and no update checker yet; the About row shows the version
 and links to the fork.
 
-- The release is created with `--generate-notes`, which lists commits and
-  merged PRs since the previous release. Commit subjects are shown as-is, so
-  edit the release if they are too internal.
-- With no earlier fork release, the workflow adds `--notes-start-tag` for the
-  upstream base tag (for example `v0.3.0`), so the first release's notes cover
-  the fork's changes rather than the project's whole history.
-- `CHANGELOG.md` stays upstream's and is not edited by a fork release. If the
-  fork ever needs its own changelog, add a whitelisted file rather than
-  editing upstream's.
+- Fork release notes live in `docs/fork-changelog.md`, newest section first.
+  Add a `## <version>` section before tagging. The workflow extracts that
+  section, appends the Full Changelog compare link, and publishes it as the
+  release body. A missing or empty section fails the release.
+- The compare link uses the previous release tag. On the first fork release it
+  falls back to the upstream base tag (for example `v0.3.0`).
+- `CHANGELOG.md` stays upstream's and is not edited by a fork release.
 
 ## Updating from upstream
 
@@ -178,6 +180,7 @@ The artifacts are unsigned, so SmartScreen may ask for **More info**, then
 |---|---|
 | Workflow did not run | The tag must start with `v`; check Actions is enabled, the tag was pushed (`git push origin <tag>`), and `.github/workflows/fork-release.yml` exists on the default branch (`main`). GitHub registers workflows only from there. |
 | Publish fails: tag "exists locally but has not been pushed to Ivorisnoob/koda-windows" | `gh` resolved the upstream remote the workflow added. Every `gh release` command must pass `--repo $env:GITHUB_REPOSITORY`. |
+| Publish fails: no `## <version>` section | Add the section to `docs/fork-changelog.md`, push it, then tag. |
 | Guard: `upstream/beta` is not an ancestor | Merge the current `upstream/beta` into `custom`, then tag again. |
 | Guard: version below upstream | Merge upstream's version bump into `custom`; never override it locally. |
 | Guard: tag is not four numeric parts | Use `v0.3.0.1`, not `v0.3.0`. |
