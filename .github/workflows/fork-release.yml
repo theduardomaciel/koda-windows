@@ -132,20 +132,38 @@ jobs:
           $assets = @(
               "artifacts/release/msi/Koda-$version-win-x64.msi",
               "artifacts/release/Koda-$version-win-x64-portable.zip")
+
+          # The release body is the section for this tag in the fork's changelog.
+          $changelog = 'docs/fork-changelog.md'
+          if (-not (Test-Path $changelog)) { throw "Missing $changelog" }
+          $text = Get-Content $changelog -Raw
+          $heading = '(?ms)^##[ \t]+' + [regex]::Escape($version) + '[ \t]*\r?\n(.*?)(?=^##[ \t]|\z)'
+          $match = [regex]::Match($text, $heading)
+          if (-not $match.Success) {
+              throw "docs/fork-changelog.md has no '## $version' section"
+          }
+          $notes = $match.Groups[1].Value.Trim()
+          if (-not $notes) { throw "The $version section in docs/fork-changelog.md is empty" }
+
+          # The previous release is the previous tag; the first release compares
+          # against the upstream base tag instead.
+          $previous = (gh release list --repo $env:GITHUB_REPOSITORY --limit 1 --json tagName --jq '.[].tagName' | Out-String).Trim()
+          if (-not $previous) {
+              $baseTag = 'v' + (($version -split '\.')[0..2] -join '.')
+              git rev-parse --verify --quiet "refs/tags/$baseTag" | Out-Null
+              if ($LASTEXITCODE -eq 0) { $previous = $baseTag }
+          }
+          if ($previous) {
+              $notes += "`n`n**Full Changelog**: https://github.com/$env:GITHUB_REPOSITORY/compare/$previous...$tag"
+          }
+
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [IO.File]::WriteAllText($notesPath, $notes)
+
           $arguments = @(
               'release', 'create', $tag) + $assets + @(
               '--repo', $env:GITHUB_REPOSITORY,
               '--title', "Koda for Windows $version",
-              '--generate-notes',
+              '--notes-file', $notesPath,
               '--latest')
-
-          # The fork's first release has no previous release to measure from;
-          # use the upstream tag it is based on so the notes are not all of history.
-          $previous = gh release list --repo $env:GITHUB_REPOSITORY --limit 1
-          if (-not $previous) {
-              $baseTag = 'v' + (($version -split '\.')[0..2] -join '.')
-              git rev-parse --verify --quiet "refs/tags/$baseTag" | Out-Null
-              if ($LASTEXITCODE -eq 0) { $arguments += @('--notes-start-tag', $baseTag) }
-          }
-
           gh @arguments
