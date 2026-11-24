@@ -468,6 +468,7 @@
                             Tapped="OnNowPlayingTapped"
                             PointerEntered="OnCoverPointerEntered"
                             PointerExited="OnCoverPointerExited"
+                            helpers:PointerCursors.IsClickable="True"
                             ToolTipService.ToolTip="Open Now Playing"
                             AutomationProperties.Name="Open Now Playing">
                             <Grid>
@@ -794,13 +795,13 @@
                     </Grid.ColumnDefinitions>
                     <Border Grid.ColumnSpan="3" Height="1" Margin="-12,0" VerticalAlignment="Top" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
-                    <Grid ColumnSpacing="12" VerticalAlignment="Center" Background="Transparent" Tapped="OnVideoBarTapped" ToolTipService.ToolTip="Back to the video">
+                    <Grid ColumnSpacing="12" VerticalAlignment="Center" Background="Transparent" Tapped="OnVideoBarTapped" helpers:PointerCursors.IsClickable="True" ToolTipService.ToolTip="Back to the video">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="100" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Border Width="100" Height="56" CornerRadius="6" Background="Black">
-                            <MediaPlayerElement x:Name="VideoBarPicture" AreTransportControlsEnabled="False" Stretch="UniformToFill" IsHitTestVisible="False" />
+                            <controls:VideoSurface x:Name="VideoBarPicture" AreTransportControlsEnabled="False" Stretch="UniformToFill" IsHitTestVisible="False" />
                         </Border>
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                             <TextBlock x:Name="VideoBarTitle" Style="{ThemeResource BodyStrongTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
@@ -853,6 +854,14 @@
                 <TextBlock x:Name="ZoomBadgeText" Style="{ThemeResource BodyStrongTextBlockStyle}" />
             </Border>
         </Grid>
+
+        <!-- Full screen: the video player is lifted here, over the whole window, while the
+             window takes the full-screen presenter. The shell under it is left as it was. -->
+        <Grid
+            x:Name="FullWindowLayer"
+            Grid.RowSpan="2"
+            Background="Black"
+            Visibility="Collapsed" />
 
     </Grid>
 </Window>

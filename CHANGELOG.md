@@ -2,6 +2,27 @@
 
 What changed in each release of Koda for Windows, newest first.
 
+## Unreleased
+
+- **Smooth motion (experimental).** Optional GPU frame interpolation for fixed-quality
+  SDR VP9 video up to 1080p, presenting at up to 120 fps. Available in video settings
+  and Settings → Videos, with status, audio timing compensation, Energy Saver bypass
+  and automatic fallback to native playback. Off by default.
+- **Stats for nerds.** An optional video overlay with a live frame-rate graph,
+  video and stream details, measured smooth-motion counters, display and output
+  limits, missed ticks and CPU submission timing. Available in Settings → Videos
+  and the player settings menu. Smooth motion offers 60/120 fps caps and follows
+  the current display, reducing output when the PC cannot keep up.
+- **Subscriptions without an account.** Signed out, Subscribe on a video or a channel
+  follows the channel on this PC, and Subscriptions shows the latest from those channels,
+  built from each channel's public feed. Channels lists them beside the account's.
+- **Video mode comes across from Android.** Importing a Koda for Android backup now also
+  brings its local subscriptions, watch history with where each video got to, video
+  playlists (they appear in the sidebar under Watch History), and its hidden videos and
+  blocked channels. Nothing is replaced, and importing twice adds nothing twice.
+- **Video playlists and Not interested.** A video's menu can save it to a video playlist,
+  hide it, or stop recommending its channel; Settings → Videos brings them back.
+
 ## 0.3.0 - 2026-10-29
 
 Lossless downloads, your YouTube Music library, settings you can search, and a Koda that is

@@ -1,5 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json.Nodes;
+using Koda.Core.Video;
+using VideoModel = Koda.Core.Video.Video;
 
 namespace Koda.Core;
 
@@ -9,12 +11,17 @@ namespace Koda.Core;
 /// The file is a zip (manifest.json, profile-data.json keyed by profile,
 /// files/playlists/&lt;id&gt;.json, typed preferences.json). Ported from AndroidBackup.swift;
 /// .NET's ZipArchive stands in for the Swift ZipReader, with the same size caps.
+/// Video mode's side comes across too: channels followed on the phone without an account
+/// (local subscriptions), the watch history with where each video got to, the video playlists
+/// made there (files/video_playlists/&lt;id&gt;.json), and the hidden videos and blocked channels.
 /// </summary>
 public sealed class AndroidBackup
 {
     public sealed record Play(Song Song, DateTimeOffset Date, double Seconds);
 
     public sealed record Playlist(string Name, DateTimeOffset Created, Song[] Songs);
+
+    public sealed record VideoList(string Name, DateTimeOffset Created, VideoModel[] Videos);
 
     public sealed class ReadException(string message, bool newerVersion = false) : Exception(message)
     {
@@ -29,6 +36,15 @@ public sealed class AndroidBackup
     public AlbumSummary[] Albums { get; private set; } = [];
     public PlaylistSummary[] SavedPlaylists { get; private set; } = [];
     public DateTimeOffset? Created { get; private set; }
+
+    public LocalSubscription[] Subscriptions { get; private set; } = [];
+    /// <summary>Newest first, as Android keeps it.</summary>
+    public VideoModel[] Watched { get; private set; } = [];
+    /// <summary>Where each watched video got to, by id.</summary>
+    public Dictionary<string, VideoProgress> VideoProgress { get; private set; } = [];
+    public VideoList[] VideoPlaylists { get; private set; } = [];
+    public ChannelRef[] BlockedChannels { get; private set; } = [];
+    public string[] HiddenVideos { get; private set; } = [];
 
     private const int KnownVersion = 2;
     private const long MaxEntryBytes = 32 << 20;
@@ -49,11 +65,19 @@ public sealed class AndroidBackup
 
         // Liked songs, history and searches: from the profile in use when the backup was made
         // (version 2), or from the device-wide copies an older backup kept.
+        // Video mode's stores were per profile from the first format, so they are read from the
+        // same profile whatever the version.
         string? likedJson, historyJson, searchText;
-        if (version >= 2 && Object(files.GetValueOrDefault("profile-data.json")) is { Count: > 0 } profiles)
+        JsonObject? profile = null;
+        if (Object(files.GetValueOrDefault("profile-data.json")) is { Count: > 0 } profiles)
         {
             var active = Str(Object(files.GetValueOrDefault("profiles.json"))?["activeProfileId"]);
-            var profile = (active is not null ? profiles[active] as JsonObject : null) ?? profiles.First().Value as JsonObject;
+            profile = (active is not null && profiles.ContainsKey(active) ? profiles[active] as JsonObject : null)
+                ?? profiles.First().Value as JsonObject;
+        }
+
+        if (version >= 2 && profile is not null)
+        {
             likedJson = Str(profile?["likedSongs"]);
             historyJson = Str(profile?["playHistory"]);
             searchText = Str(profile?["searchHistory"]);
@@ -96,8 +120,93 @@ public sealed class AndroidBackup
         }
         backup.Albums = [.. albums];
         backup.SavedPlaylists = [.. saved];
+
+        ReadVideo(backup, profile, files);
         return backup;
     }
+
+    private static void ReadVideo(AndroidBackup backup, JsonObject? profile, Dictionary<string, byte[]> files)
+    {
+        var subscriptions = new List<LocalSubscription>();
+        foreach (var item in Array(Str(profile?["subscriptions"])).OfType<JsonObject>())
+        {
+            if (Str(item["channelId"]) is not { } id || !IsChannelId(id) || subscriptions.Exists(s => s.ChannelId == id)) continue;
+            var at = Num(item["subscribedAt"]) is { } ms && ms > 0 ? DateTimeOffset.FromUnixTimeMilliseconds((long)ms) : (DateTimeOffset?)null;
+            subscriptions.Add(new LocalSubscription(id, NonEmpty(item["name"]) ?? id, ArtworkOf(item["avatarUrl"]), NonEmpty(item["handle"]), at));
+        }
+        backup.Subscriptions = [.. subscriptions];
+
+        // Resume points are milliseconds; an entry without one may still carry the fraction watched.
+        var progress = new Dictionary<string, VideoProgress>();
+        foreach (var item in Array(Str(profile?["resumePositions"])).OfType<JsonObject>())
+        {
+            if (Str(item["videoId"]) is not { } id || !IsVideoId(id)) continue;
+            var position = (Num(item["positionMs"]) ?? 0) / 1000;
+            var duration = (Num(item["durationMs"]) ?? 0) / 1000;
+            if (duration > 0 && position > 0) progress[id] = new VideoProgress(Math.Min(position, duration), duration);
+        }
+
+        var removed = (profile?["removedFromHistory"] as JsonArray ?? []).Select(Str).OfType<string>().ToHashSet();
+        var watched = new List<VideoModel>();
+        foreach (var item in Array(Str(profile?["watchHistory"])).OfType<JsonObject>())
+        {
+            if (VideoOf(item, "channelIconUrl", "thumbnailUrl", "uploadedDate") is not { } video
+                || removed.Contains(video.Id) || watched.Exists(v => v.Id == video.Id)) continue;
+            watched.Add(video);
+            if (!progress.ContainsKey(video.Id) && Num(item["watchedProgress"]) is { } fraction && fraction > 0
+                && video.Duration is { } length && length > 0)
+            {
+                progress[video.Id] = new VideoProgress(Math.Clamp(fraction, 0, 1) * length, length);
+            }
+        }
+        backup.Watched = [.. watched];
+        var watchedIds = watched.Select(v => v.Id).ToHashSet();
+        backup.VideoProgress = progress.Where(p => watchedIds.Contains(p.Key)).ToDictionary();
+
+        var playlists = new List<VideoList>();
+        foreach (var (path, contents) in files)
+        {
+            if (!path.StartsWith("files/video_playlists/") || !path.EndsWith(".json")) continue;
+            if (Object(contents) is not { } playlist) continue;
+            var videos = (playlist["videos"] as JsonArray ?? []).OfType<JsonObject>()
+                .Select(v => VideoOf(v, "channelIcon", "thumbnail", "uploaded")).OfType<VideoModel>()
+                .DistinctBy(v => v.Id).ToArray();
+            var at = Num(playlist["createdAt"]) is { } ms && ms > 0 ? DateTimeOffset.FromUnixTimeMilliseconds((long)ms) : DateTimeOffset.Now;
+            playlists.Add(new VideoList(NonEmpty(playlist["name"]) ?? "Playlist", at, videos));
+        }
+        backup.VideoPlaylists = [.. playlists.OrderByDescending(p => p.Created)];
+
+        backup.BlockedChannels = [.. Array(Str(profile?["blockedChannels"])).OfType<JsonObject>()
+            .Select(c => Str(c["channelId"]) is { } id && IsChannelId(id) ? new ChannelRef(id, NonEmpty(c["name"]) ?? id, ArtworkOf(c["avatarUrl"])) : null)
+            .OfType<ChannelRef>().DistinctBy(c => c.Id)];
+        backup.HiddenVideos = [.. Array(Str(profile?["hiddenVideos"])).OfType<JsonObject>()
+            .Select(v => Str(v["videoId"])).OfType<string>().Where(IsVideoId).Distinct()];
+    }
+
+    /// <summary>A video from Android's VideoItem; the history and the playlists name the
+    /// channel icon, frame and upload date under different keys.</summary>
+    private static VideoModel? VideoOf(JsonObject json, string iconKey, string thumbnailKey, string uploadedKey)
+    {
+        if (Str(json["videoId"]) is not { } id || !IsVideoId(id) || NonEmpty(json["title"]) is not { } title) return null;
+        var channelId = NonEmpty(json["channelId"]);
+        var channelName = NonEmpty(json["channelName"]);
+        var channel = channelId is not null || channelName is not null
+            ? new ChannelRef(channelId, channelName ?? "", ArtworkOf(json[iconKey]))
+            : null;
+        var seconds = Num(json["duration"]) ?? 0;
+        return new VideoModel(id, title, channel, ArtworkOf(json[thumbnailKey]), seconds > 0 ? seconds : null,
+            NonEmpty(json["viewCount"]), NonEmpty(json[uploadedKey]), Bool(json["isLive"]) ?? false);
+    }
+
+    /// <summary>Android writes a missing value as JSON null, or once read back, as "null".</summary>
+    private static string? NonEmpty(JsonNode? node) =>
+        Str(node) is { } s && !string.IsNullOrWhiteSpace(s) && s != "null" ? s : null;
+
+    private static Artwork? ArtworkOf(JsonNode? node) =>
+        NonEmpty(node) is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) ? new Artwork(uri) : null;
+
+    private static bool IsChannelId(string id) =>
+        id.Length == 24 && id.StartsWith("UC", StringComparison.Ordinal) && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
 
     private static ReadException NotABackup() => new("This file isn't a Koda for Android backup.");
 

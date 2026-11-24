@@ -16,7 +16,8 @@ using VideoModel = Koda.Core.Video.Video;
 namespace Koda.Pages;
 
 /// <summary>What a <see cref="VideoListPage"/> shows.</summary>
-public sealed record VideoListRequest(VideoListKind Kind, string? Query = null);
+/// <param name="Playlist">For <see cref="VideoListKind.Playlist"/>, the playlist kept on this PC.</param>
+public sealed record VideoListRequest(VideoListKind Kind, string? Query = null, Guid? Playlist = null);
 
 public enum VideoListKind
 {
@@ -27,11 +28,13 @@ public enum VideoListKind
     History,
     Channels,
     Search,
+    Playlist,
 }
 
 /// <summary>
-/// Every list of videos: Home, Subscriptions, Watch Later, Liked, History, Channels and search.
-/// One page with its four states, a page of results at a time as it is scrolled.
+/// Every list of videos: Home, Subscriptions, Watch Later, Liked, History, Channels, search and
+/// the playlists kept on this PC. One page with its four states, a page of results at a time as
+/// it is scrolled. Signed out, Subscriptions and Channels are the channels followed on this PC.
 /// </summary>
 public sealed partial class VideoListPage : Page, IVideoPage
 {
@@ -53,8 +56,23 @@ public sealed partial class VideoListPage : Page, IVideoPage
         VideoGrid.AttachMenu(Cards, null);
         _checkFilled = VideoGrid.KeepFilled(Cards, LoadMoreAsync);
         _moreComing = VideoGrid.PrepareLoading(Cards, LoadingView);
-        Unloaded += (_, _) => _cancel?.Cancel();
+        Unloaded += (_, _) =>
+        {
+            _cancel?.Cancel();
+            App.Library.Changed -= OnLibraryChanged;
+        };
+        Loaded += (_, _) => App.Library.Changed += OnLibraryChanged;
     }
+
+    /// <summary>A video hidden or a channel blocked from a menu leaves the list at once.</summary>
+    private void OnLibraryChanged() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (!Filters) return;
+        foreach (var item in _items.OfType<VideoItem>().Where(i => App.Library.IsUnwanted(i.Video)).ToList())
+        {
+            _items.Remove(item);
+        }
+    });
 
     protected override void OnNavigatedTo(NavigationEventArgs args)
     {
@@ -72,6 +90,7 @@ public sealed partial class VideoListPage : Page, IVideoPage
             VideoListKind.History => "Watch History",
             VideoListKind.Channels => "Channels",
             VideoListKind.Search => _request.Query ?? "Search",
+            VideoListKind.Playlist => App.Library.VideoPlaylist(_request.Playlist ?? Guid.Empty)?.Name ?? "Playlist",
             _ => "Home",
         };
 
@@ -79,9 +98,9 @@ public sealed partial class VideoListPage : Page, IVideoPage
         Cards.ItemTemplate = (DataTemplate)Application.Current.Resources[channels ? "ChannelCardTemplate" : "VideoCardTemplate"];
         VideoGrid.Fit(Cards, channels ? 170 : 260, channels ? 180 : null);
         ClearButton.Visibility = _request.Kind == VideoListKind.History ? Visibility.Visible : Visibility.Collapsed;
-        if (_request.Kind == VideoListKind.History)
+        if (_request.Kind is VideoListKind.History or VideoListKind.Playlist)
         {
-            Cards.RightTapped += OnHistoryRightTapped;
+            Cards.RightTapped += OnRemovableRightTapped;
         }
 
         _ = LoadAsync();
@@ -97,19 +116,37 @@ public sealed partial class VideoListPage : Page, IVideoPage
         _ = LoadAsync();
     }
 
-    private void OnHistoryRightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs args)
+    private void OnRemovableRightTapped(object sender, Microsoft.UI.Xaml.Input.RightTappedRoutedEventArgs args)
     {
         if ((args.OriginalSource as FrameworkElement)?.DataContext is VideoItem item)
         {
-            VideoGrid.MenuFor(item.Video, Remove).ShowAt(args.OriginalSource as FrameworkElement, args.GetPosition(args.OriginalSource as UIElement));
+            var label = _request.Kind == VideoListKind.Playlist ? "Remove from playlist" : "Remove from history";
+            VideoGrid.MenuFor(item.Video, Remove, label).ShowAt(args.OriginalSource as FrameworkElement, args.GetPosition(args.OriginalSource as UIElement));
             args.Handled = true;
         }
     }
 
     private void Remove(VideoModel video)
     {
-        App.Library.RemoveWatched(video.Id);
-        _ = LoadAsync();
+        if (_request is { Kind: VideoListKind.Playlist, Playlist: { } playlist })
+        {
+            App.Library.RemoveFromVideoPlaylist(video.Id, playlist);
+        }
+        else
+        {
+            App.Library.RemoveWatched(video.Id);
+        }
+
+        if (_items.FirstOrDefault(i => i is VideoItem v && v.Video.Id == video.Id) is { } shown)
+        {
+            _items.Remove(shown);
+        }
+
+        if (_items.Count == 0)
+        {
+            Cards.Visibility = Visibility.Collapsed;
+            ShowEmpty();
+        }
     }
 
     private async void OnClearClick(object sender, RoutedEventArgs e)
@@ -140,6 +177,7 @@ public sealed partial class VideoListPage : Page, IVideoPage
         {
             var (videos, channels) = await FetchAsync(cancel.Token);
             if (cancel.IsCancellationRequested) return;
+            if (Filters) videos = App.Library.Offerable(videos);
             LoadingView.Visibility = Visibility.Collapsed;
             LoadingView.Content = null;
             foreach (var video in videos) _items.Add(new VideoItem(video));
@@ -183,11 +221,16 @@ public sealed partial class VideoListPage : Page, IVideoPage
             case VideoListKind.History:
                 Status.Show("Nothing watched yet", "Videos you watch gather here, with where you got to.", "");
                 break;
+            case VideoListKind.Playlist:
+                Status.Show("No videos in this playlist", "Add one from a video's menu.", "");
+                break;
             case VideoListKind.Search:
                 Status.Show("No videos found", "Try other words.", "");
                 break;
             case VideoListKind.Subscriptions or VideoListKind.Channels:
-                Status.Show("No subscriptions", "Channels you subscribe to on YouTube appear here.", "");
+                Status.Show("No subscriptions", App.Account.IsSignedIn
+                    ? "Channels you subscribe to on YouTube appear here."
+                    : "Subscribe to a channel from its page or one of its videos, and its uploads gather here.", "");
                 break;
             default:
                 Status.Show("Nothing here yet", "Videos will appear here.", "");
@@ -202,7 +245,14 @@ public sealed partial class VideoListPage : Page, IVideoPage
         switch (_request.Kind)
         {
             case VideoListKind.Subscriptions:
+                if (!App.Account.IsSignedIn)
+                {
+                    return Page(await music.LocalSubscriptionsFeedAsync([.. App.Library.Subscriptions], cancel));
+                }
+
                 return Page(await music.VideoSubscriptionsAsync(cancel));
+            case VideoListKind.Playlist:
+                return ([.. App.Library.VideoPlaylist(_request.Playlist ?? Guid.Empty)?.Videos ?? []], []);
             case VideoListKind.WatchLater:
                 return Page((await music.VideoPlaylistAsync("WL", cancel)).Videos);
             case VideoListKind.Liked:
@@ -210,8 +260,13 @@ public sealed partial class VideoListPage : Page, IVideoPage
             case VideoListKind.History:
                 return ([.. App.Library.Watched], []);
             case VideoListKind.Channels:
-                var subscribed = await music.SubscribedChannelsAsync(cancel);
-                return ([], [.. subscribed.Select(ChannelItem.From)]);
+                // The account's channels, then any followed only on this PC.
+                var local = App.Library.Subscriptions;
+                var account = App.Account.IsSignedIn ? await music.SubscribedChannelsAsync(cancel) : [];
+                var known = account.Select(c => c.Id).OfType<string>().ToHashSet();
+                return ([], [.. account.Select(ChannelItem.From),
+                    .. local.Where(c => !known.Contains(c.ChannelId)).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
+                        .Select(c => new ChannelItem(c.ChannelId, c.Name, c.Handle ?? "", c.Avatar))]);
             case VideoListKind.Search:
                 _source = YouTubeMusic.VideoListSource.Search;
                 var results = await music.SearchVideosAsync(_request.Query ?? "", cancel);
@@ -300,6 +355,10 @@ public sealed partial class VideoListPage : Page, IVideoPage
 
     private bool HasMore => _continuation is not null || _pagesWatched;
 
+    /// <summary>Lists that recommend leave out hidden videos and blocked channels; the
+    /// listener's own lists show what they hold.</summary>
+    private bool Filters => _request.Kind is VideoListKind.Home or VideoListKind.Subscriptions or VideoListKind.Search;
+
     /// <summary>The next page; true when there may be more worth asking for at once.</summary>
     private async Task<bool> LoadMoreAsync()
     {
@@ -335,6 +394,7 @@ public sealed partial class VideoListPage : Page, IVideoPage
             }
 
             var known = _items.OfType<VideoItem>().Select(i => i.Video.Id).ToHashSet();
+            if (Filters) videos = App.Library.Offerable(videos);
             foreach (var video in videos.Where(v => known.Add(v.Id))) _items.Add(new VideoItem(video));
             _moreComing(HasMore);
             return HasMore;

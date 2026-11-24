@@ -39,7 +39,7 @@
                     </Grid.RowDefinitions>
 
                     <ContentPresenter x:Name="MixSkeleton" />
-                    <Grid x:Name="MixCard" Height="300" CornerRadius="20" Visibility="Collapsed" Tapped="OnMixCardTapped">
+                    <Grid x:Name="MixCard" Height="300" CornerRadius="20" Visibility="Collapsed" Tapped="OnMixCardTapped" helpers:PointerCursors.IsClickable="True">
                         <Grid.Background>
                             <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                 <GradientStop x:Name="MixStop0" Color="#FF5A4FCF" Offset="0" />

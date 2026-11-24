@@ -20,6 +20,10 @@ public sealed record CardItem(MusicItem Item, string Title, string Subtitle, Art
         _ => new(item, item.Title, "", item.Artwork, false),
     };
 
+    /// <summary>What a screen reader says for the card: a list item with no name of its own is
+    /// read by its item's text, which for a record would be every field.</summary>
+    public override string ToString() => Subtitle.Length == 0 ? Title : $"{Title}, {Subtitle}";
+
     public static CardItem From(AlbumSummary album) => From(new MusicItem.AlbumRecord(album));
 
     public static CardItem From(ArtistSummary artist) => From(new MusicItem.ArtistRecord(artist));

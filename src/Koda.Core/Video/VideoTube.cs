@@ -30,6 +30,51 @@ public sealed partial class YouTubeMusic
         VideoPages.Feed(await _api.WebAsync("browse",
             new JsonObject { ["browseId"] = "FEsubscriptions" }, cancellation, Signing.Required));
 
+    /// <summary>
+    /// The latest from channels followed on this PC, newest first. No one assembles this feed
+    /// server side, so it is built here from each channel's public Atom feed (its 15 newest
+    /// uploads, with real dates, no cookies), a few channels at a time, as Koda for Android does.
+    /// A channel that fails adds nothing; only when every one fails does the feed fail.
+    /// </summary>
+    public async Task<VideoPage> LocalSubscriptionsFeedAsync(IReadOnlyList<LocalSubscription> channels,
+        CancellationToken cancellation = default)
+    {
+        if (channels.Count == 0) return VideoPage.Empty;
+        using var gate = new SemaphoreSlim(6);
+        Exception? firstError = null;
+        var failures = 0;
+        var lists = await Task.WhenAll(channels.Select(async channel =>
+        {
+            await gate.WaitAsync(cancellation).ConfigureAwait(false);
+            try
+            {
+                var url = $"https://www.youtube.com/feeds/videos.xml?channel_id={Uri.EscapeDataString(channel.ChannelId)}";
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.TryAddWithoutValidation("User-Agent", Clients.BrowserUserAgent);
+                using var response = await _http.SendAsync(request, cancellation).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+                var xml = await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false);
+                return VideoFeeds.ChannelFeed(xml, channel, DateTimeOffset.Now);
+            }
+            catch (Exception error) when (error is not OperationCanceledException || !cancellation.IsCancellationRequested)
+            {
+                Interlocked.Increment(ref failures);
+                Interlocked.CompareExchange(ref firstError, error, null);
+                return [];
+            }
+            finally
+            {
+                gate.Release();
+            }
+        })).ConfigureAwait(false);
+
+        if (failures == channels.Count && firstError is not null) throw firstError;
+        return new VideoPage([.. lists.SelectMany(l => l)
+            .GroupBy(e => e.Video.Id).Select(g => g.First())
+            .OrderByDescending(e => e.Published)
+            .Select(e => e.Video)]);
+    }
+
     /// <summary>Videos and the channels that match, best first. Shorts are left out.</summary>
     public async Task<VideoSearchResults> SearchVideosAsync(string query, CancellationToken cancellation = default) =>
         VideoPages.Search(await _api.WebAsync("search", new JsonObject { ["query"] = query }, cancellation));

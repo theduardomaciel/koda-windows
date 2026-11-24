@@ -49,6 +49,7 @@ public sealed class MiniPlayerWindow : Window
         _page = new MiniPlayerPage();
         Content = _page;
         Koda.Helpers.ShellChrome.Register(_page);
+        Koda.Helpers.PointerCursors.Attach(_page);
 
         var appWindow = AppWindow;
         appWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "icon.ico"));

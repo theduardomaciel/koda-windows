@@ -28,9 +28,10 @@ public sealed record PlayEvent(Guid Id, Song Song, DateTimeOffset Date)
 }
 
 /// <summary>What an Android import added, to tell the listener.</summary>
-public sealed record AndroidImportSummary(int LikedSongs = 0, int Plays = 0, int Playlists = 0, int Saved = 0, int Searches = 0)
+public sealed record AndroidImportSummary(int LikedSongs = 0, int Plays = 0, int Playlists = 0, int Saved = 0, int Searches = 0,
+    int Subscriptions = 0, int Watched = 0, int VideoPlaylists = 0, int Blocked = 0)
 {
-    public bool IsEmpty => LikedSongs + Plays + Playlists + Saved + Searches == 0;
+    public bool IsEmpty => LikedSongs + Plays + Playlists + Saved + Searches + Subscriptions + Watched + VideoPlaylists + Blocked == 0;
 }
 
 public sealed class LibraryBackupException() : Exception("This file isn't a Koda library backup.");
@@ -84,6 +85,7 @@ public sealed class Library
     private const int RecentLimit = 200;
     private const int SearchLimit = 20;
     private const int HistoryLimit = 3000;
+    private const int WatchedLimit = 200;
     /// <summary>The iOS backup format name, kept so one backup restores on either platform.</summary>
     private const string BackupFormat = "koda-ios-library";
 
@@ -239,6 +241,112 @@ public sealed class Library
 
     // MARK: Videos
 
+    /// <summary>Channels followed on this PC without an account, newest first.</summary>
+    public LocalSubscription[] Subscriptions { get { lock (_lock) return [.. _s.Subscriptions]; } }
+
+    public bool IsSubscribed(string? channelId)
+    {
+        if (channelId is null) return false;
+        lock (_lock) return _s.Subscriptions.Exists(c => c.ChannelId == channelId);
+    }
+
+    /// <summary>Follow a channel on this PC, or stop following it.</summary>
+    public void SetSubscribed(ChannelRef channel, bool subscribed, DateTimeOffset? at = null)
+    {
+        if (channel.Id is not { } id) return;
+        Edit(s =>
+        {
+            s.Subscriptions.RemoveAll(c => c.ChannelId == id);
+            if (subscribed) s.Subscriptions.Insert(0, new LocalSubscription(id, channel.Name, channel.Avatar, null, at ?? DateTimeOffset.Now));
+        });
+    }
+
+    /// <summary>Video playlists kept on this PC, newest first.</summary>
+    public VideoPlaylist[] VideoPlaylists { get { lock (_lock) return [.. _s.VideoPlaylists]; } }
+
+    public VideoPlaylist? VideoPlaylist(Guid id) { lock (_lock) return _s.VideoPlaylists.Find(p => p.Id == id); }
+
+    public VideoPlaylist CreateVideoPlaylist(string name, IEnumerable<VideoModel>? videos = null, DateTimeOffset? at = null)
+    {
+        var playlist = global::Koda.Core.Video.VideoPlaylist.Create(name, [.. (videos ?? []).DistinctBy(v => v.Id)], at ?? DateTimeOffset.Now);
+        Edit(s => s.VideoPlaylists.Insert(0, playlist));
+        return playlist;
+    }
+
+    public void RenameVideoPlaylist(Guid id, string name) => Edit(s =>
+    {
+        var at = s.VideoPlaylists.FindIndex(p => p.Id == id);
+        if (at >= 0) s.VideoPlaylists[at] = s.VideoPlaylists[at] with { Name = name };
+    });
+
+    public void DeleteVideoPlaylist(Guid id) => Edit(s => s.VideoPlaylists.RemoveAll(p => p.Id == id));
+
+    /// <summary>Add a video to the end of a playlist; false when it was there already.</summary>
+    public bool AddToVideoPlaylist(VideoModel video, Guid id)
+    {
+        var added = false;
+        Edit(s =>
+        {
+            var at = s.VideoPlaylists.FindIndex(p => p.Id == id);
+            if (at < 0 || s.VideoPlaylists[at].Videos.Any(v => v.Id == video.Id)) return;
+            s.VideoPlaylists[at] = s.VideoPlaylists[at] with { Videos = [.. s.VideoPlaylists[at].Videos, video] };
+            added = true;
+        });
+        return added;
+    }
+
+    public void RemoveFromVideoPlaylist(string videoId, Guid id) => Edit(s =>
+    {
+        var at = s.VideoPlaylists.FindIndex(p => p.Id == id);
+        if (at >= 0) s.VideoPlaylists[at] = s.VideoPlaylists[at] with { Videos = [.. s.VideoPlaylists[at].Videos.Where(v => v.Id != videoId)] };
+    });
+
+    /// <summary>Channels whose videos are kept out of every list.</summary>
+    public ChannelRef[] BlockedChannels { get { lock (_lock) return [.. _s.BlockedChannels]; } }
+
+    public int HiddenVideoCount { get { lock (_lock) return _s.HiddenVideos.Count; } }
+
+    /// <summary>Whether a video is kept out of lists: hidden itself, or its channel blocked.</summary>
+    public bool IsUnwanted(VideoModel video)
+    {
+        lock (_lock)
+        {
+            return _s.HiddenVideos.Contains(video.Id)
+                || (video.Channel?.Id is { } channel && _s.BlockedChannels.Exists(c => c.Id == channel));
+        }
+    }
+
+    /// <summary>The videos worth offering: those not hidden and not from a blocked channel.</summary>
+    public VideoModel[] Offerable(IEnumerable<VideoModel> videos)
+    {
+        lock (_lock)
+        {
+            if (_s.HiddenVideos.Count == 0 && _s.BlockedChannels.Count == 0) return [.. videos];
+            var hidden = _s.HiddenVideos.ToHashSet();
+            var blocked = _s.BlockedChannels.Select(c => c.Id).OfType<string>().ToHashSet();
+            return [.. videos.Where(v => !hidden.Contains(v.Id) && !(v.Channel?.Id is { } c && blocked.Contains(c)))];
+        }
+    }
+
+    public void HideVideo(string videoId) => Edit(s =>
+    {
+        if (!s.HiddenVideos.Contains(videoId)) s.HiddenVideos.Insert(0, videoId);
+    });
+
+    public void Block(ChannelRef channel) => Edit(s =>
+    {
+        if (channel.Id is { } id && !s.BlockedChannels.Exists(c => c.Id == id)) s.BlockedChannels.Insert(0, channel);
+    });
+
+    public void Unblock(string channelId) => Edit(s => s.BlockedChannels.RemoveAll(c => c.Id == channelId));
+
+    /// <summary>Everything hidden and every blocked channel comes back.</summary>
+    public void ClearVideoBlocklist() => Edit(s =>
+    {
+        s.HiddenVideos.Clear();
+        s.BlockedChannels.Clear();
+    });
+
     /// <summary>Videos watched, most recent first, one entry each: Continue Watching, and what a
     /// signed-out video Home is built from.</summary>
     public VideoModel[] Watched
@@ -260,10 +368,10 @@ public sealed class Library
     {
         s.Watched.RemoveAll(v => v.Id == video.Id);
         s.Watched.Insert(0, video);
-        if (s.Watched.Count > 200)
+        if (s.Watched.Count > WatchedLimit)
         {
-            foreach (var dropped in s.Watched.Skip(200)) s.VideoProgress.Remove(dropped.Id);
-            s.Watched.RemoveRange(200, s.Watched.Count - 200);
+            foreach (var dropped in s.Watched.Skip(WatchedLimit)) s.VideoProgress.Remove(dropped.Id);
+            s.Watched.RemoveRange(WatchedLimit, s.Watched.Count - WatchedLimit);
         }
     });
 
@@ -593,6 +701,12 @@ public sealed class Library
         /// backup, or a later one that repeats its history, never counts a play twice.</summary>
         public DateTimeOffset? AndroidPlaysImportedThrough { get; set; }
         public NotInterested NotInterested { get; set; } = new();
+        /// <summary>Video mode's own: channels followed without an account, playlists of videos,
+        /// and what is kept out of its lists. Windows only; the Mac's file has none of them.</summary>
+        public List<LocalSubscription> Subscriptions { get; set; } = [];
+        public List<VideoPlaylist> VideoPlaylists { get; set; } = [];
+        public List<ChannelRef> BlockedChannels { get; set; } = [];
+        public List<string> HiddenVideos { get; set; } = [];
     }
 
     private sealed class Backup
@@ -724,6 +838,17 @@ public sealed class Library
         s.NotInterested ??= new();
         s.NotInterested.Songs ??= [];
         s.NotInterested.Artists ??= [];
+        s.Subscriptions ??= [];
+        s.VideoPlaylists ??= [];
+        s.BlockedChannels ??= [];
+        s.HiddenVideos ??= [];
+        s.Subscriptions.RemoveAll(c => c is null || string.IsNullOrEmpty(c.ChannelId));
+        s.VideoPlaylists.RemoveAll(p => p is null);
+        for (var i = 0; i < s.VideoPlaylists.Count; i++)
+        {
+            if (s.VideoPlaylists[i].Videos is null) s.VideoPlaylists[i] = s.VideoPlaylists[i] with { Videos = [] };
+        }
+        s.BlockedChannels.RemoveAll(c => c?.Id is null);
         return s;
     }
 
@@ -839,6 +964,10 @@ public sealed class Library
             s.LyricsOffsets = restored.LyricsOffsets;
             s.AndroidPlaysImportedThrough = restored.AndroidPlaysImportedThrough;
             s.NotInterested = restored.NotInterested;
+            s.Subscriptions = restored.Subscriptions;
+            s.VideoPlaylists = restored.VideoPlaylists;
+            s.BlockedChannels = restored.BlockedChannels;
+            s.HiddenVideos = restored.HiddenVideos;
         });
 
         // A version 1 backup has no dated history: the plays it knows of become one each,
@@ -930,7 +1059,9 @@ public sealed class Library
             var before = s.Searches.Count;
             s.Searches = [.. s.Searches.Concat(backup.Searches.Where(q => !knownSearches.Contains(q.ToLowerInvariant()))).Take(SearchLimit)];
 
-            summary = new AndroidImportSummary(newLikes.Length, fresh.Length, playlists, saved, s.Searches.Count - before);
+            var (subscriptions, watched, videoPlaylists, blocked) = ImportAndroidVideo(s, backup);
+            summary = new AndroidImportSummary(newLikes.Length, fresh.Length, playlists, saved, s.Searches.Count - before,
+                subscriptions, watched, videoPlaylists, blocked);
         });
 
         if (historyAdds.Count > 0)
@@ -949,6 +1080,59 @@ public sealed class Library
         }
 
         return summary;
+    }
+
+    /// <summary>Video mode's side of an Android import, merged the same way: nothing here is
+    /// replaced, and the same backup twice adds nothing twice.</summary>
+    private static (int Subscriptions, int Watched, int Playlists, int Blocked) ImportAndroidVideo(Snapshot s, AndroidBackup backup)
+    {
+        var subscriptions = 0;
+        foreach (var channel in backup.Subscriptions)
+        {
+            if (s.Subscriptions.Exists(c => c.ChannelId == channel.ChannelId)) continue;
+            s.Subscriptions.Add(channel);
+            subscriptions++;
+        }
+        s.Subscriptions = [.. s.Subscriptions.OrderByDescending(c => c.Subscribed ?? DateTimeOffset.MinValue)];
+
+        // The phone's history has no dates Windows keeps, so what is here stays on top and the
+        // phone's follows in its own order; where a video got to comes across unless it is
+        // already known here.
+        var watched = 0;
+        foreach (var video in backup.Watched)
+        {
+            if (s.Watched.Exists(v => v.Id == video.Id)) continue;
+            if (s.Watched.Count >= WatchedLimit) break;
+            s.Watched.Add(video);
+            if (backup.VideoProgress.TryGetValue(video.Id, out var progress)) s.VideoProgress.TryAdd(video.Id, progress);
+            watched++;
+        }
+
+        var playlists = 0;
+        foreach (var playlist in backup.VideoPlaylists)
+        {
+            var ids = playlist.Videos.Select(v => v.Id).ToArray();
+            if (s.VideoPlaylists.Exists(p => p.Name == playlist.Name && p.Videos.Select(v => v.Id).SequenceEqual(ids))) continue;
+            s.VideoPlaylists.Add(global::Koda.Core.Video.VideoPlaylist.Create(playlist.Name, playlist.Videos, playlist.Created));
+            playlists++;
+        }
+        s.VideoPlaylists = [.. s.VideoPlaylists.OrderByDescending(p => p.Created)];
+
+        var blocked = 0;
+        foreach (var channel in backup.BlockedChannels)
+        {
+            if (s.BlockedChannels.Exists(c => c.Id == channel.Id)) continue;
+            s.BlockedChannels.Add(channel);
+            blocked++;
+        }
+        foreach (var id in backup.HiddenVideos)
+        {
+            if (s.HiddenVideos.Contains(id)) continue;
+            s.HiddenVideos.Add(id);
+            blocked++;
+        }
+
+        return (subscriptions, watched, playlists, blocked);
     }
 
     /// <summary>Dates as Swift's .iso8601 reads and writes them: UTC, whole seconds.</summary>

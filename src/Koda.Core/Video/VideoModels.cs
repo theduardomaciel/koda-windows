@@ -65,6 +65,26 @@ public sealed record ChannelRef(string? Id, string Name, Artwork? Avatar = null)
     }
 }
 
+/// <summary>A channel followed on this PC, with no YouTube account involved: its feed is built
+/// from the channel's public uploads. <paramref name="ChannelId"/> is always the UC... id.</summary>
+public sealed record LocalSubscription(
+    string ChannelId,
+    string Name,
+    Artwork? Avatar = null,
+    string? Handle = null,
+    DateTimeOffset? Subscribed = null)
+{
+    [JsonIgnore]
+    public ChannelRef Ref => new(ChannelId, Name, Avatar);
+}
+
+/// <summary>A playlist of videos kept on this PC (made on the phone and imported, for now).</summary>
+public sealed record VideoPlaylist(Guid Id, string Name, Video[] Videos, DateTimeOffset Created)
+{
+    public static VideoPlaylist Create(string name, Video[] videos, DateTimeOffset created) =>
+        new(Guid.NewGuid(), name, videos, created);
+}
+
 /// <summary>A channel as search lists it.</summary>
 public sealed record ChannelSummary(
     string Id,

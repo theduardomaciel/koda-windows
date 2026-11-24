@@ -1831,6 +1831,7 @@ internal sealed class LyricsPanel : IDisposable
             row.Host = host;
 
             // A tap on the line jumps the song to it, and hands the panel back to the song.
+            Koda.Helpers.PointerCursors.SetIsClickable(host, true);
             host.Tapped += (_, _) =>
             {
                 UserScrolled = false;

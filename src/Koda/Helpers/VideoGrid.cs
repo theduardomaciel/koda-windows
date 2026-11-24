@@ -16,6 +16,10 @@ namespace Koda.Helpers;
 /// <summary>A video as a card or row draws it.</summary>
 public sealed record VideoItem(VideoModel Video)
 {
+    /// <summary>What a screen reader says for the card, as for songs: title, then who and how long.</summary>
+    public override string ToString() =>
+        string.Join(", ", new[] { Title, Byline, Duration }.Where(part => part.Length > 0));
+
     public string Title => Video.Title;
 
     public string Byline => Video.Byline;
@@ -250,7 +254,7 @@ public static class VideoGrid
         };
     }
 
-    public static MenuFlyout MenuFor(VideoModel video, Action<VideoModel>? onRemove = null)
+    public static MenuFlyout MenuFor(VideoModel video, Action<VideoModel>? onRemove = null, string removeLabel = "Remove from history")
     {
         var menu = new MenuFlyout();
         menu.Items.Add(SongMenu.Item("Play", "", () => App.Shell?.OpenVideo(video)));
@@ -259,16 +263,55 @@ public static class VideoGrid
             menu.Items.Add(SongMenu.Item("Go to channel", "", () => App.Shell?.NavigateTo(typeof(VideoChannelPage), channel)));
         }
 
+        menu.Items.Add(PlaylistMenu(video));
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(SongMenu.Item("Copy link", "", () => CopyLink(video)));
         menu.Items.Add(SongMenu.Item("Open on YouTube", "", () => OpenOnYouTube(video)));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(SongMenu.Item("Not interested", "", () =>
+        {
+            App.Library.HideVideo(video.Id);
+            App.Shell?.Note("You won't see this video in your lists. Settings can bring it back.");
+        }));
+        if (video.Channel is { Id: not null } owner)
+        {
+            menu.Items.Add(SongMenu.Item($"Don't recommend {owner.Name}", "", () =>
+            {
+                App.Library.Block(owner);
+                App.Shell?.Note($"Videos from {owner.Name} stay out of your lists. Settings can bring them back.");
+            }));
+        }
+
         if (onRemove is not null)
         {
             menu.Items.Add(new MenuFlyoutSeparator());
-            menu.Items.Add(SongMenu.Item("Remove from history", "", () => onRemove(video)));
+            menu.Items.Add(SongMenu.Item(removeLabel, "", () => onRemove(video)));
         }
 
         return menu;
+    }
+
+    /// <summary>Save to playlist: the video playlists kept on this PC, and a new one.</summary>
+    private static MenuFlyoutSubItem PlaylistMenu(VideoModel video)
+    {
+        var sub = new MenuFlyoutSubItem { Text = "Save to playlist", Icon = new FontIcon { Glyph = "" } };
+        sub.Items.Add(SongMenu.Item("New playlist…", "", () => _ = Dialogs.CreateVideoPlaylistAsync(video)));
+        var playlists = App.Library.VideoPlaylists;
+        if (playlists.Length > 0)
+        {
+            sub.Items.Add(new MenuFlyoutSeparator());
+        }
+
+        foreach (var playlist in playlists)
+        {
+            var name = playlist.Name;
+            var id = playlist.Id;
+            sub.Items.Add(SongMenu.Item(name, "", () => App.Shell?.Note(App.Library.AddToVideoPlaylist(video, id)
+                ? $"Saved to “{name}”."
+                : $"Already in “{name}”.")));
+        }
+
+        return sub;
     }
 
     public static Uri LinkOf(VideoModel video) => new($"https://www.youtube.com/watch?v={video.Id}");

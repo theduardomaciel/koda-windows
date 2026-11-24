@@ -65,6 +65,8 @@ public sealed partial class MainWindow : Window
     private string _playlistSignature = "";
     private bool _hasUpNext;
     private readonly List<NavigationViewItem> _playlistItems = [];
+    private string _videoPlaylistSignature = "";
+    private readonly List<NavigationViewItem> _videoPlaylistItems = [];
     private DispatcherQueueTimer? _volumeSaveTimer;
     private DispatcherQueueTimer? _statusTimer;
     private DispatcherQueueTimer? _suggestTimer;
@@ -155,6 +157,7 @@ public sealed partial class MainWindow : Window
         AppTitleBar.SizeChanged += OnTitleBarSizeChanged;
         ApplyTitleBarChrome();
         Activated += OnActivated;
+        PointerCursors.Attach(Root);
 
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         WindowPlacement.Restore(hwnd);
@@ -202,6 +205,7 @@ public sealed partial class MainWindow : Window
         // icons when the system light/dark switch moves.
         _systemColors.ColorValuesChanged += (_, _) => dispatch.TryEnqueue(() => _taskbar?.RefreshTheme());
         App.Library.Changed += () => dispatch.TryEnqueue(RefreshSidebar);
+        App.Library.Changed += () => dispatch.TryEnqueue(UpdateVideoSidebar);
         App.AudioStore.Changed += () => dispatch.TryEnqueue(RefreshSidebar);
         App.Library.Changed += () => dispatch.TryEnqueue(UpdateLike);
         App.Settings.Changed += _ => dispatch.TryEnqueue(ApplySkipSettings);
@@ -549,6 +553,10 @@ public sealed partial class MainWindow : Window
             case "new-playlist":
                 _ = Dialogs.CreatePlaylistAsync([]);
                 break;
+            case not null when tag.StartsWith("video-playlist:", StringComparison.Ordinal)
+                && Guid.TryParse(tag["video-playlist:".Length..], out var videoPlaylist):
+                NavigateRoot(typeof(VideoListPage), new VideoListRequest(VideoListKind.Playlist, Playlist: videoPlaylist), tag);
+                break;
             case not null when tag.StartsWith("playlist:", StringComparison.Ordinal)
                                 && Guid.TryParse(tag["playlist:".Length..], out var id):
                 NavigateRoot(typeof(UserPlaylistPage), id, tag);
@@ -706,6 +714,7 @@ public sealed partial class MainWindow : Window
             VideoListKind.WatchLater => "video-later",
             VideoListKind.Liked => "video-liked",
             VideoListKind.History => "video-history",
+            VideoListKind.Playlist => $"video-playlist:{(parameter as VideoListRequest)?.Playlist}",
             _ => "video-home",
         },
         _ => null,
@@ -2245,6 +2254,64 @@ public sealed partial class MainWindow : Window
 
     // MARK: video
 
+    /// <summary>The video playlists kept on this PC, under Watch History while videos are on.</summary>
+    private void RebuildVideoPlaylists(bool on)
+    {
+        var playlists = on ? App.Library.VideoPlaylists : [];
+        var signature = string.Join("|", playlists.Select(p => $"{p.Id}:{p.Name}"));
+        if (signature == _videoPlaylistSignature)
+        {
+            return;
+        }
+
+        _videoPlaylistSignature = signature;
+        foreach (var old in _videoPlaylistItems)
+        {
+            Nav.MenuItems.Remove(old);
+        }
+
+        _videoPlaylistItems.Clear();
+        var at = Nav.MenuItems.IndexOf(VideoHistoryItem) + 1;
+        foreach (var playlist in playlists)
+        {
+            var item = new NavigationViewItem
+            {
+                Content = playlist.Name,
+                Tag = $"video-playlist:{playlist.Id}",
+                Icon = new FontIcon { Glyph = "\uE90B" },
+            };
+            ToolTipService.SetToolTip(item, playlist.Name);
+            var menu = new MenuFlyout();
+            var shown = playlist;
+            menu.Items.Add(SongMenu.Item("Rename…", "\uE70F", () => _ = Dialogs.RenameVideoPlaylistAsync(shown)));
+            menu.Items.Add(SongMenu.Item("Delete playlist…", "\uE74D", () => _ = DeleteVideoPlaylistAsync(shown)));
+            item.ContextFlyout = menu;
+            Nav.MenuItems.Insert(at++, item);
+            _videoPlaylistItems.Add(item);
+        }
+
+        if (_currentTag is { } tag && tag.StartsWith("video-playlist:", StringComparison.Ordinal))
+        {
+            SelectTag(tag);
+        }
+    }
+
+    private async System.Threading.Tasks.Task DeleteVideoPlaylistAsync(Koda.Core.Video.VideoPlaylist playlist)
+    {
+        if (!await Dialogs.ConfirmAsync($"Delete “{playlist.Name}”?",
+                "The videos stay wherever else you saved them.", "Delete Playlist"))
+        {
+            return;
+        }
+
+        if (_currentTag == $"video-playlist:{playlist.Id}")
+        {
+            NavigateRoot(typeof(VideoListPage), new VideoListRequest(VideoListKind.Home), "video-home");
+        }
+
+        App.Library.DeleteVideoPlaylist(playlist.Id);
+    }
+
     /// <summary>Starts a video and opens its page; the one everything that opens a video goes through.</summary>
     public void OpenVideo(Koda.Core.Video.Video video)
     {
@@ -2263,7 +2330,12 @@ public sealed partial class MainWindow : Window
         var visible = on ? Visibility.Visible : Visibility.Collapsed;
         var account = on && signedIn ? Visibility.Visible : Visibility.Collapsed;
         VideosHeader.Visibility = VideoHomeItem.Visibility = VideoExploreItem.Visibility = VideoHistoryItem.Visibility = visible;
-        VideoSubscriptionsItem.Visibility = VideoChannelsItem.Visibility = VideoLaterItem.Visibility = VideoLikedItem.Visibility = account;
+        VideoLaterItem.Visibility = VideoLikedItem.Visibility = account;
+
+        // Signed out, channels followed on this PC make Subscriptions and Channels.
+        VideoSubscriptionsItem.Visibility = VideoChannelsItem.Visibility =
+            on && (signedIn || App.Library.Subscriptions.Length > 0) ? Visibility.Visible : Visibility.Collapsed;
+        RebuildVideoPlaylists(on);
 
         // Turned off: nothing of it stays behind, not a video in the bar nor a page of it.
         if (!on)
@@ -2352,19 +2424,81 @@ public sealed partial class MainWindow : Window
         Video.Stop();
     }
 
-    /// <summary>The watch page filling the screen: no title bar, sidebar or bar around it.</summary>
-    public void SetVideoFullScreen(bool on)
+    /// <summary>
+    /// Full screen for a video, the way Windows means it: the window takes the full-screen
+    /// presenter (no frame, no title bar, over the taskbar), and the player, handed over by the
+    /// watch page, is lifted into a layer over the whole window. The shell under it is left
+    /// alone, so nothing of it (sidebar, title bar row, the page's edges) can show around the
+    /// picture, and leaving puts the window back exactly as it was.
+    ///
+    /// The app's own title bar is let go for the duration: with content extended into the title
+    /// bar, the window keeps the strip of frame that holds the resize edge, and under the
+    /// full-screen presenter that strip shows as a light line across the top of the screen.
+    /// </summary>
+    public void EnterVideoFullScreen(UIElement player)
     {
-        if (_videoFullScreen == on)
+        if (_videoFullScreen)
         {
             return;
         }
 
-        _videoFullScreen = on;
-        AppWindow.SetPresenter(on ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Overlapped);
-        AppTitleBar.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
-        Root.RowDefinitions[0].Height = new GridLength(on ? 0 : TitleBarHeight);
-        ApplySidebar();
+        _videoFullScreen = true;
+        AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+        ExtendsContentIntoTitleBar = false;
+        // The title bar's drag region outlives it: left in place, the top of the picture would
+        // drag the window and a double click there would try to maximize it.
+        InputNonClientPointerSource.GetForWindowId(AppWindow.Id).ClearAllRegionRects();
+        FullWindowLayer.Children.Add(player);
+        FullWindowLayer.Visibility = Visibility.Visible;
+        FillWithContent(Handle);
+    }
+
+    /// <summary>
+    /// The Windows App SDK window keeps the top pixel of its client area for the resize edge and
+    /// starts its content (the DesktopChildSiteBridge) one pixel down, even under the full-screen
+    /// presenter, where there is no edge to resize. That row shows the bare window: a light
+    /// line across the top of a full-screen video. In full screen the content is given the
+    /// whole client area, after every resize, since the window sets the offset again on each.
+    /// </summary>
+    private static void FillWithContent(nint hwnd)
+    {
+        var content = Win32.FindWindowEx(hwnd, 0, "Microsoft.UI.Content.DesktopChildSiteBridge", null);
+        if (content == 0 || !Win32.GetClientRect(hwnd, out var client) || !Win32.GetWindowRect(content, out var placed))
+        {
+            return;
+        }
+
+        // Child positions are in the parent's client coordinates, which here start at the screen
+        // origin of the window; only a content window that doesn't already fill it is moved.
+        if (!Win32.GetWindowRect(hwnd, out var window)
+            || (placed.Left == window.Left && placed.Top == window.Top
+                && placed.Width == client.Width && placed.Height == client.Height))
+        {
+            return;
+        }
+
+        Win32.SetWindowPos(content, 0, 0, 0, client.Width, client.Height, Win32.SWP_NOZORDER | Win32.SWP_NOACTIVATE);
+    }
+
+    /// <summary>The player goes back to the page (the caller takes it), and the window back to
+    /// its frame and the app's title bar.</summary>
+    public void LeaveVideoFullScreen(UIElement player)
+    {
+        if (!_videoFullScreen)
+        {
+            return;
+        }
+
+        _videoFullScreen = false;
+        FullWindowLayer.Children.Remove(player);
+        FullWindowLayer.Visibility = Visibility.Collapsed;
+
+        // The title bar is ours again before the frame comes back, so Windows' own never flashes.
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(AppTitleBar);
+        AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+        PaintCaptionButtons();
+        AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
     }
 
     // MARK: sidebar
@@ -2380,12 +2514,12 @@ public sealed partial class MainWindow : Window
         ApplySidebar();
     }
 
-    /// <summary>The sidebar shown or hidden entirely, as the listener left it; full screen
-    /// always hides it. The title bar's button says which way it will go.</summary>
+    /// <summary>The sidebar shown or hidden entirely, as the listener left it. The title bar's
+    /// button says which way it will go.</summary>
     private void ApplySidebar()
     {
         var hidden = App.Settings.HidesSidebar;
-        var visible = !hidden && !_videoFullScreen;
+        var visible = !hidden;
         if (Nav.IsPaneVisible != visible)
         {
             // NavigationView opens the pane wide whenever it is shown again; a sidebar the
@@ -2705,7 +2839,7 @@ public sealed partial class MainWindow : Window
 
         _shutdown = true;
         CloseMiniPlayer();
-        Video.Flush();
+        Video.Shutdown();
         Playback.Shutdown();
         _taskbar?.Dispose();
         _tray?.Dispose();
@@ -2758,6 +2892,15 @@ public sealed partial class MainWindow : Window
                 }
 
                 break;
+
+            case Win32.WM_SIZE when _current is { _videoFullScreen: true, _previousWndProc: not 0 } shell:
+            {
+                // The window lays its content out first (one pixel down); full screen then
+                // takes that pixel back. See FillWithContent.
+                var result = Win32.CallWindowProc(shell._previousWndProc, hwnd, msg, wParam, lParam);
+                FillWithContent(hwnd);
+                return result;
+            }
 
             case Win32.WM_SIZE:
                 // The lyrics are not read while the window is out of sight; a minimized

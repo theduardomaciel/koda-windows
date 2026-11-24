@@ -59,6 +59,7 @@ public sealed partial class SettingsPage : Page
         base.OnNavigatedTo(e);
         Load();
         EnergySaver.Changed += OnEnergySaverChanged;
+        Koda.Playback.VideoPlaybackService.Instance.Changed += OnVideoChanged;
         App.Library.Changed += OnLibraryChanged;
         App.Downloads.Changed += OnDownloadsChanged;
         App.LastFm.Changed += OnLastFmChanged;
@@ -71,6 +72,7 @@ public sealed partial class SettingsPage : Page
         base.OnNavigatedFrom(e);
         FlushSettingsSave();
         EnergySaver.Changed -= OnEnergySaverChanged;
+        Koda.Playback.VideoPlaybackService.Instance.Changed -= OnVideoChanged;
         App.Library.Changed -= OnLibraryChanged;
         App.Downloads.Changed -= OnDownloadsChanged;
         App.LastFm.Changed -= OnLastFmChanged;
@@ -97,6 +99,10 @@ public sealed partial class SettingsPage : Page
         AutoplaySwitch.IsOn = settings.Autoplay;
         VideosSwitch.IsOn = settings.ShowsVideos;
         VideoAutoplaySwitch.IsOn = settings.AutoplaysVideos;
+        SmoothMotionSwitch.IsOn = settings.SmoothMotion;
+        MotionFpsBox.SelectedIndex = settings.SmoothMotionMaxFps == 60 ? 0 : 1;
+        VideoStatsSwitch.IsOn = settings.ShowsVideoStats;
+        OnVideoChanged();
         VideoQualityBox.ItemsSource = VideoQualityChoices.Select(q => q == 0 ? "Auto" : new Koda.Core.Video.VideoQuality(q, 0, 0).Label).ToArray();
         VideoQualityBox.SelectedIndex = Math.Max(0, Array.IndexOf(VideoQualityChoices, settings.VideoQuality));
         NormalizeSwitch.IsOn = settings.NormalizesVolume;
@@ -206,10 +212,35 @@ public sealed partial class SettingsPage : Page
         RefreshLyricsCache();
         RefreshDownloads();
         RefreshSuggestLess();
+        RefreshVideoBlocklist();
         RefreshLastFm();
         RefreshDiscord();
         RefreshYouTube();
         ApplySettingsSearch();
+    }
+
+    /// <summary>What video mode keeps out of its lists: videos hidden and channels blocked,
+    /// on the phone and brought across, or from a video's menu here.</summary>
+    private void RefreshVideoBlocklist()
+    {
+        var hidden = App.Library.HiddenVideoCount;
+        var blocked = App.Library.BlockedChannels.Length;
+        VideoBlocklistText.Text = hidden + blocked == 0
+            ? "Videos you hide and channels you block stay out of Home, Subscriptions and search."
+            : $"{Plural(hidden, "video")} and {Plural(blocked, "channel")} are kept out of Home, Subscriptions and search.";
+        VideoBlocklistButton.IsEnabled = hidden + blocked > 0;
+
+        static string Plural(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
+    }
+
+    private async void OnVideoBlocklistClearClick(object sender, RoutedEventArgs e)
+    {
+        if (await Dialogs.ConfirmAsync("Show hidden videos and channels again?",
+                "Every hidden video and blocked channel can turn up in your lists again.", "Show Again"))
+        {
+            App.Library.ClearVideoBlocklist();
+            RefreshVideoBlocklist();
+        }
     }
 
     // MARK: search
@@ -682,6 +713,26 @@ public sealed partial class SettingsPage : Page
     {
         if (!_loaded) return;
         App.Settings.Update(s => s.AutoplaysVideos = VideoAutoplaySwitch.IsOn);
+    }
+
+    private void OnSmoothMotionToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded) return;
+        Koda.Playback.VideoPlaybackService.Instance.SetSmoothMotion(SmoothMotionSwitch.IsOn);
+    }
+
+    private void OnVideoChanged() => SmoothMotionStatusText.Text = Koda.Playback.VideoPlaybackService.Instance.SmoothMotionStatus;
+
+    private void OnMotionFpsChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_loaded || MotionFpsBox.SelectedIndex < 0) return;
+        Koda.Playback.VideoPlaybackService.Instance.SetSmoothMotionMaxFps(MotionFpsBox.SelectedIndex == 0 ? 60 : 120);
+    }
+
+    private void OnVideoStatsToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_loaded) return;
+        Koda.Playback.VideoPlaybackService.Instance.SetVideoStats(VideoStatsSwitch.IsOn);
     }
 
     private void OnVideoQualityChanged(object sender, SelectionChangedEventArgs e)

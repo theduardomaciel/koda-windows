@@ -15,7 +15,7 @@ public static class AndroidImport
 {
     /// <summary>What Settings says under the row, as the Mac does.</summary>
     public const string Explanation =
-        "Adds the liked songs, playlists, saved albums and playlists, plays and searches from a Koda for Android backup. Nothing here is replaced, and importing the same backup twice adds nothing twice.";
+        "Adds the liked songs, playlists, saved albums and playlists, plays and searches from a Koda for Android backup, and from video mode its local subscriptions, watch history, video playlists and hidden channels. Nothing here is replaced, and importing the same backup twice adds nothing twice.";
 
     public static async Task RunAsync()
     {
@@ -59,6 +59,10 @@ public static class AndroidImport
         if (s.Saved > 0) parts.Add($"{s.Saved} saved albums and playlists");
         if (s.Plays > 0) parts.Add($"{s.Plays} plays");
         if (s.Searches > 0) parts.Add($"{s.Searches} searches");
+        if (s.Subscriptions > 0) parts.Add($"{s.Subscriptions} subscriptions");
+        if (s.Watched > 0) parts.Add($"{s.Watched} watched videos");
+        if (s.VideoPlaylists > 0) parts.Add($"{s.VideoPlaylists} video playlists");
+        if (s.Blocked > 0) parts.Add($"{s.Blocked} hidden videos and channels");
         return "Imported " + string.Join(", ", parts) + ".";
     }
 }

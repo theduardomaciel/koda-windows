@@ -53,7 +53,25 @@
   <!-- The shell is wired to the engine. -->
   <ItemGroup>
     <ProjectReference Include="..\Koda.Core\Koda.Core.csproj" />
+    <ProjectReference Include="..\SmoothMotion.Windows\SmoothMotion.Windows.csproj" />
   </ItemGroup>
+
+  <!-- A build with restore disabled can compile a newly referenced project while retaining this
+       app's old runtime dependency graph. Fail that build instead of shipping a player
+       whose interpolation engine throws FileNotFoundException when first enabled. -->
+  <Target Name="KodaVerifySmoothMotionDependencies" AfterTargets="Build"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <_KodaMotionRuntime Include="SharpGen.Runtime.dll;SharpGen.Runtime.COM.dll;Vortice.D3DCompiler.dll;Vortice.Direct3D11.dll;Vortice.DirectX.dll;Vortice.DXGI.dll;Vortice.Mathematics.dll" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(TargetDir)%(_KodaMotionRuntime.Identity)')"
+           Text="Smooth motion runtime dependency %(_KodaMotionRuntime.Identity) is missing. Build Koda with restore enabled." />
+    <PropertyGroup>
+      <_KodaMotionDepsText Condition="Exists('$(TargetDir)$(AssemblyName).deps.json')">$([System.IO.File]::ReadAllText('$(TargetDir)$(AssemblyName).deps.json'))</_KodaMotionDepsText>
+    </PropertyGroup>
+    <Error Condition="!$(_KodaMotionDepsText.Contains('SharpGen.Runtime/'))"
+           Text="Koda's runtime dependency manifest is stale. Build Koda with restore enabled." />
+  </Target>
 
   <ItemGroup>
     <Content Include="Assets\icon.ico">
@@ -94,6 +112,96 @@
         <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       </ResolvedFileToPublish>
     </ItemGroup>
+  </Target>
+
+  <!-- The video player hides the pointer with a cursor of its own (Controls\PointerHost.cs):
+       WinUI 3 has no "none" system cursor, and loads a custom one only from a named cursor
+       resource in the app's module. The compiler can't take a .res file alongside the icon
+       and manifest above, so the transparent cursor is written into the launcher (apphost)
+       right after the SDK creates it, with the Win32 resource API. Builds and publishes both
+       take the launcher from there. -->
+  <UsingTask TaskName="KodaAddBlankCursor" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <File ParameterType="System.String" Required="true" />
+      <Name ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+public class KodaAddBlankCursor : Task
+{
+    [Required] public string File { get; set; }
+    [Required] public string Name { get; set; }
+
+    private const int CursorId = 101;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr BeginUpdateResource(string file, bool deleteExisting);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool UpdateResource(IntPtr update, IntPtr type, IntPtr name, ushort language, byte[] data, int size);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool UpdateResource(IntPtr update, IntPtr type, string name, ushort language, byte[] data, int size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool EndUpdateResource(IntPtr update, bool discard);
+
+    public override bool Execute()
+    {
+        // RT_CURSOR: hotspot, then a 32x32 monochrome DIB whose XOR mask is all 0 and AND mask
+        // all 1, which draws nothing.
+        var cursor = new MemoryStream();
+        var w = new BinaryWriter(cursor);
+        w.Write((ushort)0); w.Write((ushort)0);
+        w.Write(40); w.Write(32); w.Write(64); w.Write((ushort)1); w.Write((ushort)1);
+        w.Write(0); w.Write(256); w.Write(0); w.Write(0); w.Write(0); w.Write(0);
+        w.Write(0x00000000); w.Write(0x00FFFFFF);
+        w.Write(new byte[128]);
+        var and = new byte[128];
+        for (var i = 0; i < and.Length; i++) and[i] = 0xFF;
+        w.Write(and);
+        var cursorBytes = cursor.ToArray();
+
+        // RT_GROUP_CURSOR: the named entry LoadCursor finds, pointing at the image above.
+        var group = new MemoryStream();
+        var g = new BinaryWriter(group);
+        g.Write((ushort)0); g.Write((ushort)2); g.Write((ushort)1);
+        g.Write((ushort)32); g.Write((ushort)64); g.Write((ushort)1); g.Write((ushort)1);
+        g.Write(cursorBytes.Length); g.Write((ushort)CursorId);
+        var groupBytes = group.ToArray();
+
+        var update = BeginUpdateResource(File, false);
+        if (update == IntPtr.Zero)
+        {
+            Log.LogError("Couldn't open {0} for resources (error {1}).", File, Marshal.GetLastWin32Error());
+            return false;
+        }
+
+        var ok = UpdateResource(update, (IntPtr)1, (IntPtr)CursorId, 0, cursorBytes, cursorBytes.Length)
+            && UpdateResource(update, (IntPtr)12, Name, 0, groupBytes, groupBytes.Length);
+        var error = Marshal.GetLastWin32Error();
+        if (!EndUpdateResource(update, !ok) || !ok)
+        {
+            Log.LogError("Couldn't add the {0} cursor to {1} (error {2}).", Name, File, error);
+            return false;
+        }
+
+        Log.LogMessage(MessageImportance.Normal, "Added the {0} cursor to {1}.", Name, File);
+        return true;
+    }
+}
+]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="KodaAddBlankCursorToAppHost" AfterTargets="_CreateAppHost" Condition="'$(AppHostIntermediatePath)' != '' and Exists('$(AppHostIntermediatePath)')">
+    <KodaAddBlankCursor File="$(AppHostIntermediatePath)" Name="KODA_BLANK" />
   </Target>
 
   <Target Name="KodaIncludeAppPriInPublish" BeforeTargets="ComputeFilesToPublish" Condition="'$(WindowsPackageType)' != 'MSIX'">

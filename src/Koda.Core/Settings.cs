@@ -298,6 +298,19 @@ public sealed class Settings
     /// <summary>At a video's end, the next in Up Next starts after a short countdown.</summary>
     public bool AutoplaysVideos { get; set; } = true;
 
+    /// <summary>Experimental GPU frame interpolation for SDR video up to 1080p. Off by default.</summary>
+    public bool SmoothMotion { get; set; }
+
+    /// <summary>Interpolation's upper limit. The presenter also respects the current display.</summary>
+    public int SmoothMotionMaxFps
+    {
+        get => _smoothMotionMaxFps;
+        set => _smoothMotionMaxFps = value is 60 or 120 ? value : 120;
+    }
+    private int _smoothMotionMaxFps = 120;
+
+    public bool ShowsVideoStats { get; set; }
+
     /// <summary>The watch page's theater layout: the video across the whole page on black, the
     /// details and Up Next under it; off, Up Next sits beside the video.</summary>
     public bool VideoTheater { get; set; }

@@ -23,6 +23,24 @@ internal static partial class Win32
 
     public const int GWLP_WNDPROC = -4;
 
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern nint FindWindowEx(nint parent, nint after, string? className, string? title);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetClientRect(nint hwnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetWindowRect(nint hwnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetWindowPos(nint hwnd, nint after, int x, int y, int width, int height, uint flags);
+
     public const uint IMAGE_ICON = 1;
     public const uint LR_LOADFROMFILE = 0x00000010;
 

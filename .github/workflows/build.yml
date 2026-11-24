@@ -5,6 +5,7 @@ on:
     branches: [main, beta, custom]
   pull_request:
     branches: [main, beta, custom]
+  workflow_dispatch:
 
 jobs:
   windows:
@@ -21,3 +22,33 @@ jobs:
 
       - name: Test
         run: dotnet test tests\Koda.Core.Tests --configuration Release
+
+      - name: Install WiX
+        run: |
+          dotnet tool install --tool-path "$env:RUNNER_TEMP\wix" wix --version 5.0.2
+          "$env:RUNNER_TEMP\wix" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Package (portable zip + MSI)
+        shell: pwsh
+        run: .\scripts\build-release.ps1 -Output "$env:GITHUB_WORKSPACE\artifacts\release"
+
+      - name: Verify MSI exists
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem artifacts\release\msi\*.msi -ErrorAction SilentlyContinue
+          if (-not $msi) { throw 'No MSI was produced.' }
+          $msi | ForEach-Object { '{0}  ({1:N1} MB)' -f $_.Name, ($_.Length / 1MB) }
+
+      - name: Upload MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: Koda-msi-${{ github.ref_name }}-${{ github.sha }}
+          path: artifacts/release/msi/*.msi
+          if-no-files-found: error
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Koda-portable-${{ github.ref_name }}-${{ github.sha }}
+          path: artifacts/release/*.zip
+          if-no-files-found: error

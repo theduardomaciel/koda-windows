@@ -133,6 +133,58 @@
                         </StackPanel>
                         <ToggleSwitch x:Name="VideoAutoplaySwitch" Grid.Column="1" Style="{StaticResource SettingsToggle}" AutomationProperties.Name="Autoplay next video" Toggled="OnVideoAutoplayToggled" />
                     </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,16,0">
+                            <TextBlock Text="Smooth motion (experimental)" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock Text="Generate intermediate frames for smoother video, up to 120 fps at 1080p. Uses more GPU power; turns off in Energy Saver." Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="SmoothMotionStatusText" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                        <ToggleSwitch x:Name="SmoothMotionSwitch" Grid.Column="1" Style="{StaticResource SettingsToggle}" AutomationProperties.Name="Smooth motion" Toggled="OnSmoothMotionToggled" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,16,0">
+                            <TextBlock Text="Smooth motion limit" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock Text="Output follows the display's refresh rate and steps down if this PC cannot keep up." Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ComboBox x:Name="MotionFpsBox" Grid.Column="1" MinWidth="136" AutomationProperties.Name="Smooth motion frame rate limit" SelectionChanged="OnMotionFpsChanged">
+                            <ComboBoxItem Content="Up to 60 fps" />
+                            <ComboBoxItem Content="Up to 120 fps" />
+                        </ComboBox>
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,16,0">
+                            <TextBlock Text="Stats for nerds" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock Text="Show video details, smooth-motion counters and a live frame-rate graph over the player." Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <ToggleSwitch x:Name="VideoStatsSwitch" Grid.Column="1" Style="{StaticResource SettingsToggle}" AutomationProperties.Name="Stats for nerds" Toggled="OnVideoStatsToggled" />
+                    </Grid>
+                    <Border Style="{StaticResource SettingsDivider}" />
+                    <Grid Style="{StaticResource SettingsRow}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,16,0">
+                            <TextBlock Text="Hidden videos and channels" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <TextBlock x:Name="VideoBlocklistText" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button x:Name="VideoBlocklistButton" Grid.Column="1" VerticalAlignment="Center" Content="Show them again" Click="OnVideoBlocklistClearClick" AutomationProperties.Name="Show hidden videos and channels again" />
+                    </Grid>
                 </StackPanel>
             </Border>
 

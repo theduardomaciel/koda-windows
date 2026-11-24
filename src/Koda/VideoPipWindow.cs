@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using Windows.System;
+using MediaPlayerElement = Koda.Controls.VideoSurface;
 
 namespace Koda;
 
@@ -97,6 +98,7 @@ public sealed class VideoPipWindow : Window
         root.DoubleTapped += (_, _) => RestoreRequested?.Invoke();
         AutomationProperties.SetName(root, "Picture in picture");
         Content = root;
+        Koda.Helpers.PointerCursors.Attach(root);
 
         // A 16:9 overlay, small enough to sit in a corner over other work.
         var presenter = CompactOverlayPresenter.Create();

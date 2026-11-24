@@ -30,19 +30,20 @@
 
                 <!-- The player. Controls fade over the picture and take dark styling whatever the
                      app's theme, because they always sit on video. -->
-                <Grid
+                <controls:PointerHost
                     x:Name="PlayerHost"
                     VerticalAlignment="Top"
                     Background="Black"
                     CornerRadius="8"
                     RequestedTheme="Dark"
+                    IsTabStop="True"
                     PointerMoved="OnPlayerPointerMoved"
                     PointerExited="OnPlayerPointerExited"
                     Tapped="OnPlayerTapped"
                     DoubleTapped="OnPlayerDoubleTapped"
                     AutomationProperties.Name="Video player">
                     <Image x:Name="Poster" helpers:VideoArt.Video="{x:Null}" Stretch="Uniform" />
-                    <MediaPlayerElement
+                    <controls:VideoSurface
                         x:Name="Picture"
                         AreTransportControlsEnabled="False"
                         Stretch="Uniform"
@@ -51,6 +52,8 @@
                         IsHitTestVisible="False" />
 
                     <ProgressRing x:Name="Busy" Width="44" Height="44" IsActive="False" Foreground="White" IsHitTestVisible="False" />
+
+                    <controls:VideoDiagnosticsPanel x:Name="NerdStats" Visibility="Collapsed" />
 
                     <Border
                         x:Name="CaptionBox"
@@ -194,7 +197,7 @@
                             </StackPanel>
                         </Grid>
                     </Grid>
-                </Grid>
+                </controls:PointerHost>
 
                 <!-- Details under the player. -->
                 <StackPanel x:Name="Details" Grid.Row="1" Spacing="12">

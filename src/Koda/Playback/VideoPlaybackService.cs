@@ -18,6 +18,7 @@ using Windows.Media.Core;
 using Windows.Media.Playback;
 using Windows.Media.Streaming.Adaptive;
 using Windows.Storage.Streams;
+using MediaPlayerElement = Koda.Controls.VideoSurface;
 
 namespace Koda.Playback;
 
@@ -39,6 +40,10 @@ public sealed class VideoPlaybackService
     public static VideoPlaybackService Instance { get; } = new();
 
     private readonly MediaPlayer _player = new();
+    private readonly SmoothMotionPlayback _smooth;
+    private double _smoothAudioDelay;
+    private double _sourceFps;
+    private int? _bufferStatsError;
 
     /// <summary>The soundtrack, beside a VP9 picture that plays as a file in <see cref="_player"/>.
     /// Idle while the DASH manifest plays both.</summary>
@@ -47,11 +52,30 @@ public sealed class VideoPlaybackService
     private DispatcherQueueTimer? _tick;
     private DispatcherQueueTimer? _sync;
 
-    /// <summary>The one clock a VP9 picture and its sound both play to.</summary>
-    private readonly MediaTimelineController _clock = new();
+    /// <summary>
+    /// The one clock a VP9 picture and its sound both play to. It is never moved: a
+    /// MediaTimelineController given a new Position keeps counting from the old one for seconds,
+    /// ignores Pause meanwhile, and the sound's player loses its place (the picture moves in
+    /// silence). Nor is it swapped under open players: each then catches up on its own, the
+    /// sound seconds behind the picture. So each opened video gets one clock from zero, attached
+    /// before its files open, and places are set with <see cref="_offset"/>
+    /// (TimelineControllerPositionOffset on both players): the place is the clock's time plus the
+    /// offset. A seek changes the offset; the clock only ever starts and pauses.
+    /// </summary>
+    private MediaTimelineController _clock;
+
+    /// <summary>The clock was paused because the picture or the sound ran dry, and runs again
+    /// once both have caught up.</summary>
+    private bool _held;
+    private DateTimeOffset _heldSince;
+
+    /// <summary>Where the current clock's zero is in the video, in seconds.</summary>
+    private double _offset;
     private bool _videoReady;
     private bool _audioReady;
-    private DateTimeOffset _heldSince;
+    private double? _waitingFor;
+    private DateTimeOffset _waitingSince;
+    private bool _wasBuffering;
 
     /// <summary>The picture is a VP9 file and the sound plays in <see cref="_audio"/>.</summary>
     private bool _direct;
@@ -59,9 +83,6 @@ public sealed class VideoPlaybackService
     /// <summary>VP9 failed or stalled on this video: it plays the manifest's H.264 from then on.</summary>
     private bool _directFailed;
 
-    /// <summary>The clock was paused because the picture or the sound ran dry, and runs again
-    /// once both have caught up.</summary>
-    private bool _held;
     private static readonly Lazy<Task<bool>> Vp9Decodes = new(async () =>
     {
         try
@@ -106,11 +127,17 @@ public sealed class VideoPlaybackService
 
     private VideoPlaybackService()
     {
+        _smooth = new SmoothMotionPlayback(_player, SetSmoothAudioDelay);
+        _smooth.Changed += () => Changed?.Invoke();
         _player.CommandManager.IsEnabled = false;
         _player.AudioCategory = MediaPlayerAudioCategory.Movie;
         _player.Volume = Math.Clamp(App.Volume / 100, 0, 1);
         _player.MediaOpened += (_, _) => OnDispatch(OnOpened);
-        _player.MediaEnded += (_, _) => OnDispatch(OnEnded);
+        _player.MediaEnded += (_, _) => OnDispatch(() =>
+        {
+            // A delayed soundtrack finishes on the shared clock, one source frame later.
+            if (!_direct || _smoothAudioDelay <= 0) OnEnded();
+        });
         _player.MediaFailed += (_, args) => OnDispatch(() => OnFailed(args));
         _player.PlaybackSession.PlaybackStateChanged += (_, _) => OnDispatch(OnStateChanged);
 
@@ -122,11 +149,8 @@ public sealed class VideoPlaybackService
         {
             if (_direct) OnFailed(args);
         });
-        _audio.PlaybackSession.PlaybackStateChanged += (_, _) => OnDispatch(SyncClock);
-        _clock.Ended += (_, _) => OnDispatch(() =>
-        {
-            if (_direct) OnEnded();
-        });
+        _audio.PlaybackSession.PlaybackStateChanged += (_, _) => OnDispatch(() => Changed?.Invoke());
+        _clock = CreateClock();
         _http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", ClientProfiles.Default.BrowserUserAgent);
     }
 
@@ -142,15 +166,24 @@ public sealed class VideoPlaybackService
 
     public bool IsLoading { get; private set; }
 
+    /// <summary>Playing, or meant to be and waiting for the picture: the button shows Pause.</summary>
     public bool IsPlaying => _direct
-        ? _clock.State == MediaTimelineControllerState.Running
+        ? _shouldPlay && Error is null
         : _player.PlaybackSession.PlaybackState == MediaPlaybackState.Playing;
 
-    public bool IsBuffering => _held || _player.PlaybackSession.PlaybackState == MediaPlaybackState.Buffering;
+    /// <summary>Waiting for the picture: a start, seek or quality change not yet moving, or a
+    /// player (or the shared clock) out of data while it should be playing.</summary>
+    public bool IsBuffering => _shouldPlay && Error is null && (_waitingFor is not null || (_direct
+        ? _clock.State == MediaTimelineControllerState.Stalled || Waiting(_player) || Waiting(_audio)
+        : Waiting(_player)));
 
     public string? Error { get; private set; }
 
-    public double Position => _direct ? _clock.Position.TotalSeconds : _player.PlaybackSession.Position.TotalSeconds;
+    /// <summary>Where the picture is, or is going: while a start or seek loads, the place asked
+    /// for, so the scrubber holds still and a second skip adds to the first. Otherwise read from
+    /// the picture's player in both modes: just after a start the shared clock can still report
+    /// the place it started from.</summary>
+    public double Position => _waitingFor ?? _player.PlaybackSession.Position.TotalSeconds;
 
     public double Duration => _duration > 0 ? _duration : _player.PlaybackSession.NaturalDuration.TotalSeconds;
 
@@ -187,6 +220,70 @@ public sealed class VideoPlaybackService
     /// <summary>The player itself, for a page's MediaPlayerElement and the mini window.</summary>
     public MediaPlayer Player => _player;
 
+    public string SmoothMotionStatus => _smooth.Status;
+
+    public void SetVideoStats(bool enabled)
+    {
+        App.Settings.Update(s => s.ShowsVideoStats = enabled);
+        Changed?.Invoke();
+    }
+
+    public void SetSmoothMotionMaxFps(int fps)
+    {
+        App.Settings.Update(s => s.SmoothMotionMaxFps = fps);
+        UpdateSmoothMotion();
+        Changed?.Invoke();
+    }
+
+    internal VideoDiagnostics Diagnostics()
+    {
+        var session = _player.PlaybackSession;
+        var height = (int)Math.Min(session.NaturalVideoWidth, session.NaturalVideoHeight);
+        var rung = (_direct ? _stream?.Direct : _stream?.Qualities)?.FirstOrDefault(q => q.Height == height);
+        if (!_direct && _adaptive?.CurrentPlaybackBitrate is > 0)
+            rung = _stream?.Qualities.FirstOrDefault(q => q.Bandwidth == _adaptive.CurrentPlaybackBitrate) ?? rung;
+        return new(Current?.Id ?? "", session.NaturalVideoWidth, session.NaturalVideoHeight,
+            _direct ? "VP9 · SDR · separate audio" : "H.264 · DASH · adaptive audio/video",
+            rung?.Fps ?? _sourceFps, IsLoading ? "Opening" : IsBuffering ? "Buffering" : IsPlaying ? "Playing" : "Paused",
+            Position, Duration, Speed, ReadBufferProgress(session), rung?.Bandwidth ?? 0, _smooth.Diagnostics);
+    }
+
+    private double ReadBufferProgress(MediaPlaybackSession session)
+    {
+        return VideoStatistics.BufferProgress(session, error =>
+        {
+            if (_bufferStatsError != error.HResult)
+            {
+                _bufferStatsError = error.HResult;
+                VideoTrace.Write($"Buffer statistics unavailable: {error}");
+            }
+        });
+    }
+
+    public void SetSmoothMotion(bool enabled)
+    {
+        App.Settings.Update(s => s.SmoothMotion = enabled);
+        UpdateSmoothMotion();
+        Changed?.Invoke();
+    }
+
+    private void UpdateSmoothMotion()
+    {
+        if (!HasVideo) { _smooth.Idle(App.Settings.SmoothMotion); return; }
+        _smooth.Update(App.Settings.SmoothMotion, _direct,
+            Current?.IsLive == true, IsPlaying, IsLoading || IsBuffering, Speed, _sourceFps, App.Settings.SmoothMotionMaxFps);
+    }
+
+    private void SetSmoothAudioDelay(double seconds)
+    {
+        _smoothAudioDelay = seconds;
+        if (_direct)
+        {
+            _audio.TimelineControllerPositionOffset = TimeSpan.FromSeconds(_offset - seconds);
+            if (_duration > _offset) _clock.Duration = TimeSpan.FromSeconds(_duration - _offset + seconds);
+        }
+    }
+
     /// <summary>Raised for anything the controls draw: the video, loading, playing, quality,
     /// speed, captions, Up Next and the autoplay countdown.</summary>
     public event Action? Changed;
@@ -203,7 +300,7 @@ public sealed class VideoPlaybackService
         PlaybackService.Instance.PlayStateChanged += () =>
         {
             // A song starting takes the sound back; the video waits where it is.
-            if (PlaybackService.Instance.IsPlaying && (IsPlaying || _held))
+            if (PlaybackService.Instance.IsPlaying && IsPlaying)
             {
                 PauseCore();
                 _shouldPlay = false;
@@ -257,6 +354,7 @@ public sealed class VideoPlaybackService
     private async Task OpenAsync(Video video, double startAt, int quality, bool record)
     {
         var generation = ++_generation;
+        VideoTrace.Write($"---- open {video.Id} start at {startAt:0.00} quality={quality} {Snapshot()}");
         IsLoading = true;
         Error = null;
         _pendingPosition = startAt;
@@ -352,11 +450,15 @@ public sealed class VideoPlaybackService
     public async Task SetSubscribedAsync(bool subscribed)
     {
         if (Watch is not { } watch || Current is not { } video) return;
-        var channelId = (watch.Video.Channel ?? video.Channel)?.Id;
-        if (channelId is null) return;
+        var channel = watch.Video.Channel ?? video.Channel;
+        if (channel?.Id is not { } channelId) return;
+
+        // Signed out, the channel is followed on this PC: its uploads make the Subscriptions feed.
         if (!EngineHost.Account.IsSignedIn)
         {
-            App.Shell?.Note("Sign in to YouTube in Settings to subscribe");
+            App.Library.SetSubscribed(channel.Avatar is null && video.Channel?.Avatar is { } avatar ? channel with { Avatar = avatar } : channel, subscribed);
+            Watch = watch with { IsSubscribed = subscribed };
+            Changed?.Invoke();
             return;
         }
 
@@ -397,19 +499,21 @@ public sealed class VideoPlaybackService
     /// </summary>
     private async Task<bool> SetSourceAsync(VideoStream stream, int quality, int generation)
     {
+        _smooth.NewSource();
         var rung = quality == 0 ? null : Qualities.FirstOrDefault(q => q.Height == quality && q.IsDirect);
+        _sourceFps = rung?.Fps ?? 0;
+        VideoTrace.Write($"source quality={quality} direct={rung is not null && stream.AudioUrl is not null} "
+            + $"pending={_pendingPosition:0.00} clock was {_clock.State}@{_clock.Position.TotalSeconds:0.00}");
         if (rung is not null && stream.AudioUrl is { } audioUrl)
         {
             _adaptive = null;
-            _clock.Pause();
             _direct = true;
-            _held = false;
             _videoReady = _audioReady = false;
-            _player.TimelineController = _clock;
-            _audio.TimelineController = _clock;
+            // The players open already at the place: a fresh clock at zero, offset to it.
+            UseClockAt(Math.Max(0, _pendingPosition), run: false);
             _player.Source = MediaSource.CreateFromUri(new Uri(rung.DirectUrl!));
             _audio.Source = MediaSource.CreateFromUri(new Uri(audioUrl));
-            _sync?.Start();
+            WaitForPicture(_pendingPosition);
             return true;
         }
 
@@ -425,12 +529,92 @@ public sealed class VideoPlaybackService
     private void StopAudio()
     {
         _direct = false;
-        _held = false;
-        _sync?.Stop();
         _clock.Pause();
         _audio.Source = null;
         _player.TimelineController = null;
         _audio.TimelineController = null;
+        _player.TimelineControllerPositionOffset = TimeSpan.Zero;
+        _audio.TimelineControllerPositionOffset = TimeSpan.Zero;
+        _offset = 0;
+    }
+
+    /// <summary>A clock that follows this service's state, the old one's events ignored.</summary>
+    private MediaTimelineController CreateClock()
+    {
+        var clock = new MediaTimelineController();
+        clock.StateChanged += (sender, _) => OnDispatch(() =>
+        {
+            if (ReferenceEquals(sender, _clock)) Changed?.Invoke();
+        });
+        clock.Ended += (sender, _) => OnDispatch(() =>
+        {
+            if (ReferenceEquals(sender, _clock) && _direct) OnEnded();
+        });
+        return clock;
+    }
+
+    /// <summary>
+    /// A fresh clock from zero for a video about to open (or, as a last resort, a seek the
+    /// offset can't make), both players offset to <paramref name="at"/> seconds. Only ever
+    /// before the files open, or as that fallback: swapping clocks under open players puts the
+    /// sound behind the picture (see <see cref="_clock"/>).
+    /// </summary>
+    private void UseClockAt(double at, bool run)
+    {
+        _clock.Pause();
+        _held = false;
+        _clock = CreateClock();
+        try
+        {
+            _clock.ClockRate = Speed;
+        }
+        catch (Exception)
+        {
+            // An older clock without a rate still keeps the two players together.
+        }
+
+        SetOffset(at);
+        _player.TimelineController = _clock;
+        _audio.TimelineController = _clock;
+        if (run) _clock.Resume();
+        VideoTrace.Write($"new clock at {at:0.00} run={run}");
+    }
+
+    /// <summary>Both players to the clock's time plus <paramref name="offset"/>, and the clock's
+    /// end to where the video ends. False when Windows refuses the offset.</summary>
+    private bool SetOffset(double offset)
+    {
+        try
+        {
+            var span = TimeSpan.FromSeconds(offset);
+            _player.TimelineControllerPositionOffset = span;
+            _audio.TimelineControllerPositionOffset = TimeSpan.FromSeconds(offset - _smoothAudioDelay);
+            _offset = offset;
+        }
+        catch (Exception error)
+        {
+            VideoTrace.Write($"offset {offset:0.00} refused: 0x{error.HResult:X8} {error.Message}");
+            return false;
+        }
+
+        try
+        {
+            if (_duration > offset) _clock.Duration = TimeSpan.FromSeconds(_duration - offset + _smoothAudioDelay);
+        }
+        catch (Exception)
+        {
+            // Without an end the players' own end still finishes the video.
+        }
+
+        return true;
+    }
+
+    /// <summary>A seek with the clock left alone: the offset makes up the difference.</summary>
+    private void SeekDirect(double position)
+    {
+        var offset = position - _clock.Position.TotalSeconds;
+        VideoTrace.Write($"seek by offset to {position:0.00} (offset {offset:0.00})");
+        if (!SetOffset(offset)) UseClockAt(position, run: _shouldPlay);
     }
 
     private async Task<AdaptiveMediaSource> CreateSourceAsync(string manifest, VideoStream stream, int quality)
@@ -470,6 +654,7 @@ public sealed class VideoPlaybackService
 
     private void OnOpened()
     {
+        VideoTrace.Write($"picture opened pending={_pendingPosition:0.00} {Snapshot()}");
         if (_direct)
         {
             _videoReady = true;
@@ -477,9 +662,10 @@ public sealed class VideoPlaybackService
             return;
         }
 
-        if (_pendingPosition > 0.5)
+        var at = _pendingPosition > 0.5 ? _pendingPosition : 0;
+        if (at > 0)
         {
-            _player.PlaybackSession.Position = TimeSpan.FromSeconds(_pendingPosition);
+            _player.PlaybackSession.Position = TimeSpan.FromSeconds(at);
         }
 
         _pendingPosition = 0;
@@ -494,37 +680,48 @@ public sealed class VideoPlaybackService
             // A source that refuses a rate still plays at 1x.
         }
 
-        if (_shouldPlay) PlayCore();
+        if (_shouldPlay)
+        {
+            PlayCore();
+            WaitForPicture(at);
+        }
+
         Changed?.Invoke();
     }
 
     private void OnAudioOpened()
     {
+        VideoTrace.Write($"sound opened {Snapshot()}");
         if (!_direct) return;
         _audioReady = true;
         FinishDirectOpen();
     }
 
-    /// <summary>Picture and sound both open: the shared clock goes to the place and starts.</summary>
+    /// <summary>
+    /// Picture and sound both open, already at the place (the clock was set up for it when the
+    /// sources went on): the clock learns where the video ends, and starts.
+    /// </summary>
     private void FinishDirectOpen()
     {
         if (!_videoReady || !_audioReady) return;
         _videoReady = _audioReady = false;
         _duration = _player.PlaybackSession.NaturalDuration.TotalSeconds;
-        try
-        {
-            if (_duration > 0) _clock.Duration = TimeSpan.FromSeconds(_duration);
-            _clock.ClockRate = Speed;
-        }
-        catch (Exception)
-        {
-            // An older clock without these still keeps the two players together.
-        }
 
-        _clock.Position = TimeSpan.FromSeconds(Math.Max(0, _pendingPosition));
+        var at = Math.Max(0, _pendingPosition);
+        VideoTrace.Write($"both open, start at {at:0.00} {Snapshot()}");
         _pendingPosition = 0;
         IsLoading = false;
-        if (_shouldPlay) PlayCore();
+
+        // The clock opened with the players, at zero, offset to the place. It is not swapped
+        // now: a seek made while it opened moves the offset, and the end is set now that the
+        // length is known.
+        SetOffset(at);
+        if (_shouldPlay)
+        {
+            _clock.Resume();
+            WaitForPicture(at);
+        }
+
         Changed?.Invoke();
     }
 
@@ -533,6 +730,7 @@ public sealed class VideoPlaybackService
     /// <summary>Play: the shared clock when picture and sound are separate files.</summary>
     private void PlayCore()
     {
+        VideoTrace.Write($"play {Snapshot()}");
         _held = false;
         if (_direct) _clock.Resume();
         else _player.Play();
@@ -540,51 +738,102 @@ public sealed class VideoPlaybackService
 
     private void PauseCore()
     {
+        VideoTrace.Write($"pause {Snapshot()}");
         _held = false;
         if (_direct) _clock.Pause();
         else _player.Pause();
     }
 
     /// <summary>
-    /// Picture and sound read one <see cref="MediaTimelineController"/>, so they cannot drift.
     /// The clock does not wait for a player that runs out of data, so it is held while either
-    /// buffers and let go when both have caught up (or after three seconds, when Windows'
-    /// own catching up does better than waiting longer).
+    /// buffers and let go when both have caught up (or after three seconds, when Windows' own
+    /// catching up does better than waiting longer).
     /// </summary>
-    private void SyncClock()
+    private void HoldClock()
     {
-        if (!_direct || _player.Source is null || _audio.Source is null || IsLoading) return;
+        if (!_direct || IsLoading || !_shouldPlay || _player.Source is null || _audio.Source is null) return;
         var buffering = Waiting(_player) || Waiting(_audio);
-        if (_clock.State == MediaTimelineControllerState.Running && buffering && _shouldPlay)
+        if (!_held && buffering && _clock.State == MediaTimelineControllerState.Running)
         {
             _clock.Pause();
             _held = true;
             _heldSince = DateTimeOffset.UtcNow;
-            Changed?.Invoke();
+            VideoTrace.Write($"clock held {Snapshot()}");
         }
         else if (_held && (!buffering || DateTimeOffset.UtcNow - _heldSince > TimeSpan.FromSeconds(3)))
         {
             _held = false;
-            if (_shouldPlay) _clock.Resume();
-            Changed?.Invoke();
+            _clock.Resume();
+            VideoTrace.Write($"clock let go {Snapshot()}");
+        }
+    }
+
+    // MARK: Loading state
+
+    /// <summary>One line of state for the trace: the picture, the sound, the clock.</summary>
+    private string Snapshot()
+    {
+        static string Of(MediaPlayer player) =>
+            $"{player.PlaybackSession.PlaybackState}@{player.PlaybackSession.Position.TotalSeconds:0.00}";
+        return $"direct={_direct} should={_shouldPlay} wait={_waitingFor?.ToString("0.00") ?? "-"} "
+            + $"video={Of(_player)} audio={(_direct ? Of(_audio) : "-")} "
+            + $"clock={(_direct ? $"{_clock.State}@{_clock.Position.TotalSeconds:0.00}+{_offset:0.00}" : "-")} "
+            + $"music={PlaybackService.Instance.IsPlaying}";
+    }
+
+    /// <summary>A start, seek or quality change shows as loading from the moment it is asked for
+    /// until the picture is moving from that place, whatever the players report meanwhile.</summary>
+    private void WaitForPicture(double at)
+    {
+        VideoTrace.Write($"wait for picture at {at:0.00} {Snapshot()}");
+        _waitingFor = at;
+        _waitingSince = DateTimeOffset.UtcNow;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Four times a second: whether the picture has started moving, and whether the
+    /// loading state changed, so the spinner comes and goes on time.</summary>
+    private void CheckPicture()
+    {
+        if (!HasVideo) return;
+        HoldClock();
+        if (DateTimeOffset.UtcNow - _waitingSince < TimeSpan.FromSeconds(12) || _waitingFor is not null)
+        {
+            VideoTrace.Write($"tick {Snapshot()}");
         }
 
-        static bool Waiting(MediaPlayer player) =>
-            player.PlaybackSession.PlaybackState is MediaPlaybackState.Buffering or MediaPlaybackState.Opening;
+        if (_waitingFor is { } at)
+        {
+            var session = _player.PlaybackSession;
+            var position = session.Position.TotalSeconds;
+            var moving = session.PlaybackState == MediaPlaybackState.Playing && position >= at + 0.15 && position < at + 30;
+            // Past half a minute the stall recovery has had its turn; the spinner does not stay forever.
+            var given = DateTimeOffset.UtcNow - _waitingSince > TimeSpan.FromSeconds(30);
+            if (moving || given || !_shouldPlay || Error is not null)
+            {
+                VideoTrace.Write($"wait over: moving={moving} given={given} should={_shouldPlay} error={Error is not null} "
+                    + $"after {(DateTimeOffset.UtcNow - _waitingSince).TotalSeconds:0.00}s");
+                _waitingFor = null;
+            }
+        }
+
+        var buffering = IsBuffering;
+        if (buffering && _bufferingSince == DateTimeOffset.MaxValue) _bufferingSince = DateTimeOffset.UtcNow;
+        if (!buffering) _bufferingSince = DateTimeOffset.MaxValue;
+        if (buffering != _wasBuffering)
+        {
+            _wasBuffering = buffering;
+            Changed?.Invoke();
+        }
     }
+
+    private static bool Waiting(MediaPlayer player) =>
+        player.PlaybackSession.PlaybackState is MediaPlaybackState.Buffering or MediaPlaybackState.Opening;
 
     private void OnStateChanged()
     {
-        SyncClock();
-        if (IsBuffering)
-        {
-            if (_bufferingSince == DateTimeOffset.MaxValue) _bufferingSince = DateTimeOffset.UtcNow;
-        }
-        else
-        {
-            _bufferingSince = DateTimeOffset.MaxValue;
-        }
-
+        UpdateSmoothMotion();
+        CheckPicture();
         Changed?.Invoke();
     }
 
@@ -592,6 +841,7 @@ public sealed class VideoPlaybackService
     {
         _shouldPlay = false;
         if (_direct) _clock.Pause();
+        UpdateSmoothMotion();
         SaveProgress(force: true);
         Ended?.Invoke();
         Changed?.Invoke();
@@ -650,8 +900,9 @@ public sealed class VideoPlaybackService
 
     public void TogglePlay()
     {
+        VideoTrace.Write($"toggle loading={IsLoading} source={_player.Source is not null} {Snapshot()}");
         if (!HasVideo || _player.Source is null) return;
-        if (IsPlaying || _held)
+        if (IsPlaying)
         {
             PauseCore();
             _shouldPlay = false;
@@ -665,16 +916,35 @@ public sealed class VideoPlaybackService
             PlayCore();
         }
 
+        UpdateSmoothMotion();
         Changed?.Invoke();
     }
 
     public void Seek(double seconds)
     {
         if (!HasVideo) return;
+        _smooth.Reset();
         var duration = Duration;
         var position = Math.Clamp(seconds, 0, duration > 0 ? duration : seconds);
-        if (_direct) _clock.Position = TimeSpan.FromSeconds(position);
-        else _player.PlaybackSession.Position = TimeSpan.FromSeconds(position);
+        VideoTrace.Write($"seek to {position:0.00} loading={IsLoading} {Snapshot()}");
+        if (IsLoading)
+        {
+            // Not open yet: the place is taken when it is.
+            _pendingPosition = position;
+            return;
+        }
+
+        if (_direct)
+        {
+            // The clock is never moved or swapped here (see _clock).
+            SeekDirect(position);
+        }
+        else
+        {
+            _player.PlaybackSession.Position = TimeSpan.FromSeconds(position);
+        }
+
+        if (_shouldPlay) WaitForPicture(position);
         _lastSavedPosition = -1;
         Tick?.Invoke();
     }
@@ -693,6 +963,7 @@ public sealed class VideoPlaybackService
     public void SetSpeed(double speed)
     {
         Speed = speed is 0.5 or 0.75 or 1 or 1.25 or 1.5 or 1.75 or 2 ? speed : 1;
+        UpdateSmoothMotion();
         try
         {
             _player.PlaybackSession.PlaybackRate = Speed;
@@ -744,7 +1015,7 @@ public sealed class VideoPlaybackService
         if (Current is not { } video || _stream is null) return;
         if (height != 0 && !Qualities.Any(q => q.Height == height)) return;
         var resume = Position;
-        var wasPlaying = _shouldPlay || IsPlaying || _held;
+        var wasPlaying = _shouldPlay || IsPlaying;
         Quality = height;
         var generation = ++_generation;
         IsLoading = true;
@@ -898,6 +1169,7 @@ public sealed class VideoPlaybackService
 
     public void BeginPictureInPicture(MediaPlayerElement element)
     {
+        _smooth.Attach(null);
         _parked = _element;
         _element?.SetMediaPlayer(null);
         _element = null;
@@ -933,12 +1205,17 @@ public sealed class VideoPlaybackService
         if (_element == element)
         {
             element.SetMediaPlayer(_player);
+            _smooth.Attach(element);
+            UpdateSmoothMotion();
             return;
         }
 
+        _smooth.Attach(null);
         _element?.SetMediaPlayer(null);
         _element = element;
         element.SetMediaPlayer(_player);
+        _smooth.Attach(element);
+        UpdateSmoothMotion();
     }
 
     public void Detach(MediaPlayerElement element)
@@ -946,6 +1223,7 @@ public sealed class VideoPlaybackService
         if (_parked == element) _parked = null;
         if (_element == element)
         {
+            _smooth.Attach(null);
             element.SetMediaPlayer(null);
             _element = null;
         }
@@ -977,9 +1255,9 @@ public sealed class VideoPlaybackService
         var sync = _dispatch.CreateTimer();
         sync.Interval = TimeSpan.FromMilliseconds(250);
         sync.IsRepeating = true;
-        sync.Tick += (_, _) => SyncClock();
+        sync.Tick += (_, _) => CheckPicture();
         _sync = sync;
-        if (_direct) sync.Start();
+        sync.Start();
 
         var autoplay = _dispatch.CreateTimer();
         autoplay.Interval = TimeSpan.FromSeconds(1);
@@ -1008,6 +1286,7 @@ public sealed class VideoPlaybackService
 
     private void OnTick()
     {
+        UpdateSmoothMotion();
         if (!HasVideo) return;
         SkipSponsor(Position);
         Tick?.Invoke();
@@ -1048,9 +1327,17 @@ public sealed class VideoPlaybackService
     /// <summary>Leaving the app: the place is kept now, not on the next tick.</summary>
     public void Flush() => SaveProgress(force: true);
 
+    /// <summary>Releases the GPU presenter before the shell's XAML tree is destroyed.</summary>
+    public void Shutdown()
+    {
+        Flush();
+        _smooth.Attach(null);
+    }
+
     /// <summary>Stops and clears the video, for closing it from the bar.</summary>
     public void Stop()
     {
+        _smooth.NewSource();
         _generation++;
         SaveProgress(force: true);
         // The clock, not the player, when picture and sound share a timeline controller:

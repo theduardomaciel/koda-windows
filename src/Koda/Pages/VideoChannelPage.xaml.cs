@@ -23,6 +23,8 @@ public sealed partial class VideoChannelPage : Page, IVideoPage
     private string? _continuation;
     private bool _loadingMore;
     private bool _aboutLoaded;
+    /// <summary>Signed in, whether the account follows the channel, as last pressed.</summary>
+    private bool? _subscribed;
     private readonly Action _checkFilled;
     private readonly Action<bool> _moreComing;
 
@@ -34,7 +36,57 @@ public sealed partial class VideoChannelPage : Page, IVideoPage
         VideoGrid.AttachMenu(Cards);
         _checkFilled = VideoGrid.KeepFilled(Cards, LoadMoreAsync);
         _moreComing = VideoGrid.PrepareLoading(Cards, LoadingView);
-        Unloaded += (_, _) => _cancel.Cancel();
+        Unloaded += (_, _) =>
+        {
+            _cancel.Cancel();
+            App.Library.Changed -= OnLibraryChanged;
+        };
+        Loaded += (_, _) => App.Library.Changed += OnLibraryChanged;
+    }
+
+    private void OnLibraryChanged() => DispatcherQueue.TryEnqueue(DrawSubscribe);
+
+    /// <summary>Subscribe follows the account when signed in, and this PC otherwise.</summary>
+    private void DrawSubscribe()
+    {
+        if (_page is null)
+        {
+            SubscribeButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var subscribed = App.Account.IsSignedIn ? _subscribed == true : App.Library.IsSubscribed(_channelId);
+        SubscribeButton.Visibility = Visibility.Visible;
+        SubscribeText.Text = subscribed ? "Subscribed" : "Subscribe";
+        SubscribeButton.Style = (Style)Application.Current.Resources[subscribed ? "DefaultButtonStyle" : "AccentButtonStyle"];
+        var label = subscribed ? $"Unsubscribe from {_page.Channel.Name}" : $"Subscribe to {_page.Channel.Name}";
+        ToolTipService.SetToolTip(SubscribeButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SubscribeButton, label);
+    }
+
+    private async void OnSubscribeClick(object sender, RoutedEventArgs e)
+    {
+        if (_page is null) return;
+        if (!App.Account.IsSignedIn)
+        {
+            App.Library.SetSubscribed(_page.Channel.Ref, !App.Library.IsSubscribed(_channelId));
+            return;
+        }
+
+        var before = _subscribed;
+        var subscribed = before != true;
+        _subscribed = subscribed;
+        DrawSubscribe();
+        try
+        {
+            await EngineHost.Music.SetSubscribedOnYouTubeAsync(_channelId, subscribed);
+        }
+        catch (Exception)
+        {
+            _subscribed = before;
+            DrawSubscribe();
+            App.Shell?.Note(subscribed ? "Couldn't subscribe. Try again." : "Couldn't unsubscribe. Try again.");
+        }
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs args)
@@ -57,6 +109,8 @@ public sealed partial class VideoChannelPage : Page, IVideoPage
         {
             var page = await EngineHost.Music.ChannelAsync(_channelId, cancellation: _cancel.Token);
             _page = page;
+            _subscribed = page.IsSubscribed;
+            DrawSubscribe();
             NameText.Text = page.Channel.Name;
             DetailText.Text = string.Join(" · ", new[] { page.Channel.Handle, page.Channel.Subscribers, page.VideoCount }
                 .Where(s => !string.IsNullOrWhiteSpace(s)));

@@ -53,6 +53,18 @@ public sealed partial class YouTubeSignInDialog : ContentDialog
         })();
         """;
 
+    /// <summary>
+    /// Presented as Chrome on Windows, the page gets Google's device-bound session: the
+    /// <c>*PSIDTS</c> cookies are short-lived and only renewed by a proof signed with a key kept
+    /// in this browser's profile. The profile is deleted when the dialog closes, so the copied
+    /// session could never be renewed and was signed out within days. Without the feature the
+    /// browser never registers the binding and Google issues an ordinary session, as it does for
+    /// the Mac's and Android's sign-in views. Unknown feature names are ignored by the runtime.
+    /// </summary>
+    private const string NoBoundSessions =
+        "--disable-features=DeviceBoundSessions,EnableBoundSessionCredentials,"
+        + "EnableBoundSessionCredentialsSoftwareKeysForManualTesting";
+
     private readonly string _profileFolder;
     private bool _initialized;
     private bool _finishing;
@@ -180,7 +192,10 @@ public sealed partial class YouTubeSignInDialog : ContentDialog
             var environment = await CoreWebView2Environment.CreateWithOptionsAsync(
                 browserExecutableFolder: null!,
                 userDataFolder: _profileFolder,
-                options: new CoreWebView2EnvironmentOptions());
+                options: new CoreWebView2EnvironmentOptions
+                {
+                    AdditionalBrowserArguments = NoBoundSessions,
+                });
             if (_closed) return;
             await Browser.EnsureCoreWebView2Async(environment);
             if (_closed || Browser.CoreWebView2 is null) return;

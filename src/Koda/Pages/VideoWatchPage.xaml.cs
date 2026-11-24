@@ -30,17 +30,22 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
     private string? _commentsToken;
     private bool _scrubbing;
     private bool _immersive;
+    private int _playerSlot;
+    private Windows.Foundation.Point? _lastPointer;
+    private bool _wasPlaying;
     private bool _settingVolume;
+    private string? _statsFailure;
 
     private static VideoPlaybackService Player => VideoPlaybackService.Instance;
 
     public VideoWatchPage()
     {
         InitializeComponent();
+        NerdStats.CloseRequested += () => Player.SetVideoStats(false);
         _hideTimer = DispatcherQueue.CreateTimer();
         _hideTimer.Interval = TimeSpan.FromSeconds(3);
         _hideTimer.IsRepeating = false;
-        _hideTimer.Tick += (_, _) => HideControls();
+        _hideTimer.Tick += (_, _) => OnControlsIdle();
         Scrubbing.Attach(Scrubber, on => _scrubbing = on, Player.Seek, () => Player.HasVideo);
         Scrubber.ValueChanged += (_, _) =>
         {
@@ -75,14 +80,34 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
         Player.Changed -= OnChanged;
         Player.Tick -= OnTick;
         _hideTimer.Stop();
+        SetCursorHidden(false);
         if (_immersive) SetImmersive(false);
         Player.Detach(Picture);
     }
 
     private void OnChanged() => DispatcherQueue.TryEnqueue(Draw);
 
+    private void DrawStats()
+    {
+        NerdStats.Visibility = App.Settings.ShowsVideoStats && Player.HasVideo ? Visibility.Visible : Visibility.Collapsed;
+        if (NerdStats.Visibility != Visibility.Visible) return;
+        try
+        {
+            NerdStats.Width = Math.Max(0, Math.Min(420, PlayerHost.ActualWidth - 24));
+            NerdStats.MaxHeight = Math.Max(0, PlayerHost.ActualHeight - 96);
+            NerdStats.Update(Player.Diagnostics());
+        }
+        catch (Exception error)
+        {
+            var failure = $"{error.HResult:X8}: {error.Message}";
+            if (_statsFailure != failure) { _statsFailure = failure; VideoTrace.Write($"Video statistics failed: {error}"); }
+            NerdStats.ReportError();
+        }
+    }
+
     private void OnTick() => DispatcherQueue.TryEnqueue(() =>
     {
+        DrawStats();
         if (_scrubbing) return;
         var duration = Player.Duration;
         if (duration > 0)
@@ -108,6 +133,7 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
 
     private void Draw()
     {
+        DrawStats();
         var video = Player.Current;
         var playing = Player.IsPlaying;
         var busy = video is not null && Player.Error is null && (Player.IsLoading || Player.IsBuffering);
@@ -154,7 +180,10 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
         DrawActions();
         DrawMarks();
         DrawChapter();
-        if (!playing) ShowControls();
+        // Paused, the controls stay up. Starting to play starts their countdown: without it they
+        // only ever faded after the pointer moved, so a still mouse kept them up for good.
+        if (!playing || !_wasPlaying) ShowControls();
+        _wasPlaying = playing;
     }
 
     /// <summary>Like, dislike and subscribe, as the account has them (or as just pressed).</summary>
@@ -174,7 +203,8 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
 
         var channel = watch?.Video.Channel ?? Player.Current?.Channel;
         SubscribeButton.Visibility = watch is not null && channel?.Id is not null ? Visibility.Visible : Visibility.Collapsed;
-        var subscribed = watch?.IsSubscribed == true;
+        // Signed out, subscriptions are the ones kept on this PC.
+        var subscribed = App.Account.IsSignedIn ? watch?.IsSubscribed == true : App.Library.IsSubscribed(channel?.Id);
         SubscribeText.Text = subscribed ? "Subscribed" : "Subscribe";
         SubscribeButton.Style = (Style)Application.Current.Resources[subscribed ? "DefaultButtonStyle" : "AccentButtonStyle"];
         var subscribeLabel = subscribed ? $"Unsubscribe from {channel?.Name}" : $"Subscribe to {channel?.Name}";
@@ -416,19 +446,19 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
         var height = PageRoot.ActualHeight;
         if (width <= 0 || height <= 0) return;
 
-        var theater = App.Settings.VideoTheater && !_immersive;
+        // In full screen the player is in the shell's full-window layer; the page under it keeps
+        // its own layout, ready for the player's return.
+        var theater = App.Settings.VideoTheater;
         var wide = width >= 1020;
-        var side = _immersive ? 0 : wide ? 380 : !theater && width >= 760 ? 300 : 0;
+        var side = wide ? 380 : !theater && width >= 760 ? 300 : 0;
         var hasSide = side > 0;
 
-        Layout.Padding = _immersive ? new Thickness(0)
-            : theater ? new Thickness(0, 0, 0, 28)
-            : new Thickness(24, 12, 24, 28);
+        Layout.Padding = theater ? new Thickness(0, 0, 0, 28) : new Thickness(24, 12, 24, 28);
         Layout.ColumnSpacing = hasSide ? 24 : 0;
-        Layout.RowSpacing = _immersive ? 0 : 16;
+        Layout.RowSpacing = 16;
         SideColumn.Width = new GridLength(side);
         PlayerHost.CornerRadius = _immersive || theater ? new CornerRadius(0) : new CornerRadius(8);
-        Grid.SetColumnSpan(PlayerHost, _immersive || theater ? 2 : 1);
+        Grid.SetColumnSpan(PlayerHost, theater ? 2 : 1);
 
         if (Layout.RowDefinitions.Count < 3)
         {
@@ -441,19 +471,20 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
 
         Details.Margin = theater ? new Thickness(24, 0, hasSide ? 0 : 24, 0) : new Thickness(0);
         UpNext.Margin = theater ? new Thickness(hasSide ? 0 : 24, 0, 24, 0) : new Thickness(0);
-        Details.Visibility = UpNext.Visibility = _immersive ? Visibility.Collapsed : Visibility.Visible;
-
-        Scroller.VerticalScrollMode = _immersive ? ScrollMode.Disabled : ScrollMode.Auto;
-        Scroller.VerticalScrollBarVisibility = _immersive ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
-
         TheaterIcon.Glyph = theater ? "\uE9A8" : "\uE9A6";
         var label = theater ? "Default view" : "Theater mode";
         ToolTipService.SetToolTip(TheaterButton, $"{label} (T)");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(TheaterButton, label);
 
+        PlayerHost.VerticalAlignment = _immersive ? VerticalAlignment.Stretch : VerticalAlignment.Top;
+        // Full screen, the player has focus for the keys; its focus rectangle would be a frame
+        // around the whole screen.
+        PlayerHost.FocusVisualPrimaryThickness = _immersive ? new Thickness(0) : new Thickness(2);
+        PlayerHost.FocusVisualSecondaryThickness = _immersive ? new Thickness(0) : new Thickness(1);
         if (_immersive)
         {
-            PlayerHost.Height = height;
+            // The layer's whole size: the picture letterboxes itself.
+            PlayerHost.Height = double.NaN;
         }
         else if (theater)
         {
@@ -472,10 +503,31 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
         ApplyLayout();
     }
 
+    /// <summary>
+    /// Full screen hands the player itself to the shell's full-window layer, as a media element
+    /// going full window does, and takes it back to its place in the page after. The picture,
+    /// its controls and their state go along unchanged; the window does the rest.
+    /// </summary>
     private void SetImmersive(bool on)
     {
+        if (_immersive == on || App.Shell is not { } shell) return;
         _immersive = on;
-        App.Shell?.SetVideoFullScreen(on);
+        if (on)
+        {
+            _playerSlot = Layout.Children.IndexOf(PlayerHost);
+            Layout.Children.Remove(PlayerHost);
+            shell.EnterVideoFullScreen(PlayerHost);
+        }
+        else
+        {
+            shell.LeaveVideoFullScreen(PlayerHost);
+            Layout.Children.Insert(Math.Clamp(_playerSlot, 0, Layout.Children.Count), PlayerHost);
+        }
+
+        // Focus left the tree with the player. It goes to the player itself, not a button: Space
+        // on a focused button presses it, and here Space must play and pause.
+        DispatcherQueue.TryEnqueue(() => PlayerHost.Focus(FocusState.Programmatic));
+
         FullScreenIcon.Glyph = on ? "" : "";
         var label = on ? "Exit full screen" : "Full screen";
         ToolTipService.SetToolTip(FullScreenButton, $"{label} (F)");
@@ -489,6 +541,7 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
 
     private void ShowControls()
     {
+        SetCursorHidden(false);
         Controls.Opacity = 1;
         Controls.IsHitTestVisible = true;
         _hideTimer.Stop();
@@ -502,7 +555,35 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
         Controls.IsHitTestVisible = false;
     }
 
-    private void OnPlayerPointerMoved(object sender, PointerRoutedEventArgs e) => ShowControls();
+    /// <summary>The controls fading on their own in full screen take the pointer with them, as
+    /// any player does; it comes back with the controls on the first move.</summary>
+    private void OnControlsIdle()
+    {
+        VideoTrace.Write($"controls idle: immersive={_immersive} playing={Player.IsPlaying} scrubbing={_scrubbing}");
+        HideControls();
+        if (_immersive && Controls.Opacity == 0) SetCursorHidden(true);
+    }
+
+    /// <summary>The pointer over the player: a blank cursor on the player itself (WinUI's own
+    /// per-element cursor), so it hides only there and comes back the moment it leaves.</summary>
+    private void SetCursorHidden(bool hidden)
+    {
+        if (PlayerHost.IsPointerHidden == hidden) return;
+        PlayerHost.IsPointerHidden = hidden;
+        VideoTrace.Write($"pointer {(hidden ? "hidden" : "shown")}: applied={PlayerHost.IsPointerHidden == hidden}");
+    }
+
+    /// <summary>A real move of the pointer brings the controls back. WinUI also raises
+    /// PointerMoved for a still pointer when what is under it changes (the controls fading out,
+    /// the picture's layout), which would bring them straight back; a move of under two
+    /// pixels is not taken for one.</summary>
+    private void OnPlayerPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(null).Position;
+        if (_lastPointer is { } last && Math.Abs(point.X - last.X) < 2 && Math.Abs(point.Y - last.Y) < 2) return;
+        _lastPointer = point;
+        ShowControls();
+    }
 
     private void OnPlayerPointerExited(object sender, PointerRoutedEventArgs e)
     {
@@ -530,7 +611,7 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
         for (var element = source as DependencyObject; element is not null && element != PlayerHost;
              element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
         {
-            if (element == Controls || element == AutoplayCard || element == PlayerError) return true;
+            if (element == Controls || element == AutoplayCard || element == PlayerError || element == NerdStats) return true;
         }
 
         return false;
@@ -661,6 +742,27 @@ public sealed partial class VideoWatchPage : Page, IVideoPage
         }
 
         SettingsMenu.Items.Add(speed);
+
+        var smooth = new ToggleMenuFlyoutItem
+        {
+            Text = "Smooth motion (experimental)",
+            IsChecked = App.Settings.SmoothMotion,
+        };
+        smooth.Click += (_, _) => Player.SetSmoothMotion(smooth.IsChecked);
+        SettingsMenu.Items.Add(smooth);
+        SettingsMenu.Items.Add(new MenuFlyoutItem { Text = Player.SmoothMotionStatus, IsEnabled = false });
+
+        var cap = new MenuFlyoutSubItem { Text = "Smooth motion limit" };
+        foreach (var fps in new[] { 60, 120 })
+        {
+            var rate = new RadioMenuFlyoutItem { Text = $"Up to {fps} fps", GroupName = "MotionFps", IsChecked = App.Settings.SmoothMotionMaxFps == fps };
+            rate.Click += (_, _) => Player.SetSmoothMotionMaxFps(fps);
+            cap.Items.Add(rate);
+        }
+        SettingsMenu.Items.Add(cap);
+        var stats = new ToggleMenuFlyoutItem { Text = "Stats for nerds", IsChecked = App.Settings.ShowsVideoStats };
+        stats.Click += (_, _) => Player.SetVideoStats(stats.IsChecked);
+        SettingsMenu.Items.Add(stats);
 
         if (Player.CaptionTracks.Length == 0) await Player.LoadCaptionTracksAsync();
         if (Player.CaptionTracks.Length > 0)

@@ -67,6 +67,33 @@ public static class Dialogs
         return true;
     }
 
+    /// <summary>Asks for a name and makes a video playlist on this PC with the video in it.</summary>
+    public static async Task<Koda.Core.Video.VideoPlaylist?> CreateVideoPlaylistAsync(Koda.Core.Video.Video video)
+    {
+        var name = await AskAsync("New Video Playlist", "", "Create", "Name", "The video is added to it.");
+        if (name is null)
+        {
+            return null;
+        }
+
+        var playlist = App.Library.CreateVideoPlaylist(name, [video]);
+        App.Shell?.Note($"Created “{playlist.Name}”.");
+        return playlist;
+    }
+
+    /// <summary>Asks for a new name for a video playlist; true when it was saved.</summary>
+    public static async Task<bool> RenameVideoPlaylistAsync(Koda.Core.Video.VideoPlaylist playlist)
+    {
+        var name = await AskAsync("Rename Playlist", playlist.Name, "Save", "Name", "The videos stay in it.");
+        if (name is null || name == playlist.Name)
+        {
+            return false;
+        }
+
+        App.Library.RenameVideoPlaylist(playlist.Id, name);
+        return true;
+    }
+
     /// <summary>A destructive question with a way out; true only when the action was chosen.</summary>
     public static async Task<bool> ConfirmAsync(string title, string message, string action)
     {

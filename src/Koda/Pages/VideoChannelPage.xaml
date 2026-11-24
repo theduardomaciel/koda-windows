@@ -41,7 +41,12 @@
                             <TextBlock x:Name="NameText" Style="{ThemeResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                             <TextBlock x:Name="DetailText" Style="{ThemeResource BodyTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                         </StackPanel>
-                        <DropDownButton x:Name="SortButton" Grid.Column="2" VerticalAlignment="Center" ToolTipService.ToolTip="Sort" AutomationProperties.Name="Sort this channel's videos" Visibility="Collapsed" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Button x:Name="SubscribeButton" Click="OnSubscribeClick" Visibility="Collapsed" Style="{ThemeResource AccentButtonStyle}">
+                                <TextBlock x:Name="SubscribeText" Text="Subscribe" />
+                            </Button>
+                            <DropDownButton x:Name="SortButton" ToolTipService.ToolTip="Sort" AutomationProperties.Name="Sort this channel's videos" Visibility="Collapsed" />
+                        </StackPanel>
                     </Grid>
                     <Expander x:Name="AboutExpander" Header="About" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Expanding="OnAboutExpanding" Visibility="Collapsed">
                         <StackPanel x:Name="AboutPanel" Spacing="8" />

@@ -11,10 +11,12 @@
       <Platform Solution="*|x64" Project="x64" />
       <Platform Solution="Debug|Any CPU" Project="x64" />
     </Project>
+    <Project Path="src/SmoothMotion.Windows/SmoothMotion.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Koda.Core.Tests/Koda.Core.Tests.csproj">
       <Platform Solution="*|x64" Project="x64" />
     </Project>
+    <Project Path="tests/SmoothMotion.Windows.Tests/SmoothMotion.Windows.Tests.csproj" />
   </Folder>
 </Solution>
